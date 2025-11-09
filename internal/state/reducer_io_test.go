@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
@@ -78,6 +79,64 @@ func TestLoadDirectory_InvalidDirectory(t *testing.T) {
 
 	if err == nil {
 		t.Error("Expected error for invalid directory")
+	}
+}
+
+func TestUpdateParentEntries_HideHiddenFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	parentDir := filepath.Join(tmpDir, "parent")
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		t.Fatalf("Failed to create parent dir: %v", err)
+	}
+
+	dirs := []string{"visible", "other", ".hidden", ".current"}
+	for _, name := range dirs {
+		if err := os.MkdirAll(filepath.Join(parentDir, name), 0o755); err != nil {
+			t.Fatalf("Failed to create child dir %q: %v", name, err)
+		}
+	}
+
+	state := &AppState{CurrentPath: filepath.Join(parentDir, "visible")}
+
+	state.updateParentEntries()
+	names := extractParentNames(state.ParentEntries)
+	expectedAll := []string{".current", ".hidden", "other", "visible"}
+	if !slices.Equal(names, expectedAll) {
+		t.Fatalf("Expected parent entries %v, got %v", expectedAll, names)
+	}
+
+	state.HideHiddenFiles = true
+	state.updateParentEntries()
+	names = extractParentNames(state.ParentEntries)
+	expectedVisible := []string{"other", "visible"}
+	if !slices.Equal(names, expectedVisible) {
+		t.Fatalf("Expected parent entries %v when hiding hidden files, got %v", expectedVisible, names)
+	}
+}
+
+func TestUpdateParentEntries_HideHiddenKeepsCurrentEntry(t *testing.T) {
+	tmpDir := t.TempDir()
+	parentDir := filepath.Join(tmpDir, "parent")
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		t.Fatalf("Failed to create parent dir: %v", err)
+	}
+
+	for _, name := range []string{".current", ".hidden", "visible"} {
+		if err := os.MkdirAll(filepath.Join(parentDir, name), 0o755); err != nil {
+			t.Fatalf("Failed to create child dir %q: %v", name, err)
+		}
+	}
+
+	state := &AppState{
+		CurrentPath:     filepath.Join(parentDir, ".current"),
+		HideHiddenFiles: true,
+	}
+
+	state.updateParentEntries()
+	names := extractParentNames(state.ParentEntries)
+	expected := []string{".current", "visible"}
+	if !slices.Equal(names, expected) {
+		t.Fatalf("Expected parent entries %v when current directory is hidden, got %v", expected, names)
 	}
 }
 
@@ -522,4 +581,12 @@ func TestGoHomeActionNavigatesToHomeDirectory(t *testing.T) {
 	if state.HistoryIndex != len(state.History)-1 {
 		t.Fatalf("HistoryIndex should point to latest entry, got %d", state.HistoryIndex)
 	}
+}
+
+func extractParentNames(entries []FileEntry) []string {
+	names := make([]string, len(entries))
+	for i, entry := range entries {
+		names[i] = entry.Name
+	}
+	return names
 }

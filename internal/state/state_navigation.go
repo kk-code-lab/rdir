@@ -15,6 +15,8 @@ func (s *AppState) updateParentEntries() {
 		return
 	}
 
+	currentName := filepath.Base(s.CurrentPath)
+
 	entries, err := os.ReadDir(parentPath)
 	if err != nil {
 		s.ParentEntries = nil
@@ -58,6 +60,17 @@ func (s *AppState) updateParentEntries() {
 		}
 		return parentFiles[i].Name < parentFiles[j].Name
 	})
+
+	if s.HideHiddenFiles {
+		filtered := parentFiles[:0]
+		for _, entry := range parentFiles {
+			if entry.IsHidden() && entry.Name != currentName {
+				continue
+			}
+			filtered = append(filtered, entry)
+		}
+		parentFiles = filtered
+	}
 
 	s.ParentEntries = parentFiles
 }
