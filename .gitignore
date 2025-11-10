@@ -38,3 +38,4 @@ go.work.sum
 # .vscode/
 
 .claude/settings.local.json
+trees/
