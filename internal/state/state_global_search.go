@@ -43,6 +43,7 @@ func (s *AppState) clearGlobalSearch(forgetMemory bool) {
 	s.GlobalSearchRootPath = ""
 	s.GlobalSearchDesiredSelectionPath = ""
 	s.clearGlobalSearchPendingIndex()
+	s.GlobalSearchIndexStatus = IndexTelemetry{}
 }
 
 func (s *AppState) clampGlobalSearchSelection() {
