@@ -7,11 +7,22 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+
+	"golang.org/x/text/encoding/unicode"
 )
 
 const (
 	textDetectionSampleSize      = 4096
 	nonPrintableThresholdPercent = 30
+)
+
+type unicodeEncoding int
+
+const (
+	encodingUnknown unicodeEncoding = iota
+	encodingUTF8BOM
+	encodingUTF16LE
+	encodingUTF16BE
 )
 
 var binaryExtensions = map[string]struct{}{
@@ -75,6 +86,10 @@ func IsTextFile(path string, content []byte) bool {
 	sample := content
 	if len(sample) > textDetectionSampleSize {
 		sample = sample[:textDetectionSampleSize]
+	}
+
+	if enc := detectUnicodeEncoding(sample); enc != encodingUnknown {
+		return true
 	}
 
 	if bytes.IndexByte(sample, 0x00) != -1 {
@@ -146,4 +161,46 @@ func isCommonTextByte(b byte) bool {
 	default:
 		return false
 	}
+}
+
+func detectUnicodeEncoding(sample []byte) unicodeEncoding {
+	if len(sample) >= 3 && sample[0] == 0xEF && sample[1] == 0xBB && sample[2] == 0xBF {
+		return encodingUTF8BOM
+	}
+	if len(sample) >= 2 {
+		switch {
+		case sample[0] == 0xFF && sample[1] == 0xFE:
+			return encodingUTF16LE
+		case sample[0] == 0xFE && sample[1] == 0xFF:
+			return encodingUTF16BE
+		}
+	}
+	return encodingUnknown
+}
+
+// NormalizeTextContent converts known Unicode BOM-encoded content into UTF-8 strings.
+func NormalizeTextContent(content []byte) string {
+	if len(content) == 0 {
+		return ""
+	}
+
+	switch detectUnicodeEncoding(content) {
+	case encodingUTF8BOM:
+		return string(content[3:])
+	case encodingUTF16LE:
+		return decodeUTF16(content, unicode.LittleEndian)
+	case encodingUTF16BE:
+		return decodeUTF16(content, unicode.BigEndian)
+	default:
+		return string(content)
+	}
+}
+
+func decodeUTF16(content []byte, endian unicode.Endianness) string {
+	decoder := unicode.UTF16(endian, unicode.ExpectBOM).NewDecoder()
+	out, err := decoder.Bytes(content)
+	if err != nil {
+		return string(content)
+	}
+	return string(out)
 }
