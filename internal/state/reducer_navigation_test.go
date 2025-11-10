@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -195,6 +196,59 @@ func TestScrollPageUp(t *testing.T) {
 	// ScreenHeight 20 - 4 = 16 visible lines, so cursor should move 16 positions up: 25 - 16 = 9
 	if state.SelectedIndex != 9 {
 		t.Errorf("Expected selected at 9, got %d", state.SelectedIndex)
+	}
+}
+
+func TestScrollToStart(t *testing.T) {
+	state := &AppState{
+		CurrentPath:   "/test",
+		Files:         make([]FileEntry, 10),
+		SelectedIndex: 6,
+		ScrollOffset:  4,
+		ScreenHeight:  15,
+	}
+	for i := range state.Files {
+		state.Files[i].Name = fmt.Sprintf("file%d", i)
+	}
+
+	reducer := NewStateReducer()
+	if _, err := reducer.Reduce(state, ScrollToStartAction{}); err != nil {
+		t.Fatalf("Failed to scroll to start: %v", err)
+	}
+
+	if state.SelectedIndex != 0 {
+		t.Errorf("Expected selection at start, got %d", state.SelectedIndex)
+	}
+	if state.ScrollOffset != 0 {
+		t.Errorf("Expected scroll offset reset to 0, got %d", state.ScrollOffset)
+	}
+}
+
+func TestScrollToEnd(t *testing.T) {
+	state := &AppState{
+		CurrentPath:   "/test",
+		Files:         make([]FileEntry, 10),
+		SelectedIndex: 0,
+		ScrollOffset:  0,
+		ScreenHeight:  12,
+	}
+	for i := range state.Files {
+		state.Files[i].Name = fmt.Sprintf("file%d", i)
+	}
+
+	reducer := NewStateReducer()
+	if _, err := reducer.Reduce(state, ScrollToEndAction{}); err != nil {
+		t.Fatalf("Failed to scroll to end: %v", err)
+	}
+
+	expected := len(state.Files) - 1
+	if state.SelectedIndex != expected {
+		t.Errorf("Expected selection at %d, got %d", expected, state.SelectedIndex)
+	}
+	displayFiles := state.getDisplayFiles()
+	visibleLines := state.ScreenHeight - 4
+	if len(displayFiles) > visibleLines && state.ScrollOffset != len(displayFiles)-visibleLines {
+		t.Errorf("Expected scroll offset to align end of list, got %d", state.ScrollOffset)
 	}
 }
 

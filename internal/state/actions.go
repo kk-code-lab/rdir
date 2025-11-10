@@ -31,6 +31,8 @@ type ScrollUpAction struct{}
 type ScrollDownAction struct{}
 type ScrollPageUpAction struct{}
 type ScrollPageDownAction struct{}
+type ScrollToStartAction struct{}
+type ScrollToEndAction struct{}
 
 // ===== VIEW ACTIONS =====
 

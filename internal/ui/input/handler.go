@@ -155,12 +155,16 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 	case tcell.KeyHome:
 		if inGlobalSearch {
 			ih.actionChan <- statepkg.GlobalSearchMoveCursorAction{Direction: "home"}
+		} else {
+			ih.actionChan <- statepkg.ScrollToStartAction{}
 		}
 		return true
 
 	case tcell.KeyEnd:
 		if inGlobalSearch {
 			ih.actionChan <- statepkg.GlobalSearchMoveCursorAction{Direction: "end"}
+		} else {
+			ih.actionChan <- statepkg.ScrollToEndAction{}
 		}
 		return true
 

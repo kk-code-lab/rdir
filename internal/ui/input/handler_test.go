@@ -359,6 +359,42 @@ func TestInputHandlerEndMovesCursorInGlobalSearch(t *testing.T) {
 	}
 }
 
+func TestInputHandlerHomeScrollsListInNormalMode(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+	handler.SetState(&statepkg.AppState{})
+
+	event := tcell.NewEventKey(tcell.KeyHome, 0, 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.ScrollToStartAction); !ok {
+			t.Fatalf("Expected ScrollToStartAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected ScrollToStartAction for Home key in normal mode")
+	}
+}
+
+func TestInputHandlerEndScrollsListInNormalMode(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+	handler.SetState(&statepkg.AppState{})
+
+	event := tcell.NewEventKey(tcell.KeyEnd, 0, 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.ScrollToEndAction); !ok {
+			t.Fatalf("Expected ScrollToEndAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected ScrollToEndAction for End key in normal mode")
+	}
+}
+
 func TestInputHandlerCtrlArrowsMoveByWordInGlobalSearch(t *testing.T) {
 	tests := []struct {
 		key       tcell.Key

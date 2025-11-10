@@ -598,6 +598,24 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		state.updateScrollVisibility()
 		return state, r.generatePreview(state)
 
+	case ScrollToStartAction:
+		displayFiles := state.getDisplayFiles()
+		if len(displayFiles) == 0 {
+			return state, nil
+		}
+		state.setDisplaySelectedIndex(0)
+		state.updateScrollVisibility()
+		return state, r.generatePreview(state)
+
+	case ScrollToEndAction:
+		displayFiles := state.getDisplayFiles()
+		if len(displayFiles) == 0 {
+			return state, nil
+		}
+		state.setDisplaySelectedIndex(len(displayFiles) - 1)
+		state.updateScrollVisibility()
+		return state, r.generatePreview(state)
+
 	// ===== VIEW =====
 
 	case ResizeAction:
