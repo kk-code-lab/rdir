@@ -196,6 +196,10 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 	if workerCount < 2 {
 		workerCount = 2
 	}
+	defaultMaxWorkers := 8
+	if runtime.GOOS == "windows" {
+		defaultMaxWorkers = 16
+	}
 	maxWorkers := parseEnvInt(envIndexMaxWorkers, 0)
 	if maxWorkers > 0 {
 		if maxWorkers < 1 {
@@ -205,11 +209,14 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 			workerCount = maxWorkers
 		}
 	} else {
-		workerCount = clampInt(workerCount, 2, 8)
+		workerCount = clampInt(workerCount, 2, defaultMaxWorkers)
 	}
 
-	dirJobs := make(chan string, workerCount*2)
-	fileResults := make(chan indexFileRecord, workerCount*4)
+	dirBuffer := clampInt(workerCount*8, 32, 1024)
+	fileBuffer := clampInt(workerCount*64, 512, 16384)
+
+	dirJobs := make(chan string, dirBuffer)
+	fileResults := make(chan indexFileRecord, fileBuffer)
 
 	var workerWG sync.WaitGroup
 	var pendingDirs atomic.Int64
