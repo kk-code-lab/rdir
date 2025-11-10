@@ -869,6 +869,11 @@ func TestClearGlobalSearchStateMethod(t *testing.T) {
 		GlobalSearchResults:    []GlobalSearchResult{{FilePath: "/test"}},
 		GlobalSearchInProgress: true,
 		GlobalSearchRootPath:   "/test",
+		GlobalSearchIndexStatus: IndexTelemetry{
+			RootPath:     "/tmp",
+			FilesIndexed: 42,
+			Ready:        true,
+		},
 	}
 
 	state.clearGlobalSearch(false)
@@ -887,6 +892,9 @@ func TestClearGlobalSearchStateMethod(t *testing.T) {
 	}
 	if len(state.GlobalSearchResults) != 0 {
 		t.Error("GlobalSearchResults should be empty")
+	}
+	if state.GlobalSearchIndexStatus.RootPath != "" {
+		t.Errorf("GlobalSearchIndexStatus should be reset, got %#v", state.GlobalSearchIndexStatus)
 	}
 }
 
