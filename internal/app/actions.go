@@ -15,7 +15,7 @@ import (
 
 func (app *Application) handleClipboard() bool {
 	if app.clipboardAvail && len(app.clipboardCmd) > 0 {
-		path := app.state.CurrentFilePath()
+		path := normalizeClipboardPath(app.state.CurrentFilePath(), runtime.GOOS)
 		cmd := exec.Command(app.clipboardCmd[0], app.clipboardCmd[1:]...)
 		cmd.Stdin = strings.NewReader(path)
 		cmd.Stdout = os.Stdout
@@ -25,6 +25,14 @@ func (app *Application) handleClipboard() bool {
 		}
 	}
 	return true
+}
+
+func normalizeClipboardPath(path string, goos string) string {
+	cleaned := filepath.Clean(path)
+	if strings.EqualFold(goos, "windows") {
+		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
+	}
+	return cleaned
 }
 
 func (app *Application) handleRightArrow() bool {
