@@ -119,14 +119,14 @@ func (s *AppState) CurrentFile() *FileEntry {
 
 func (s *AppState) getCurrentFilePath() string {
 	file := s.getCurrentFile()
-	if file == nil {
-		return s.CurrentPath
+	current := s.CurrentPath
+	if current == "" {
+		current = "."
 	}
-
-	if s.CurrentPath == "/" {
-		return "/" + file.Name
+	if file != nil {
+		current = filepath.Join(current, file.Name)
 	}
-	return s.CurrentPath + "/" + file.Name
+	return filepath.Clean(current)
 }
 
 func (s *AppState) CurrentFilePath() string {
