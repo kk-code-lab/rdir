@@ -1336,7 +1336,8 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 		content, err := fsutil.ReadFileHead(filePath, previewByteLimit)
 		if err == nil {
 			if fsutil.IsTextFile(filePath, content) {
-				lines := strings.Split(string(content), "\n")
+				textContent := fsutil.NormalizeTextContent(content)
+				lines := strings.Split(textContent, "\n")
 				preview.TextLines = append(preview.TextLines, lines...)
 				preview.LineCount = len(lines)
 			} else {
