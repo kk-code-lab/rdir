@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"io/fs"
-	"sort"
-	"sync"
-	"time"
 	"unicode/utf8"
 )
 
@@ -15,155 +12,97 @@ func (gs *GlobalSearcher) SearchRecursiveAsync(query string, caseSensitive bool,
 	gs.cancelOngoingSearch()
 	tokens, matchAll := prepareQueryTokens(query, caseSensitive)
 
-	if gs.maybeUseIndex() {
-		ctx, cancel := context.WithCancel(context.Background())
-		token := gs.setCancel(cancel)
-		go func(token int, ctx context.Context, cancel context.CancelFunc) {
-			defer gs.clearCancel(token)
-			defer cancel()
-
-			results := gs.searchIndex(query, caseSensitive)
-
-			if !gs.isTokenCurrent(token) {
-				return
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			callback(results, true, false)
-		}(token, ctx, cancel)
-		return
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	token := gs.setCancel(cancel)
 
-	go func(cancel context.CancelFunc, token int, tokens []queryToken, matchAll bool) {
-		defer gs.clearCancel(token)
-		defer cancel()
+	startWalker := func() {
+		go gs.runWalkerAsync(ctx, cancel, token, query, caseSensitive, tokens, matchAll, callback)
+	}
 
-		results := borrowResultBuffer(256)
-		defer func() {
-			releaseResultBuffer(results)
-		}()
-
-		var sortedSnapshot []GlobalSearchResult
-		var mu sync.Mutex
-		lastCallbackTime := time.Now()
-		lastCallbackSize := 0
-		filesScanned := 0
-
-		orderCounter := 0
-
-		err := gs.walkFilesBFS(ctx, func(path string, relPath string, d fs.DirEntry) error {
-			filesScanned++
-			gs.maybeKickoffIndex(filesScanned)
-
-			score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll)
-			if !matched {
-				return nil
-			}
-
-			score += computeSegmentBoost(query, relPath, details)
-
-			pathLength := details.TargetLength
-			if pathLength == 0 {
-				pathLength = utf8.RuneCountInString(relPath)
-			}
-			matchStart := details.Start
-			matchEnd := details.End
-			matchCount := details.MatchCount
-			wordHits := details.WordHits
-			pathSegments := countPathSegments(relPath)
-
-			order := orderCounter
-			orderCounter++
-
-			info, infoErr := d.Info()
-			if infoErr != nil {
-				return nil
-			}
-			hasMatch := len(query) > 0
-			result := makeGlobalSearchResult(path, d, info, score, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments, order, hasMatch, details.Spans)
-
-			mu.Lock()
-			if len(results) == cap(results) {
-				results = growResultBuffer(results, len(results)+1)
-			}
-			results = append(results, result)
-			mu.Unlock()
-
-			if flushBatch := shouldFlushBatch(lastCallbackSize, len(results), lastCallbackTime); flushBatch {
-				mu.Lock()
-				currentSize := len(results)
-				if currentSize > lastCallbackSize {
-					newResults := borrowResultBuffer(currentSize - lastCallbackSize)
-					newResults = append(newResults, results[lastCallbackSize:currentSize]...)
-
-					mu.Unlock()
-
-					sort.Slice(newResults, func(i, j int) bool {
-						return compareResults(newResults[i], newResults[j]) < 0
-					})
-
-					prevSnapshot := sortedSnapshot
-					sortedSnapshot = mergeResults(sortedSnapshot, newResults)
-					releaseResultBuffer(newResults)
-					releaseResultBuffer(prevSnapshot)
-
-					displaySnapshot := sortedSnapshot
-					if len(displaySnapshot) > maxDisplayResults {
-						displaySnapshot = displaySnapshot[:maxDisplayResults]
-					}
-
-					callback(displaySnapshot, false, true)
-					lastCallbackTime = time.Now()
-					lastCallbackSize = currentSize
-				} else {
-					mu.Unlock()
+	if gs.maybeUseIndex() {
+		go func() {
+			results := gs.searchIndex(query, caseSensitive)
+			if len(results) > 0 {
+				if gs.isTokenCurrent(token) {
+					callback(results, true, false)
 				}
+				cancel()
+				gs.clearCancel(token)
+				return
 			}
+			if !gs.isTokenCurrent(token) {
+				cancel()
+				gs.clearCancel(token)
+				return
+			}
+			startWalker()
+		}()
+		return
+	}
 
+	startWalker()
+}
+
+func (gs *GlobalSearcher) runWalkerAsync(ctx context.Context, cancel context.CancelFunc, token int, query string, caseSensitive bool, tokens []queryToken, matchAll bool, callback func([]GlobalSearchResult, bool, bool)) {
+	defer gs.clearCancel(token)
+	defer cancel()
+
+	acc := newAsyncAccumulator(256, callback)
+	defer acc.Close()
+
+	filesScanned := 0
+	orderCounter := 0
+
+	err := gs.walkFilesBFS(ctx, func(path string, relPath string, d fs.DirEntry) error {
+		filesScanned++
+		gs.maybeKickoffIndex(filesScanned)
+
+		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll)
+		if !matched {
 			return nil
-		})
-
-		if errors.Is(err, context.Canceled) {
-			return
 		}
 
-		gs.considerIndexBuildAfterWalk(filesScanned)
+		score += computeSegmentBoost(query, relPath, details)
 
-		mu.Lock()
-		defer mu.Unlock()
-
-		var finalResults []GlobalSearchResult
-		if len(results) > lastCallbackSize {
-			unsortedFinal := results[lastCallbackSize:]
-			sort.Slice(unsortedFinal, func(i, j int) bool {
-				return compareResults(unsortedFinal[i], unsortedFinal[j]) < 0
-			})
-
-			prevSnapshot := sortedSnapshot
-			sortedSnapshot = mergeResults(sortedSnapshot, unsortedFinal)
-			releaseResultBuffer(prevSnapshot)
-			finalResults = sortedSnapshot
-		} else {
-			finalResults = sortedSnapshot
+		pathLength := details.TargetLength
+		if pathLength == 0 {
+			pathLength = utf8.RuneCountInString(relPath)
 		}
+		matchStart := details.Start
+		matchEnd := details.End
+		matchCount := details.MatchCount
+		wordHits := details.WordHits
+		pathSegments := countPathSegments(relPath)
 
-		if len(finalResults) > maxDisplayResults {
-			finalResults = finalResults[:maxDisplayResults]
-		}
+		order := orderCounter
+		orderCounter++
 
-		if len(finalResults) >= mergeStatusMinimumResults {
-			callback(finalResults, true, true)
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return nil
 		}
-		callback(finalResults, true, false)
-	}(cancel, token, tokens, matchAll)
+		hasMatch := !matchAll
+		result := makeGlobalSearchResult(path, d, info, score, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments, order, hasMatch, details.Spans)
+
+		acc.Add(result)
+		acc.Flush(false)
+
+		return nil
+	})
+
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+
+	gs.considerIndexBuildAfterWalk(filesScanned)
+
+	acc.FlushRemaining()
+	finalResults := acc.FinalResults()
+
+	if len(finalResults) >= mergeStatusMinimumResults {
+		callback(finalResults, true, true)
+	}
+	callback(finalResults, true, false)
 }
 
 func (gs *GlobalSearcher) cancelOngoingSearch() {

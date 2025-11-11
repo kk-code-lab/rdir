@@ -199,7 +199,7 @@ func (r *StateReducer) triggerGlobalSearch(state *AppState) {
 
 	state.GlobalSearchIndexStatus = searcher.CurrentProgress()
 
-	query := state.GlobalSearchQuery
+	query := state.CleanGlobalSearchQuery()
 	caseSensitive := state.GlobalSearchCaseSensitive
 
 	searcher.SearchRecursiveAsync(query, caseSensitive, func(results []GlobalSearchResult, isDone bool, inProgress bool) {
@@ -629,7 +629,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 	case GlobalSearchStartAction:
 		// Start global search from current directory
 		state.GlobalSearchActive = true
-		state.GlobalSearchQuery = ""
+		state.setGlobalSearchQuery("")
 		state.GlobalSearchCursorPos = 0
 		state.GlobalSearchCaseSensitive = false
 		state.GlobalSearchResults = nil
@@ -638,7 +638,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		state.GlobalSearchDesiredSelectionPath = ""
 		state.clearGlobalSearchPendingIndex()
 		if state.LastGlobalSearchQuery != "" && state.LastGlobalSearchRootPath == state.CurrentPath {
-			state.GlobalSearchQuery = state.LastGlobalSearchQuery
+			state.setGlobalSearchQuery(state.LastGlobalSearchQuery)
 			state.GlobalSearchCursorPos = len([]rune(state.GlobalSearchQuery))
 			state.GlobalSearchCaseSensitive = queryHasUppercase(state.GlobalSearchQuery)
 			state.GlobalSearchIndex = state.LastGlobalSearchIndex
@@ -681,11 +681,11 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			buffer = append(buffer, a.Char)
 			buffer = append(buffer, runes[cursor:]...)
 
-			state.GlobalSearchQuery = string(buffer)
+			state.setGlobalSearchQuery(string(buffer))
 			state.GlobalSearchCursorPos = cursor + 1
 			state.GlobalSearchCaseSensitive = queryHasUppercase(state.GlobalSearchQuery)
 
-			if state.GlobalSearchQuery == "" {
+			if state.CleanGlobalSearchQuery() == "" {
 				state.GlobalSearchCaseSensitive = false
 			}
 
@@ -694,7 +694,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		return state, nil
 
 	case GlobalSearchBackspaceAction:
-		if state.GlobalSearchActive && len(state.GlobalSearchQuery) > 0 {
+		if state.GlobalSearchActive && len(state.CleanGlobalSearchQuery()) > 0 {
 			state.clearDesiredGlobalSearchSelection()
 			state.clearGlobalSearchPendingIndex()
 			runes := []rune(state.GlobalSearchQuery)
@@ -713,14 +713,14 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			buffer := append([]rune{}, runes[:cursor-1]...)
 			buffer = append(buffer, runes[cursor:]...)
 
-			state.GlobalSearchQuery = string(buffer)
+			state.setGlobalSearchQuery(string(buffer))
 			newCursor := cursor - 1
 			if newCursor < 0 {
 				newCursor = 0
 			}
 			state.GlobalSearchCursorPos = newCursor
 			state.GlobalSearchCaseSensitive = queryHasUppercase(state.GlobalSearchQuery)
-			if state.GlobalSearchQuery == "" {
+			if state.CleanGlobalSearchQuery() == "" {
 				state.GlobalSearchCaseSensitive = false
 			}
 
@@ -729,7 +729,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		return state, nil
 
 	case GlobalSearchDeleteAction:
-		if state.GlobalSearchActive && len(state.GlobalSearchQuery) > 0 {
+		if state.GlobalSearchActive && len(state.CleanGlobalSearchQuery()) > 0 {
 			state.clearDesiredGlobalSearchSelection()
 			state.clearGlobalSearchPendingIndex()
 			runes := []rune(state.GlobalSearchQuery)
@@ -744,9 +744,9 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			buffer := append([]rune{}, runes[:cursor]...)
 			buffer = append(buffer, runes[cursor+1:]...)
 
-			state.GlobalSearchQuery = string(buffer)
+			state.setGlobalSearchQuery(string(buffer))
 			state.GlobalSearchCaseSensitive = queryHasUppercase(state.GlobalSearchQuery)
-			if state.GlobalSearchQuery == "" {
+			if state.CleanGlobalSearchQuery() == "" {
 				state.GlobalSearchCaseSensitive = false
 			}
 
@@ -755,7 +755,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		return state, nil
 
 	case GlobalSearchDeleteWordAction:
-		if state.GlobalSearchActive && len(state.GlobalSearchQuery) > 0 {
+		if state.GlobalSearchActive && len(state.CleanGlobalSearchQuery()) > 0 {
 			state.clearDesiredGlobalSearchSelection()
 			state.clearGlobalSearchPendingIndex()
 			runes := []rune(state.GlobalSearchQuery)
@@ -778,10 +778,10 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			buffer := append([]rune{}, runes[:start]...)
 			buffer = append(buffer, runes[cursor:]...)
 
-			state.GlobalSearchQuery = string(buffer)
+			state.setGlobalSearchQuery(string(buffer))
 			state.GlobalSearchCursorPos = start
 			state.GlobalSearchCaseSensitive = queryHasUppercase(state.GlobalSearchQuery)
-			if state.GlobalSearchQuery == "" {
+			if state.CleanGlobalSearchQuery() == "" {
 				state.GlobalSearchCaseSensitive = false
 			}
 
@@ -816,10 +816,10 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		return state, nil
 
 	case GlobalSearchResetQueryAction:
-		if state.GlobalSearchActive && state.GlobalSearchQuery != "" {
+		if state.GlobalSearchActive && state.CleanGlobalSearchQuery() != "" {
 			state.clearDesiredGlobalSearchSelection()
 			state.clearGlobalSearchPendingIndex()
-			state.GlobalSearchQuery = ""
+			state.setGlobalSearchQuery("")
 			state.GlobalSearchCursorPos = 0
 			state.GlobalSearchCaseSensitive = false
 			state.GlobalSearchIndex = 0

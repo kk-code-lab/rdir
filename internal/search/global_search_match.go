@@ -82,7 +82,7 @@ func prepareQueryTokens(query string, caseSensitive bool) ([]queryToken, bool) {
 	if trimmed == "" {
 		return nil, true
 	}
-	rawTokens := splitQueryTokens(query)
+	rawTokens := splitQueryTokens(trimmed)
 	if len(rawTokens) == 0 {
 		return nil, true
 	}
@@ -221,6 +221,7 @@ func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string
 			}
 			return agg.Spans[i].Start < agg.Spans[j].Start
 		})
+		agg.Spans = MergeMatchSpans(agg.Spans)
 	}
 	if agg.TargetLength == 0 {
 		agg.TargetLength = utf8.RuneCountInString(text)

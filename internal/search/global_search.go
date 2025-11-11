@@ -82,6 +82,7 @@ func NewGlobalSearcher(rootPath string, hideHidden bool, progressCb func(IndexTe
 		maxIndexResults: maxIndexResults,
 		progress:        progress,
 		progressCb:      progressCb,
+		indexReady:      false,
 	}
 }
 
@@ -89,7 +90,9 @@ func NewGlobalSearcher(rootPath string, hideHidden bool, progressCb func(IndexTe
 // Returns sorted results by fuzzy match score
 func (gs *GlobalSearcher) SearchRecursive(query string, caseSensitive bool) []GlobalSearchResult {
 	if gs.maybeUseIndex() {
-		return gs.searchIndex(query, caseSensitive)
+		if results := gs.searchIndex(query, caseSensitive); len(results) > 0 {
+			return results
+		}
 	}
 
 	return gs.searchWalk(query, caseSensitive)

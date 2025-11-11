@@ -1,7 +1,17 @@
 package state
 
+import "strings"
+
+func (s *AppState) setGlobalSearchQuery(value string) {
+	s.GlobalSearchQuery = value
+}
+
+func (s *AppState) CleanGlobalSearchQuery() string {
+	return strings.TrimSpace(s.GlobalSearchQuery)
+}
+
 func (s *AppState) rememberGlobalSearchQuery() {
-	if s.GlobalSearchQuery == "" {
+	if s.CleanGlobalSearchQuery() == "" {
 		return
 	}
 
@@ -32,7 +42,7 @@ func (s *AppState) clearGlobalSearch(forgetMemory bool) {
 	}
 
 	s.GlobalSearchActive = false
-	s.GlobalSearchQuery = ""
+	s.setGlobalSearchQuery("")
 	s.GlobalSearchCursorPos = 0
 	s.GlobalSearchCaseSensitive = false
 	s.GlobalSearchResults = nil
