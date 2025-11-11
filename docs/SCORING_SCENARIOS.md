@@ -17,6 +17,7 @@ go test ./internal/search -run Snapshot -v
 |----------|-------|------------|--------|
 | `tail_vs_middle_en` | `en` | `repo/fs/hidden_windows.go`, `repo/ui/render/renderer.go`, `docs/content/en.md` | Prefer matches that land in the file name (tail segment) over earlier directory hits. |
 | `multi_token_tail_mo_sum` | `mo sum` | `apps/core/modules/summary.html`, `apps/core/modules/transport/templates/summary.html`, `apps/momentum/sum.go`, `apps/monitoring/sumcheck/main.go` | With multi-token queries make sure the final segment containing both tokens outranks deeper directory matches. |
+| `multi_token_tail_boost` | `mo sum` | `pkg/sum.go`, `apps/core/modules/summary.html`, `apps/core/modules/transport/templates/sum_preview.html` | Ensures the filename-only path and segment boost promote short filenames over deep directories for multi-token queries. |
 | `short_suffix_go` | `go` | `app/render/layout.go`, `app/render/renderer.go`, `cmd/tool/main.go`, `app/handlers/generic/options` | A short token should still push `.go` filenames above directories that merely contain the substring. |
 | `filename_exact_renderer` | `renderer.go` | `pkg/renderer.go`, `pkg/ui/render/renderer.go`, `pkg/ui/renderer.go` | Exact filename queries should prioritize an exact tail match, even if directories also include the same substring. |
 | `go_mod_files` | `mod` | `repo/go.mod`, `repo/go.sum`, `…/doc/html/modules.js`, `…/modules.tex` | Prefer `go.mod`/`go.sum` over long directory matches when searching for “mod”. |
