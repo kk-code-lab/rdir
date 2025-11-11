@@ -380,12 +380,16 @@ func (r *Renderer) drawSidebar(state *statepkg.AppState, sidebarWidth, h int) {
 			}
 
 			rowStyle := baseBgStyle
-			if entry.Name == currentName {
+			isCurrent := entry.Name == currentName
+			if isCurrent {
 				rowStyle = tcell.StyleDefault.Background(r.theme.SidebarActiveBg).Foreground(r.theme.SidebarActiveFg)
 			} else if entry.IsSymlink {
 				rowStyle = baseBgStyle.Foreground(r.theme.SymlinkFg)
 			} else if entry.IsDir {
 				rowStyle = baseBgStyle.Foreground(r.theme.DirectoryFg)
+			}
+			if entry.IsHidden() && !isCurrent {
+				rowStyle = rowStyle.Foreground(r.theme.HiddenFg)
 			}
 
 			icon := " "
@@ -558,9 +562,12 @@ func (r *Renderer) drawFileList(state *statepkg.AppState, startX, panelWidth, h 
 		// Get actual file index for selection comparison (testable logic in state.go)
 		actualIdx := state.ActualIndexFromDisplayIndex(displayIdx)
 
+		isSelected := actualIdx == state.SelectedIndex
+		isHidden := f.IsHidden()
+
 		// Highlight selected row
 		var rowStyle tcell.Style
-		if actualIdx == state.SelectedIndex {
+		if isSelected {
 			rowStyle = tcell.StyleDefault.Background(r.theme.SelectionBg).Foreground(r.theme.SelectionFg)
 		} else if f.IsSymlink {
 			rowStyle = baseBgStyle.Foreground(r.theme.SymlinkFg)
@@ -568,6 +575,9 @@ func (r *Renderer) drawFileList(state *statepkg.AppState, startX, panelWidth, h 
 			rowStyle = baseBgStyle.Foreground(r.theme.DirectoryFg)
 		} else {
 			rowStyle = baseBgStyle.Foreground(r.theme.FileFg)
+		}
+		if isHidden && !isSelected {
+			rowStyle = rowStyle.Foreground(r.theme.HiddenFg)
 		}
 
 		// Icon: @ for symlinks, / for directories, space for files
@@ -670,12 +680,18 @@ func (r *Renderer) drawGlobalSearchResults(state *statepkg.AppState, startX, pan
 
 		result := state.GlobalSearchResults[resultIdx]
 
+		isSelected := resultIdx == selectedIdx
+		isHidden := result.FileEntry.IsHidden()
+
 		// Highlight selected result
 		var rowStyle tcell.Style
-		if resultIdx == selectedIdx {
+		if isSelected {
 			rowStyle = tcell.StyleDefault.Background(r.theme.SelectionBg).Foreground(r.theme.SelectionFg)
 		} else {
 			rowStyle = baseBgStyle.Foreground(r.theme.FileFg)
+		}
+		if isHidden && !isSelected {
+			rowStyle = rowStyle.Foreground(r.theme.HiddenFg)
 		}
 
 		// Display relative path from root
