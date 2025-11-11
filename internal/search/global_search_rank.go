@@ -13,6 +13,12 @@ const (
 	segmentRankNone
 )
 
+const (
+	finalSegmentBonus       = 0.85
+	segmentDepthPenaltyStep = 0.22
+	crossSegmentPenalty     = 0.45
+)
+
 func computeSegmentBoost(query, relPath string, details MatchDetails) float64 {
 	if query == "" || relPath == "" {
 		return 0
@@ -75,19 +81,20 @@ func computeSegmentBoost(query, relPath string, details MatchDetails) float64 {
 	boost := segmentRankBaseBoost(bestRank)
 
 	if bestIsFinal {
-		boost += 0.25
+		boost += finalSegmentBonus
 	}
 
 	if bestDepth >= 0 && bestDepth < len(segments)-1 {
-		boost += float64((len(segments)-1)-bestDepth) * 0.12
+		depthPenalty := float64((len(segments)-1)-bestDepth) * segmentDepthPenaltyStep
+		boost -= depthPenalty
 	}
 
 	if matchCrossesSegments(normalized, details) {
-		boost -= 0.35
+		boost -= crossSegmentPenalty
 	}
 
 	if boost < 0 {
-		return 0
+		boost = 0
 	}
 	return boost
 }
@@ -95,13 +102,13 @@ func computeSegmentBoost(query, relPath string, details MatchDetails) float64 {
 func segmentRankBaseBoost(rank int) float64 {
 	switch rank {
 	case segmentRankExact:
-		return 2.3
+		return 2.6
 	case segmentRankExactBase:
-		return 1.9
+		return 2.1
 	case segmentRankPrefix:
-		return 1.1
+		return 1.25
 	case segmentRankSubstring:
-		return 0.35
+		return 0.2
 	default:
 		return 0
 	}

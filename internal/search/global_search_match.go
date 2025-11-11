@@ -2,6 +2,7 @@ package search
 
 import (
 	"math"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -29,56 +30,51 @@ func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseS
 	}
 
 	fold := !caseSensitive
-	textRunes, textBuf := acquireRunes(relPath, fold)
-	defer releaseRunes(textBuf)
+	pathRunes, pathBuf := acquireRunes(relPath, fold)
+	defer releaseRunes(pathBuf)
 
-	totalScore := 0.0
-	agg := MatchDetails{
-		Start:        math.MaxInt32,
-		End:          -1,
-		TargetLength: len(textRunes),
+	pathScore, pathDetails, ok := gs.aggregateTokenMatches(tokens, relPath, pathRunes)
+	if !ok {
+		return 0, false, MatchDetails{}
 	}
 
-	for _, token := range tokens {
-		score, matched, details := gs.matcher.MatchDetailedFromRunes(token.pattern, token.runes, relPath, textRunes)
-		if !matched {
-			return 0, false, MatchDetails{}
-		}
-		totalScore += score
+	bestScore := pathScore
+	bestDetails := pathDetails
 
-		if details.MatchCount > 0 {
-			agg.MatchCount += details.MatchCount
-		}
-		if details.WordHits > 0 {
-			agg.WordHits += details.WordHits
-		}
-		if spans := extractTokenSpans(token.runes, textRunes); len(spans) > 0 {
-			agg.Spans = append(agg.Spans, spans...)
-		}
-		if details.Start >= 0 && details.Start < agg.Start {
-			agg.Start = details.Start
-		}
-		if details.End > agg.End {
-			agg.End = details.End
-		}
+	filename := filepath.Base(relPath)
+	if filename == "" {
+		filename = relPath
 	}
+	if filename != "" {
+		fileRunes, fileBuf := acquireRunes(filename, fold)
+		fileOffset := len(pathRunes) - len(fileRunes)
+		if fileOffset < 0 {
+			fileOffset = 0
+		}
+		fileScore, fileDetails, fileOK := gs.aggregateTokenMatches(tokens, filename, fileRunes)
+		releaseRunes(fileBuf)
 
-	if agg.Start == math.MaxInt32 {
-		agg.Start = -1
-	}
-	if len(agg.Spans) > 1 {
-		sort.Slice(agg.Spans, func(i, j int) bool {
-			if agg.Spans[i].Start == agg.Spans[j].Start {
-				return agg.Spans[i].End < agg.Spans[j].End
+		if fileOK && fileScore > bestScore {
+			bestScore = fileScore
+			if fileDetails.Start >= 0 {
+				fileDetails.Start += fileOffset
 			}
-			return agg.Spans[i].Start < agg.Spans[j].Start
-		})
-	}
-	if agg.TargetLength == 0 {
-		agg.TargetLength = utf8.RuneCountInString(relPath)
+			if fileDetails.End >= 0 {
+				fileDetails.End += fileOffset
+			}
+			for i := range fileDetails.Spans {
+				fileDetails.Spans[i].Start += fileOffset
+				fileDetails.Spans[i].End += fileOffset
+			}
+			bestDetails = fileDetails
+		}
 	}
 
-	return totalScore / float64(len(tokens)), true, agg
+	if bestDetails.TargetLength == 0 {
+		bestDetails.TargetLength = len(pathRunes)
+	}
+
+	return bestScore / float64(len(tokens)), true, bestDetails
 }
 
 func prepareQueryTokens(query string, caseSensitive bool) ([]queryToken, bool) {
@@ -181,4 +177,54 @@ func extractTokenSpans(pattern []rune, text []rune) []MatchSpan {
 	}
 	spans = append(spans, MatchSpan{Start: spanStart, End: prev})
 	return spans
+}
+
+func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string, textRunes []rune) (float64, MatchDetails, bool) {
+	totalScore := 0.0
+	agg := MatchDetails{
+		Start:        math.MaxInt32,
+		End:          -1,
+		TargetLength: len(textRunes),
+	}
+
+	for _, token := range tokens {
+		score, matched, details := gs.matcher.MatchDetailedFromRunes(token.pattern, token.runes, text, textRunes)
+		if !matched {
+			return 0, MatchDetails{}, false
+		}
+		totalScore += score
+
+		if details.MatchCount > 0 {
+			agg.MatchCount += details.MatchCount
+		}
+		if details.WordHits > 0 {
+			agg.WordHits += details.WordHits
+		}
+		if spans := extractTokenSpans(token.runes, textRunes); len(spans) > 0 {
+			agg.Spans = append(agg.Spans, spans...)
+		}
+		if details.Start >= 0 && details.Start < agg.Start {
+			agg.Start = details.Start
+		}
+		if details.End > agg.End {
+			agg.End = details.End
+		}
+	}
+
+	if agg.Start == math.MaxInt32 {
+		agg.Start = -1
+	}
+	if len(agg.Spans) > 1 {
+		sort.Slice(agg.Spans, func(i, j int) bool {
+			if agg.Spans[i].Start == agg.Spans[j].Start {
+				return agg.Spans[i].End < agg.Spans[j].End
+			}
+			return agg.Spans[i].Start < agg.Spans[j].Start
+		})
+	}
+	if agg.TargetLength == 0 {
+		agg.TargetLength = utf8.RuneCountInString(text)
+	}
+
+	return totalScore, agg, true
 }
