@@ -197,9 +197,6 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 		workerCount = 2
 	}
 	defaultMaxWorkers := 8
-	if runtime.GOOS == "windows" {
-		defaultMaxWorkers = 16
-	}
 	maxWorkers := parseEnvInt(envIndexMaxWorkers, 0)
 	if maxWorkers > 0 {
 		if maxWorkers < 1 {
