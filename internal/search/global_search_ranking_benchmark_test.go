@@ -34,6 +34,15 @@ var rankingScenarios = []rankingScenario{
 		},
 	},
 	{
+		name:  "multi_token_tail_boost",
+		query: "mo sum",
+		candidates: []string{
+			"apps/core/modules/transport/templates/sum_preview.html",
+			"apps/core/modules/summary.html",
+			"pkg/sum.go",
+		},
+	},
+	{
 		name:  "short_suffix_go",
 		query: "go",
 		candidates: []string{

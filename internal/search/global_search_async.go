@@ -13,6 +13,7 @@ import (
 // SearchRecursiveAsync performs global search asynchronously in a goroutine.
 func (gs *GlobalSearcher) SearchRecursiveAsync(query string, caseSensitive bool, callback func(results []GlobalSearchResult, isDone bool, inProgress bool)) {
 	gs.cancelOngoingSearch()
+	tokens, matchAll := prepareQueryTokens(query, caseSensitive)
 
 	if gs.maybeUseIndex() {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -41,7 +42,7 @@ func (gs *GlobalSearcher) SearchRecursiveAsync(query string, caseSensitive bool,
 	ctx, cancel := context.WithCancel(context.Background())
 	token := gs.setCancel(cancel)
 
-	go func(cancel context.CancelFunc, token int) {
+	go func(cancel context.CancelFunc, token int, tokens []queryToken, matchAll bool) {
 		defer gs.clearCancel(token)
 		defer cancel()
 
@@ -62,7 +63,7 @@ func (gs *GlobalSearcher) SearchRecursiveAsync(query string, caseSensitive bool,
 			filesScanned++
 			gs.maybeKickoffIndex(filesScanned)
 
-			score, matched, details := gs.matcher.MatchDetailed(query, relPath)
+			score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll)
 			if !matched {
 				return nil
 			}
@@ -162,7 +163,7 @@ func (gs *GlobalSearcher) SearchRecursiveAsync(query string, caseSensitive bool,
 			callback(finalResults, true, true)
 		}
 		callback(finalResults, true, false)
-	}(cancel, token)
+	}(cancel, token, tokens, matchAll)
 }
 
 func (gs *GlobalSearcher) cancelOngoingSearch() {
