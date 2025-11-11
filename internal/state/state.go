@@ -13,6 +13,7 @@ type FileEntry = fsutil.Entry
 type FuzzyMatch = search.FuzzyMatch
 type FuzzyMatcher = search.FuzzyMatcher
 type MatchDetails = search.MatchDetails
+type MatchSpan = search.MatchSpan
 type GlobalSearchResult = search.GlobalSearchResult
 type GlobalSearcher = search.GlobalSearcher
 type IndexTelemetry = search.IndexTelemetry

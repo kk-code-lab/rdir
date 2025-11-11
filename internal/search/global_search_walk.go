@@ -48,7 +48,7 @@ func (gs *GlobalSearcher) searchWalk(query string, caseSensitive bool) []GlobalS
 		if infoErr != nil {
 			return nil
 		}
-		collector.Store(makeGlobalSearchResult(path, d, info, score, pathLength, details.Start, details.End, details.MatchCount, details.WordHits, pathSegments, order, hasMatch))
+		collector.Store(makeGlobalSearchResult(path, d, info, score, pathLength, details.Start, details.End, details.MatchCount, details.WordHits, pathSegments, order, hasMatch, details.Spans))
 
 		return nil
 	})
@@ -58,7 +58,7 @@ func (gs *GlobalSearcher) searchWalk(query string, caseSensitive bool) []GlobalS
 	return collector.Results()
 }
 
-func makeGlobalSearchResult(path string, d fs.DirEntry, info fs.FileInfo, score float64, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments, order int, hasMatch bool) GlobalSearchResult {
+func makeGlobalSearchResult(path string, d fs.DirEntry, info fs.FileInfo, score float64, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments, order int, hasMatch bool, spans []MatchSpan) GlobalSearchResult {
 	return GlobalSearchResult{
 		FilePath:     path,
 		FileName:     d.Name(),
@@ -72,6 +72,7 @@ func makeGlobalSearchResult(path string, d fs.DirEntry, info fs.FileInfo, score 
 		PathSegments: pathSegments,
 		InputOrder:   order,
 		HasMatch:     hasMatch,
+		MatchSpans:   cloneMatchSpans(spans),
 		FileEntry: fsutil.Entry{
 			Name:      d.Name(),
 			IsDir:     d.IsDir(),
@@ -81,6 +82,15 @@ func makeGlobalSearchResult(path string, d fs.DirEntry, info fs.FileInfo, score 
 			Mode:      info.Mode(),
 		},
 	}
+}
+
+func cloneMatchSpans(spans []MatchSpan) []MatchSpan {
+	if len(spans) == 0 {
+		return nil
+	}
+	out := make([]MatchSpan, len(spans))
+	copy(out, spans)
+	return out
 }
 
 func (gs *GlobalSearcher) walkFilesBFS(ctx context.Context, handle func(fullPath, relPath string, d fs.DirEntry) error) error {

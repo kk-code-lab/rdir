@@ -80,7 +80,7 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 			continue
 		}
 
-		result := gs.makeIndexedResult(entry, score, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments, true)
+		result := gs.makeIndexedResult(entry, score, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments, true, details.Spans)
 		collector.Store(result)
 	}
 
@@ -111,7 +111,7 @@ func (gs *GlobalSearcher) collectAllIndex() []GlobalSearchResult {
 		relPath := gs.indexRelativePath(entry)
 		pathLength := utf8.RuneCountInString(relPath)
 		segments := countPathSegments(relPath)
-		results[i] = gs.makeIndexedResult(entry, 1.0, pathLength, -1, -1, 0, 0, segments, false)
+		results[i] = gs.makeIndexedResult(entry, 1.0, pathLength, -1, -1, 0, 0, segments, false, nil)
 	}
 
 	return results
@@ -559,7 +559,7 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 	progressDebugf("buildIndex ready total=%d duration=%s", finalCount, finished.Sub(start))
 }
 
-func (gs *GlobalSearcher) makeIndexedResult(entry *indexedEntry, score float64, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments int, hasMatch bool) GlobalSearchResult {
+func (gs *GlobalSearcher) makeIndexedResult(entry *indexedEntry, score float64, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments int, hasMatch bool, spans []MatchSpan) GlobalSearchResult {
 	fullPath := gs.indexFullPath(entry)
 	mode := fs.FileMode(entry.mode)
 
@@ -590,6 +590,7 @@ func (gs *GlobalSearcher) makeIndexedResult(entry *indexedEntry, score float64, 
 		PathSegments: pathSegments,
 		InputOrder:   int(entry.order),
 		HasMatch:     hasMatch,
+		MatchSpans:   cloneMatchSpans(spans),
 		FileEntry: fsutil.Entry{
 			Name:      fileName,
 			IsDir:     false,
