@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -23,11 +24,18 @@ func LoadDirectory(state *AppState, path ...string) error {
 	}
 
 	state.CurrentPath = dirPath
-	state.Files = make([]FileEntry, len(entries))
+	visibleEntries := make([]FileEntry, 0, len(entries))
 
-	for i, e := range entries {
+	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {
+			continue
+		}
+
+		rawName := e.Name()
+		fullPath := filepath.Join(dirPath, rawName)
+
+		if fsutil.ShouldHideFromListing(fullPath, rawName) {
 			continue
 		}
 
@@ -36,25 +44,26 @@ func LoadDirectory(state *AppState, path ...string) error {
 
 		// For symlinks, check if target is a directory
 		if isSymlink {
-			fullPath := filepath.Join(dirPath, e.Name())
 			targetInfo, err := os.Stat(fullPath)
 			if err == nil {
 				isDir = targetInfo.IsDir()
 			}
 		}
 
-		normalizedName := norm.NFC.String(e.Name())
+		normalizedName := norm.NFC.String(rawName)
 
-		state.Files[i] = FileEntry{
+		visibleEntries = append(visibleEntries, FileEntry{
 			Name:      normalizedName,
-			FullPath:  filepath.Join(dirPath, e.Name()),
+			FullPath:  fullPath,
 			IsDir:     isDir,
 			IsSymlink: isSymlink,
 			Size:      info.Size(),
 			Modified:  info.ModTime(),
 			Mode:      info.Mode(),
-		}
+		})
 	}
+
+	state.Files = visibleEntries
 
 	state.sortFiles()
 	state.resetViewport()
