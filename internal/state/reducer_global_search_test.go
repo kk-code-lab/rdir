@@ -299,7 +299,7 @@ func TestGlobalSearchBackspaceAction(t *testing.T) {
 	}
 
 	// Deleting character before the cursor should move the cursor left
-	state.GlobalSearchQuery = "bar"
+	state.setGlobalSearchQuery("bar")
 	state.GlobalSearchCursorPos = 2 // cursor between 'a' and 'r'
 	if _, err := reducer.Reduce(state, GlobalSearchBackspaceAction{}); err != nil {
 		t.Fatalf("Failed to backspace from middle: %v", err)
@@ -422,7 +422,7 @@ func TestGlobalSearchMoveCursorAction(t *testing.T) {
 	}
 
 	// Word navigation should respect boundaries
-	state.GlobalSearchQuery = "foo bar/baz"
+	state.setGlobalSearchQuery("foo bar/baz")
 	state.GlobalSearchCursorPos = len([]rune(state.GlobalSearchQuery))
 
 	if _, err := reducer.Reduce(state, GlobalSearchMoveCursorAction{Direction: "word-left"}); err != nil {

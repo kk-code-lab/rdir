@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/gdamore/tcell/v2"
+	searchpkg "github.com/kk-code-lab/rdir/internal/search"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 )
 
@@ -934,22 +935,18 @@ func convertMatchSpansToHighlights(spans []statepkg.MatchSpan, text string) []hi
 		return highlights[i].start < highlights[j].start
 	})
 
-	merged := make([]highlightSpan, 0, len(highlights))
-	for _, span := range highlights {
-		if len(merged) == 0 || span.start > merged[len(merged)-1].end {
-			merged = append(merged, span)
-			continue
-		}
-		last := &merged[len(merged)-1]
-		if span.start < last.start {
-			last.start = span.start
-		}
-		if span.end > last.end {
-			last.end = span.end
-		}
+	searchSpans := make([]searchpkg.MatchSpan, len(highlights))
+	for i, span := range highlights {
+		searchSpans[i] = searchpkg.MatchSpan{Start: span.start, End: span.end}
 	}
 
-	return merged
+	merged := searchpkg.MergeMatchSpans(searchSpans)
+	out := make([]highlightSpan, len(merged))
+	for i, span := range merged {
+		out[i] = highlightSpan{start: span.Start, end: span.End}
+	}
+
+	return out
 }
 
 func computeHighlightSpans(query, text string, caseSensitive bool) []highlightSpan {
