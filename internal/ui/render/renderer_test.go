@@ -205,3 +205,49 @@ func TestTextPreviewEstimationUsesTabs(t *testing.T) {
 		t.Fatalf("expected preview width >= %d to accommodate tabs, got %d", expected, width)
 	}
 }
+
+func TestComputeHighlightSpansDisjointMatches(t *testing.T) {
+	spans := computeHighlightSpans("cch", "cache_handler", false)
+	want := []highlightSpan{
+		{start: 0, end: 1},
+		{start: 2, end: 4},
+	}
+	if len(spans) != len(want) {
+		t.Fatalf("expected %d spans, got %d (%v)", len(want), len(spans), spans)
+	}
+	for i := range spans {
+		if spans[i] != want[i] {
+			t.Fatalf("span %d mismatch: got %+v want %+v", i, spans[i], want[i])
+		}
+	}
+}
+
+func TestComputeHighlightSpansRespectsCaseSensitivity(t *testing.T) {
+	insensitive := computeHighlightSpans("AbC", "Abc", false)
+	if len(insensitive) == 0 {
+		t.Fatalf("expected insensitive search to highlight")
+	}
+
+	sensitive := computeHighlightSpans("AbC", "Abc", true)
+	if len(sensitive) != 1 || sensitive[0].start != 0 || sensitive[0].end != 2 {
+		t.Fatalf("expected only exact-case prefix to match in case-sensitive mode, got %+v", sensitive)
+	}
+}
+
+func TestConvertMatchSpansToHighlightsClampsAndMerges(t *testing.T) {
+	spans := []statepkg.MatchSpan{
+		{Start: -2, End: 0},
+		{Start: 2, End: 4},
+		{Start: 3, End: 5},
+	}
+	out := convertMatchSpansToHighlights(spans, "abcdef")
+	if len(out) != 2 {
+		t.Fatalf("expected 2 merged spans, got %v", out)
+	}
+	if out[0].start != 0 || out[0].end != 1 {
+		t.Fatalf("unexpected first span %+v", out[0])
+	}
+	if out[1].start != 2 || out[1].end != 6 {
+		t.Fatalf("unexpected second span %+v", out[1])
+	}
+}

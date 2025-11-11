@@ -2,10 +2,13 @@ package render
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gdamore/tcell/v2"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
@@ -622,17 +625,7 @@ func (r *Renderer) drawFileList(state *statepkg.AppState, startX, panelWidth, h 
 func (r *Renderer) drawGlobalSearchResults(state *statepkg.AppState, startX, panelWidth, h int, listStartY int, baseBgStyle tcell.Style) {
 	// Draw search results
 	if len(state.GlobalSearchResults) == 0 {
-		// No results to display
-		displayY := listStartY
-		bottomLimit := h - 2
-		if displayY >= bottomLimit {
-			displayY = bottomLimit - 1
-		}
-		for y := displayY; y < bottomLimit; y++ {
-			for x := startX; x < startX+panelWidth; x++ {
-				r.screen.SetContent(x, y, ' ', nil, baseBgStyle)
-			}
-		}
+		r.clearPanelArea(startX, panelWidth, listStartY, h, baseBgStyle)
 		return
 	}
 
@@ -672,6 +665,9 @@ func (r *Renderer) drawGlobalSearchResults(state *statepkg.AppState, startX, pan
 		endIdx = len(state.GlobalSearchResults)
 	}
 
+	maxScore := determineMaxScore(state.GlobalSearchResults)
+	rowEnd := startX + panelWidth
+
 	displayY := listStartY
 	for resultIdx := startIdx; resultIdx < endIdx && resultIdx < len(state.GlobalSearchResults); resultIdx++ {
 		if displayY >= bottomLimit {
@@ -683,40 +679,331 @@ func (r *Renderer) drawGlobalSearchResults(state *statepkg.AppState, startX, pan
 		isSelected := resultIdx == selectedIdx
 		isHidden := result.FileEntry.IsHidden()
 
-		// Highlight selected result
-		var rowStyle tcell.Style
+		rowStyle := baseBgStyle.Foreground(r.theme.FileFg)
 		if isSelected {
 			rowStyle = tcell.StyleDefault.Background(r.theme.SelectionBg).Foreground(r.theme.SelectionFg)
-		} else {
-			rowStyle = baseBgStyle.Foreground(r.theme.FileFg)
 		}
 		if isHidden && !isSelected {
 			rowStyle = rowStyle.Foreground(r.theme.HiddenFg)
 		}
 
-		// Display relative path from root
-		relPath, _ := filepath.Rel(state.GlobalSearchRootPath, result.FilePath)
-
-		text := fmt.Sprintf(" %s", relPath)
-		text = r.truncateTextToWidth(text, panelWidth)
-
-		// Draw text with proper Unicode handling
-		endX := r.drawTextLine(startX, displayY, panelWidth, text, rowStyle)
-
-		// Fill remaining space with padding
-		for x := endX; x < startX+panelWidth; x++ {
+		// Fill background for the entire row to make layout math simpler
+		for x := startX; x < rowEnd; x++ {
 			r.screen.SetContent(x, displayY, ' ', nil, rowStyle)
 		}
+
+		relPath := result.FilePath
+		if root := state.GlobalSearchRootPath; root != "" {
+			if rel, err := filepath.Rel(root, result.FilePath); err == nil {
+				relPath = rel
+			}
+		}
+		if relPath == "." || relPath == "" {
+			relPath = result.FileEntry.Name
+		}
+
+		dirPart := filepath.Dir(relPath)
+		if dirPart == "." {
+			dirPart = ""
+		}
+		fileName := filepath.Base(relPath)
+
+		pathText := fileName
+		if dirPart != "" {
+			pathText = dirPart + string(filepath.Separator) + fileName
+		}
+
+		highlightSpans := convertMatchSpansToHighlights(result.MatchSpans, pathText)
+		if len(highlightSpans) == 0 {
+			highlightSpans = computeHighlightSpans(state.GlobalSearchQuery, pathText, state.GlobalSearchCaseSensitive)
+		}
+
+		dirStyle, dirMatchStyle := r.globalSearchDirStyles(rowStyle, isSelected, isHidden)
+		fileStyle, fileMatchStyle := r.globalSearchFileStyles(rowStyle, isSelected, isHidden)
+
+		scoreText, ratio := formatScoreText(result.Score, maxScore)
+		scoreWidth := r.measureTextWidth(scoreText)
+		if scoreWidth > panelWidth {
+			scoreWidth = panelWidth
+		}
+		scoreX := rowEnd - scoreWidth
+		if scoreX < startX {
+			scoreX = startX
+		}
+		pathLimit := scoreX - 1
+		if pathLimit < startX {
+			pathLimit = startX
+		}
+
+		// Marker + space before the path
+		marker := ' '
+		if isSelected {
+			marker = '▶'
+		}
+		x := startX
+		if pathLimit > startX {
+			x = r.drawStyledRune(x, displayY, pathLimit, marker, rowStyle.Bold(isSelected))
+		}
+		if pathLimit > x {
+			x = r.drawStyledRune(x, displayY, pathLimit, ' ', rowStyle)
+		}
+
+		segments := buildPathSegments(dirPart, fileName, dirStyle, dirMatchStyle, fileStyle, fileMatchStyle)
+		offset := 0
+		for _, segment := range segments {
+			x, offset = r.drawSegmentWithHighlights(x, displayY, pathLimit, segment, highlightSpans, offset)
+			if x >= pathLimit {
+				break
+			}
+		}
+
+		scoreStyle := r.scoreStyleForRatio(rowStyle, ratio)
+		r.drawStyledStringClipped(scoreX, displayY, rowEnd, scoreText, scoreStyle)
 
 		displayY++
 	}
 
 	// Fill rest with empty space
-	for y := displayY; y < bottomLimit; y++ {
-		for x := startX; x < startX+panelWidth; x++ {
+	r.clearPanelArea(startX, panelWidth, displayY, h, baseBgStyle)
+}
+
+type pathSegment struct {
+	text       string
+	baseStyle  tcell.Style
+	matchStyle tcell.Style
+}
+
+type highlightSpan struct {
+	start int
+	end   int
+}
+
+func (r *Renderer) clearPanelArea(startX, panelWidth, startY, h int, baseBgStyle tcell.Style) {
+	bottomLimit := h - 2
+	if startY >= bottomLimit {
+		startY = bottomLimit
+	}
+	endX := startX + panelWidth
+	for y := startY; y < bottomLimit; y++ {
+		for x := startX; x < endX; x++ {
 			r.screen.SetContent(x, y, ' ', nil, baseBgStyle)
 		}
 	}
+}
+
+func determineMaxScore(results []statepkg.GlobalSearchResult) float64 {
+	maxScore := 0.0
+	for _, res := range results {
+		if res.Score > maxScore {
+			maxScore = res.Score
+		}
+	}
+	if maxScore <= 0 {
+		return 1
+	}
+	return maxScore
+}
+
+func formatScoreText(score, maxScore float64) (string, float64) {
+	if maxScore <= 0 {
+		maxScore = 1
+	}
+	ratio := score / maxScore
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+	percent := int(math.Round(ratio * 100))
+	return fmt.Sprintf("%3d%%", percent), ratio
+}
+
+func (r *Renderer) scoreStyleForRatio(base tcell.Style, ratio float64) tcell.Style {
+	switch {
+	case ratio >= 0.85:
+		return base.Foreground(tcell.ColorGreen).Bold(true)
+	case ratio >= 0.6:
+		return base.Foreground(tcell.ColorYellowGreen)
+	case ratio >= 0.4:
+		return base.Foreground(tcell.ColorYellow)
+	default:
+		return base.Foreground(tcell.ColorDarkGray)
+	}
+}
+
+func (r *Renderer) globalSearchDirStyles(rowStyle tcell.Style, isSelected, isHidden bool) (tcell.Style, tcell.Style) {
+	if isSelected {
+		base := rowStyle.Foreground(r.theme.SelectionFg)
+		return base, base.Bold(true)
+	}
+
+	dirColor := r.theme.DirectoryFg
+	matchColor := tcell.ColorYellowGreen
+	if isHidden {
+		dirColor = r.theme.HiddenFg
+		matchColor = r.theme.HiddenFg
+	}
+	base := rowStyle.Foreground(dirColor)
+	match := rowStyle.Foreground(matchColor).Bold(true)
+	return base, match
+}
+
+func (r *Renderer) globalSearchFileStyles(rowStyle tcell.Style, isSelected, isHidden bool) (tcell.Style, tcell.Style) {
+	if isSelected {
+		base := rowStyle.Foreground(r.theme.SelectionFg)
+		return base, base.Bold(true)
+	}
+
+	fileColor := r.theme.FileFg
+	matchColor := tcell.ColorYellow
+	if isHidden {
+		fileColor = r.theme.HiddenFg
+		matchColor = r.theme.HiddenFg
+	}
+	base := rowStyle.Foreground(fileColor)
+	match := rowStyle.Foreground(matchColor).Bold(true)
+	return base, match
+}
+
+func buildPathSegments(dirPart, fileName string, dirStyle, dirMatchStyle, fileStyle, fileMatchStyle tcell.Style) []pathSegment {
+	segments := make([]pathSegment, 0, 3)
+
+	if dirPart != "" {
+		segments = append(segments, pathSegment{
+			text:       dirPart,
+			baseStyle:  dirStyle,
+			matchStyle: dirMatchStyle,
+		})
+		segments = append(segments, pathSegment{
+			text:       string(filepath.Separator),
+			baseStyle:  dirStyle,
+			matchStyle: dirMatchStyle,
+		})
+	}
+
+	segments = append(segments, pathSegment{
+		text:       fileName,
+		baseStyle:  fileStyle,
+		matchStyle: fileMatchStyle,
+	})
+
+	return segments
+}
+
+func convertMatchSpansToHighlights(spans []statepkg.MatchSpan, text string) []highlightSpan {
+	if len(spans) == 0 || text == "" {
+		return nil
+	}
+	textRunes := []rune(text)
+	runeCount := len(textRunes)
+	if runeCount == 0 {
+		return nil
+	}
+
+	highlights := make([]highlightSpan, 0, len(spans))
+	for _, span := range spans {
+		start := span.Start
+		end := span.End + 1 // convert inclusive -> exclusive
+		if start < 0 {
+			start = 0
+		}
+		if end < start {
+			end = start
+		}
+		if start > runeCount {
+			start = runeCount
+		}
+		if end > runeCount {
+			end = runeCount
+		}
+		if start == end {
+			continue
+		}
+		highlights = append(highlights, highlightSpan{start: start, end: end})
+	}
+
+	if len(highlights) == 0 {
+		return nil
+	}
+
+	sort.Slice(highlights, func(i, j int) bool {
+		if highlights[i].start == highlights[j].start {
+			return highlights[i].end < highlights[j].end
+		}
+		return highlights[i].start < highlights[j].start
+	})
+
+	merged := make([]highlightSpan, 0, len(highlights))
+	for _, span := range highlights {
+		if len(merged) == 0 || span.start > merged[len(merged)-1].end {
+			merged = append(merged, span)
+			continue
+		}
+		last := &merged[len(merged)-1]
+		if span.start < last.start {
+			last.start = span.start
+		}
+		if span.end > last.end {
+			last.end = span.end
+		}
+	}
+
+	return merged
+}
+
+func computeHighlightSpans(query, text string, caseSensitive bool) []highlightSpan {
+	if query == "" || text == "" {
+		return nil
+	}
+
+	pattern := []rune(query)
+	target := []rune(text)
+	spans := make([]highlightSpan, 0, len(pattern))
+
+	qIdx := 0
+	spanStart := -1
+	lastMatchPos := -1
+
+	for idx, ru := range target {
+		if qIdx >= len(pattern) {
+			break
+		}
+		targetRune := ru
+		patternRune := pattern[qIdx]
+		if !caseSensitive {
+			targetRune = unicode.ToLower(targetRune)
+			patternRune = unicode.ToLower(patternRune)
+		}
+
+		if targetRune == patternRune {
+			if spanStart == -1 {
+				spanStart = idx
+			}
+			qIdx++
+			lastMatchPos = idx + 1
+			continue
+		}
+
+		if spanStart != -1 {
+			spans = append(spans, highlightSpan{start: spanStart, end: idx})
+			spanStart = -1
+		}
+	}
+
+	if spanStart != -1 {
+		end := len(target)
+		if lastMatchPos > spanStart {
+			end = lastMatchPos
+		}
+		spans = append(spans, highlightSpan{start: spanStart, end: end})
+	}
+
+	return spans
+}
+
+func (r *Renderer) drawSegmentWithHighlights(startX, y, maxX int, segment pathSegment, spans []highlightSpan, offset int) (int, int) {
+	return r.drawHighlightedText(startX, y, maxX, segment.text, spans, offset, segment.baseStyle, segment.matchStyle)
 }
 
 // drawPreviewPanel renders the right preview panel

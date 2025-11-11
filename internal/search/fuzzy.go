@@ -19,6 +19,12 @@ type FuzzyMatch struct {
 	Score     float64 // 0.0 to 1.0
 }
 
+// MatchSpan represents the inclusive [Start, End] range of a match in rune indexes.
+type MatchSpan struct {
+	Start int
+	End   int
+}
+
 // MatchDetails exposes additional metadata about a fuzzy match.
 // Start/End are rune indexes into the target text; TargetLength
 // is the total rune length of the target text, used for tie-breaks.
@@ -28,6 +34,7 @@ type MatchDetails struct {
 	TargetLength int
 	MatchCount   int
 	WordHits     int
+	Spans        []MatchSpan
 }
 
 const (
@@ -125,6 +132,7 @@ func (fm *FuzzyMatcher) MatchDetailedFromRunes(pattern string, patternRunes []ru
 			TargetLength: len(textRunes),
 			MatchCount:   0,
 			WordHits:     0,
+			Spans:        nil,
 		}
 	}
 	score, matched, details, _ := fm.matchWithRunes(pattern, text, patternRunes, textRunes)
@@ -139,6 +147,7 @@ func (fm *FuzzyMatcher) matchDetailedWithMode(pattern, text string, caseSensitiv
 			TargetLength: utf8.RuneCountInString(text),
 			MatchCount:   0,
 			WordHits:     0,
+			Spans:        nil,
 		}
 	}
 
@@ -219,6 +228,7 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 			TargetLength: targetLen,
 			MatchCount:   0,
 			WordHits:     0,
+			Spans:        nil,
 		}, substringIdx
 	}
 
@@ -278,6 +288,9 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 		TargetLength: targetLen,
 		MatchCount:   matchCount,
 		WordHits:     wordHits,
+		Spans: []MatchSpan{
+			{Start: start, End: end},
+		},
 	}, substringIdx
 }
 

@@ -190,3 +190,48 @@ func (r *Renderer) clipTextToWidth(text string, maxWidth int) (string, bool) {
 
 	return builder.String(), true
 }
+
+func (r *Renderer) drawStyledStringClipped(startX, y, maxX int, text string, style tcell.Style) int {
+	if maxX <= startX {
+		return startX
+	}
+
+	x := startX
+	for _, ru := range text {
+		if x >= maxX {
+			break
+		}
+		x = r.drawStyledRune(x, y, maxX, ru, style)
+	}
+	return x
+}
+
+func (r *Renderer) drawHighlightedText(startX, y, maxX int, text string, spans []highlightSpan, offset int, baseStyle, highlightStyle tcell.Style) (int, int) {
+	runes := []rune(text)
+	if maxX <= startX {
+		return startX, offset + len(runes)
+	}
+
+	x := startX
+	spanIdx := 0
+
+	for idx, ru := range runes {
+		if x >= maxX {
+			return x, offset + len(runes)
+		}
+
+		globalIdx := offset + idx
+		for spanIdx < len(spans) && globalIdx >= spans[spanIdx].end {
+			spanIdx++
+		}
+
+		style := baseStyle
+		if spanIdx < len(spans) && globalIdx >= spans[spanIdx].start && globalIdx < spans[spanIdx].end {
+			style = highlightStyle
+		}
+
+		x = r.drawStyledRune(x, y, maxX, ru, style)
+	}
+
+	return x, offset + len(runes)
+}

@@ -20,5 +20,6 @@ type GlobalSearchResult struct {
 	PathSegments int
 	InputOrder   int
 	HasMatch     bool
+	MatchSpans   []MatchSpan
 	FileEntry    FileEntry
 }

@@ -87,7 +87,7 @@ func (gs *GlobalSearcher) SearchRecursiveAsync(query string, caseSensitive bool,
 				return nil
 			}
 			hasMatch := len(query) > 0
-			result := makeGlobalSearchResult(path, d, info, score, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments, order, hasMatch)
+			result := makeGlobalSearchResult(path, d, info, score, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments, order, hasMatch, details.Spans)
 
 			mu.Lock()
 			if len(results) == cap(results) {
