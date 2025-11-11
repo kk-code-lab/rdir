@@ -20,6 +20,7 @@ const (
 )
 
 func computeSegmentBoost(query, relPath string, details MatchDetails) float64 {
+	query = strings.TrimSpace(query)
 	if query == "" || relPath == "" {
 		return 0
 	}
