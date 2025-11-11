@@ -8,6 +8,7 @@ type ColorTheme struct {
 	Foreground      tcell.Color
 	SidebarBg       tcell.Color
 	SidebarFg       tcell.Color
+	HiddenFg        tcell.Color
 	SidebarActiveBg tcell.Color
 	SidebarActiveFg tcell.Color
 	SelectionBg     tcell.Color
@@ -28,6 +29,7 @@ func GetColorTheme() ColorTheme {
 		Foreground:      tcell.ColorDefault,
 		SidebarBg:       tcell.ColorDefault,
 		SidebarFg:       tcell.ColorDefault,
+		HiddenFg:        tcell.ColorLightSlateGray,
 		SidebarActiveBg: tcell.Color33,
 		SidebarActiveFg: tcell.ColorWhite,
 		SelectionBg:     tcell.Color33,
