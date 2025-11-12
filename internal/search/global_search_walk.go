@@ -49,13 +49,3 @@ func (gs *GlobalSearcher) shouldSkip(relPath string, d fs.DirEntry, absPath stri
 
 	return false, false
 }
-
-func joinRelPath(parent, child string) string {
-	if parent == "." || parent == "" {
-		if child == "" {
-			return "."
-		}
-		return child
-	}
-	return filepath.Join(parent, child)
-}

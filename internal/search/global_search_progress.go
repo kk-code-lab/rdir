@@ -26,7 +26,6 @@ type IndexTelemetry struct {
 
 var (
 	progressDebugEnabled = os.Getenv("RDIR_DEBUG_PROGRESS") == "1"
-	progressDebugVerbose = os.Getenv("RDIR_DEBUG_PROGRESS_VERBOSE") == "1"
 	progressDebugMu      sync.Mutex
 )
 
