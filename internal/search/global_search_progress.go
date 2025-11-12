@@ -15,6 +15,7 @@ type IndexTelemetry struct {
 	Disabled        bool
 	UseIndex        bool
 	FilesIndexed    int
+	TotalFiles      int
 	Threshold       int
 	MaxIndexResults int
 	StartedAt       time.Time

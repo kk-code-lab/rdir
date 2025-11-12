@@ -326,6 +326,7 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 	gs.indexReady = true
 	gs.indexBuilding = false
 	gs.indexErr = nil
+	gs.indexTotalFiles = totalFiles
 	gs.pendingBroadcast = 0
 	gs.broadcastSnapshotLocked()
 	gs.indexMu.Unlock()
@@ -481,6 +482,7 @@ func (gs *GlobalSearcher) emitProgress(mutator func(*IndexTelemetry)) {
 	gs.indexMu.Lock()
 	mutator(&gs.progress)
 	gs.progress.RootPath = gs.rootPath
+	gs.progress.TotalFiles = gs.indexTotalFiles
 	gs.progress.MaxIndexResults = gs.maxIndexResults
 	gs.progress.UseIndex = true
 	if gs.progress.UpdatedAt.IsZero() {

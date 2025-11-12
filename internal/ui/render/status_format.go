@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -55,8 +56,11 @@ func formatIndexStatusLine(status statepkg.IndexTelemetry) string {
 
 func formatBuildingSummary(status statepkg.IndexTelemetry, prefix string) string {
 	parts := []string{prefix}
-	if status.FilesIndexed > 0 {
-		parts = append(parts, fmt.Sprintf("%s files", formatCompactNumber(status.FilesIndexed)))
+	if files := formatFilesProgress(status, true); files != "" {
+		parts = append(parts, files)
+	}
+	if rate := formatFilesPerSecond(status); rate != "" {
+		parts = append(parts, rate)
 	}
 	if !status.StartedAt.IsZero() {
 		duration := time.Since(status.StartedAt)
@@ -67,8 +71,11 @@ func formatBuildingSummary(status statepkg.IndexTelemetry, prefix string) string
 
 func formatReadySummary(status statepkg.IndexTelemetry, prefix string) string {
 	parts := []string{prefix}
-	if status.FilesIndexed > 0 {
-		parts = append(parts, fmt.Sprintf("%s files", formatCompactNumber(status.FilesIndexed)))
+	if files := formatFilesProgress(status, false); files != "" {
+		parts = append(parts, files)
+	}
+	if rate := formatFilesPerSecond(status); rate != "" {
+		parts = append(parts, rate)
 	}
 	if status.Duration > 0 {
 		parts = append(parts, formatDurationShort(status.Duration))
@@ -81,6 +88,62 @@ func formatDisabledIndexSummary(status statepkg.IndexTelemetry) string {
 		return "index disabled · " + status.LastError
 	}
 	return "index disabled"
+}
+
+func formatFilesProgress(status statepkg.IndexTelemetry, building bool) string {
+	if status.TotalFiles > 0 {
+		if building && status.FilesIndexed > 0 && status.FilesIndexed < status.TotalFiles {
+			percent := int(math.Round(float64(status.FilesIndexed) / float64(status.TotalFiles) * 100.0))
+			return fmt.Sprintf("%s/%s (%d%%)", formatCompactNumber(status.FilesIndexed), formatCompactNumber(status.TotalFiles), percent)
+		}
+		return fmt.Sprintf("%s files", formatCompactNumber(status.TotalFiles))
+	}
+	if status.FilesIndexed > 0 {
+		return fmt.Sprintf("%s files", formatCompactNumber(status.FilesIndexed))
+	}
+	return ""
+}
+
+func formatFilesPerSecond(status statepkg.IndexTelemetry) string {
+	if status.FilesIndexed <= 0 {
+		return ""
+	}
+
+	var duration time.Duration
+	switch {
+	case status.Building && !status.StartedAt.IsZero():
+		duration = time.Since(status.StartedAt)
+	case status.Duration > 0:
+		duration = status.Duration
+	case !status.StartedAt.IsZero():
+		duration = time.Since(status.StartedAt)
+	default:
+		return ""
+	}
+	if duration <= 0 {
+		return ""
+	}
+
+	rate := float64(status.FilesIndexed) / duration.Seconds()
+	if rate <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("@ %s/s", formatRateValue(rate))
+}
+
+func formatRateValue(rate float64) string {
+	switch {
+	case rate >= 1_000_000_000:
+		return trimTrailingZero(fmt.Sprintf("%.1fB", rate/1_000_000_000))
+	case rate >= 1_000_000:
+		return trimTrailingZero(fmt.Sprintf("%.1fM", rate/1_000_000))
+	case rate >= 1_000:
+		return trimTrailingZero(fmt.Sprintf("%.1fk", rate/1_000))
+	case rate >= 10:
+		return fmt.Sprintf("%.0f", rate)
+	default:
+		return trimTrailingZero(fmt.Sprintf("%.1f", rate))
+	}
 }
 
 func formatCompactNumber(n int) string {
