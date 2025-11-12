@@ -52,6 +52,8 @@ type GlobalSearcher struct {
 	indexEntries     []indexedEntry
 	indexRuneBuckets map[rune][]int
 	indexTotalFiles  int
+	cache            *searchCache
+	indexGen         int
 	indexReady       bool
 	indexErr         error
 	indexBuilding    bool
@@ -87,6 +89,7 @@ func NewGlobalSearcher(rootPath string, hideHidden bool, progressCb func(IndexTe
 		progress:        progress,
 		progressCb:      progressCb,
 		indexWatchers:   make(map[int]chan indexSnapshot),
+		cache:           newSearchCache(),
 	}
 
 	return gs
@@ -264,4 +267,42 @@ func clampInt(val, minVal, maxVal int) int {
 		return maxVal
 	}
 	return val
+}
+
+func (gs *GlobalSearcher) incrementIndexGeneration() {
+	gs.indexMu.Lock()
+	gs.indexGen++
+	gs.indexMu.Unlock()
+}
+
+func (gs *GlobalSearcher) indexGeneration() int {
+	gs.indexMu.Lock()
+	defer gs.indexMu.Unlock()
+	return gs.indexGen
+}
+
+func (gs *GlobalSearcher) lookupCache(query string, caseSensitive bool) ([]GlobalSearchResult, bool) {
+	if gs.cache == nil {
+		return nil, false
+	}
+	key := cacheKey{
+		rootPath: gs.rootPath,
+		query:    normalizeCacheQuery(query, caseSensitive),
+		caseSens: caseSensitive,
+		indexGen: gs.indexGeneration(),
+	}
+	return gs.cache.get(key)
+}
+
+func (gs *GlobalSearcher) storeCache(query string, caseSensitive bool, results []GlobalSearchResult) {
+	if gs.cache == nil || len(results) == 0 {
+		return
+	}
+	key := cacheKey{
+		rootPath: gs.rootPath,
+		query:    normalizeCacheQuery(query, caseSensitive),
+		caseSens: caseSensitive,
+		indexGen: gs.indexGeneration(),
+	}
+	gs.cache.put(key, results)
 }

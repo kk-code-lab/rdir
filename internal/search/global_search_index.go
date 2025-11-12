@@ -330,6 +330,8 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 	gs.pendingBroadcast = 0
 	gs.broadcastSnapshotLocked()
 	gs.indexMu.Unlock()
+	gs.cache.clear()
+	gs.incrementIndexGeneration()
 
 	gs.emitProgress(func(p *IndexTelemetry) {
 		p.Building = false
