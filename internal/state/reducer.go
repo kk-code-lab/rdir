@@ -1195,50 +1195,7 @@ func (r *StateReducer) ensureSelectionVisible(state *AppState) {
 
 // changeDirectory changes current directory and loads files
 func (r *StateReducer) changeDirectory(state *AppState, path string) error {
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return fmt.Errorf("cannot read directory %s: %w", path, err)
-	}
-
-	state.CurrentPath = path
-	state.Files = make([]FileEntry, len(entries))
-	for i, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-
-		isDir := e.IsDir()
-		isSymlink := (info.Mode() & os.ModeSymlink) != 0
-
-		// For symlinks, check if target is a directory
-		if isSymlink {
-			fullPath := filepath.Join(path, e.Name())
-			targetInfo, err := os.Stat(fullPath)
-			if err == nil {
-				isDir = targetInfo.IsDir()
-			}
-		}
-
-		// Normalize filename to NFC (precomposed) form for consistent display
-		// macOS returns NFD (decomposed) which breaks combining characters like accents
-		normalizedName := norm.NFC.String(e.Name())
-
-		state.Files[i] = FileEntry{
-			Name:      normalizedName,
-			IsDir:     isDir,
-			IsSymlink: isSymlink,
-			Size:      info.Size(),
-			Modified:  info.ModTime(),
-			Mode:      info.Mode(),
-		}
-	}
-
-	state.sortFiles()
-	state.resetViewport()
-	state.updateParentEntries()
-
-	return nil
+	return LoadDirectory(state, path)
 }
 
 // addToHistory adds path to history, removing forward history if needed

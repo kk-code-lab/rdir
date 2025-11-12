@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -35,7 +34,7 @@ func LoadDirectory(state *AppState, path ...string) error {
 		rawName := e.Name()
 		fullPath := filepath.Join(dirPath, rawName)
 
-		if fsutil.ShouldHideFromListing(fullPath, rawName) {
+		if shouldHideFromListingFn(fullPath, rawName) {
 			continue
 		}
 

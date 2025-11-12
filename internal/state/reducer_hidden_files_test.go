@@ -846,9 +846,11 @@ func TestSelectionHistoryRestoresVisibleWhenHiddenDisabled(t *testing.T) {
 		t.Fatalf("failed to create dir A: %v", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dirA, ".hidden"), []byte("hidden"), 0o644); err != nil {
+	hiddenFile := filepath.Join(dirA, ".hidden")
+	if err := os.WriteFile(hiddenFile, []byte("hidden"), 0o644); err != nil {
 		t.Fatalf("failed to create hidden file: %v", err)
 	}
+	ensureHidden(t, hiddenFile)
 	if err := os.WriteFile(filepath.Join(dirA, "visible.txt"), []byte("visible"), 0o644); err != nil {
 		t.Fatalf("failed to create visible file: %v", err)
 	}
@@ -920,6 +922,7 @@ func TestGoUpAfterHidingHiddenDirectoryKeepsSelectionVisible(t *testing.T) {
 	if err := os.Mkdir(hiddenDir, 0o755); err != nil {
 		t.Fatalf("failed to create hidden dir: %v", err)
 	}
+	ensureHidden(t, hiddenDir)
 	if err := os.WriteFile(filepath.Join(hiddenDir, "file.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("failed to create file in hidden dir: %v", err)
 	}
