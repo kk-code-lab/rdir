@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,6 +18,7 @@ import (
 type indexedEntry struct {
 	fullPath    string
 	relPath     string
+	lowerPath   string
 	size        int64
 	modUnixNano int64
 	mode        uint32
@@ -39,8 +41,19 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 	}
 
 	collector := newTopCollector(maxDisplayResults)
-	for i := range entries {
-		entry := &entries[i]
+	candidates := gs.indexCandidates(tokens)
+	if len(candidates) == 0 {
+		candidates = make([]int, len(entries))
+		for i := range entries {
+			candidates[i] = i
+		}
+	}
+
+	for _, idx := range candidates {
+		if idx < 0 || idx >= len(entries) {
+			continue
+		}
+		entry := &entries[idx]
 		relPath := entry.relPath
 		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll)
 		if !matched {
@@ -86,6 +99,27 @@ func (gs *GlobalSearcher) collectAllIndexFrom(entries []indexedEntry) []GlobalSe
 	return results
 }
 
+func (gs *GlobalSearcher) indexCandidates(tokens []queryToken) []int {
+	gs.indexMu.Lock()
+	defer gs.indexMu.Unlock()
+
+	total := len(gs.indexEntries)
+	if total == 0 || len(tokens) == 0 || gs.indexRuneBuckets == nil {
+		return makeSequentialIndexes(total)
+	}
+
+	fRune := firstRune(strings.ToLower(tokens[0].pattern))
+	if fRune == 0 {
+		return makeSequentialIndexes(total)
+	}
+	if bucket, ok := gs.indexRuneBuckets[fRune]; ok && len(bucket) > 0 {
+		out := make([]int, len(bucket))
+		copy(out, bucket)
+		return out
+	}
+	return makeSequentialIndexes(total)
+}
+
 func (gs *GlobalSearcher) buildIndex(start time.Time) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -96,6 +130,7 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 	gs.indexMu.Lock()
 	initialCap := intMin(gs.maxIndexResults, 1024)
 	gs.indexEntries = make([]indexedEntry, 0, initialCap)
+	gs.indexRuneBuckets = make(map[rune][]int)
 	gs.indexReady = false
 	gs.indexErr = nil
 	gs.pendingBroadcast = 0
@@ -260,9 +295,12 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 			break
 		}
 
+		lower := strings.ToLower(record.relPath)
+
 		entry := indexedEntry{
 			fullPath:    record.fullPath,
 			relPath:     record.relPath,
+			lowerPath:   lower,
 			size:        record.size,
 			modUnixNano: record.modUnixNano,
 			mode:        record.mode,
@@ -356,7 +394,13 @@ func (gs *GlobalSearcher) snapshotEntries(start, end int) []indexedEntry {
 
 func (gs *GlobalSearcher) appendIndexedEntry(entry indexedEntry, force bool) {
 	gs.indexMu.Lock()
+	idx := len(gs.indexEntries)
 	gs.indexEntries = append(gs.indexEntries, entry)
+	if gs.indexRuneBuckets != nil {
+		for _, r := range runeKeysForPath(entry.lowerPath) {
+			gs.indexRuneBuckets[r] = append(gs.indexRuneBuckets[r], idx)
+		}
+	}
 	gs.pendingBroadcast++
 	notify := force || gs.pendingBroadcast >= indexStreamBatchSize
 	if notify {
@@ -379,6 +423,55 @@ func (gs *GlobalSearcher) indexSnapshot() (ready bool, count int, useIndex bool)
 	gs.indexMu.Lock()
 	defer gs.indexMu.Unlock()
 	return gs.indexReady, len(gs.indexEntries), gs.indexReady && len(gs.indexEntries) > 0
+}
+
+func makeSequentialIndexes(total int) []int {
+	if total <= 0 {
+		return nil
+	}
+	indexes := make([]int, total)
+	for i := 0; i < total; i++ {
+		indexes[i] = i
+	}
+	return indexes
+}
+
+func runeKeysForPath(lower string) []rune {
+	if lower == "" {
+		return nil
+	}
+	seen := make(map[rune]struct{})
+	keys := make([]rune, 0, 8)
+	for _, r := range lower {
+		if !isRuneIndexable(r) {
+			continue
+		}
+		if _, ok := seen[r]; ok {
+			continue
+		}
+		seen[r] = struct{}{}
+		keys = append(keys, r)
+	}
+	return keys
+}
+
+func isRuneIndexable(r rune) bool {
+	if r >= 'a' && r <= 'z' {
+		return true
+	}
+	if r >= '0' && r <= '9' {
+		return true
+	}
+	return r >= 'à' && r <= 'ž'
+}
+
+func firstRune(s string) rune {
+	for _, r := range s {
+		if isRuneIndexable(r) {
+			return r
+		}
+	}
+	return 0
 }
 
 func (gs *GlobalSearcher) emitProgress(mutator func(*IndexTelemetry)) {

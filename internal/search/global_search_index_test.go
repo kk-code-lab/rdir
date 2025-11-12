@@ -172,3 +172,40 @@ func TestGlobalSearcherBuildIndexEmitsReadySnapshot(t *testing.T) {
 		t.Fatalf("expected final snapshot to report %d files, got %d", fileCount, final.FilesIndexed)
 	}
 }
+
+func containsName(list []string, target string) bool {
+	for _, v := range list {
+		if v == target {
+			return true
+		}
+	}
+	return false
+}
+
+func TestGlobalSearcherPrefixIndexNarrowsCandidates(t *testing.T) {
+	root := t.TempDir()
+	files := []string{
+		"alpha.txt",
+		"alpine.log",
+		"beta.txt",
+		"gamma.txt",
+	}
+	for _, name := range files {
+		full := filepath.Join(root, name)
+		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	searcher := NewGlobalSearcher(root, false, nil)
+	searcher.buildIndex(time.Now())
+
+	results := searcher.searchIndex("alp", false)
+	if len(results) != 2 {
+		t.Fatalf("expected prefix search to hit 2 files, got %d", len(results))
+	}
+	names := []string{results[0].FileName, results[1].FileName}
+	if !containsName(names, "alpha.txt") || !containsName(names, "alpine.log") {
+		t.Fatalf("expected alpha/alpine in results, got %#v", names)
+	}
+}
