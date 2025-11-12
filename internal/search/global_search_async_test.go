@@ -1,8 +1,7 @@
 package search
 
 import (
-	"context"
-	"io/fs"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -10,78 +9,36 @@ import (
 	"time"
 )
 
-func TestSearchRecursiveAsyncFindsMatches(t *testing.T) {
+func TestSearchRecursiveAsyncStreamsResults(t *testing.T) {
 	root := t.TempDir()
-	filePath := filepath.Join(root, "main.go")
-	if err := os.WriteFile(filePath, []byte("package main"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
+	totalFiles := 200
+	for i := 0; i < totalFiles; i++ {
+		name := fmt.Sprintf("file-%03d.txt", i)
+		if err := os.WriteFile(filepath.Join(root, name), []byte("data"), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 	}
 
 	searcher := NewGlobalSearcher(root, false, nil)
-	tokens, matchAll := prepareQueryTokens("go", false)
 
-	visitCount := 0
-	matchFromWalk := 0
-	_ = searcher.walkFilesBFS(context.Background(), func(path string, relPath string, d fs.DirEntry) error {
-		visitCount++
-		_, matched, _ := searcher.matchTokens(tokens, relPath, false, matchAll)
-		if matched {
-			matchFromWalk++
-		}
-		return nil
-	})
-	if visitCount == 0 {
-		t.Fatalf("expected walk to visit files")
-	}
-	if matchFromWalk == 0 {
-		t.Fatalf("expected walk to find matches")
-	}
-
-	if _, matched, _ := searcher.matchTokens(tokens, "main.go", false, matchAll); !matched {
-		t.Fatalf("expected match for main.go")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	token := searcher.setCancel(cancel)
-	var directResults []GlobalSearchResult
-	directDone := make(chan struct{})
-	go searcher.runWalkerAsync(ctx, cancel, token, "go", false, tokens, matchAll, func(results []GlobalSearchResult, isDone bool, inProgress bool) {
-		if !isDone {
-			return
-		}
-		directResults = append([]GlobalSearchResult(nil), results...)
-		select {
-		case <-directDone:
-		default:
-			close(directDone)
-		}
-	})
-
-	select {
-	case <-directDone:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for direct walker results")
-	}
-
-	if len(directResults) == 0 {
-		t.Fatalf("direct walker produced no results")
-	}
-
-	var mu sync.Mutex
-	var finalResults []GlobalSearchResult
 	done := make(chan struct{})
+	var mu sync.Mutex
+	progressSeen := false
+	var final []GlobalSearchResult
 
-	searcher.SearchRecursiveAsync("go", false, func(results []GlobalSearchResult, isDone bool, inProgress bool) {
-		if !isDone {
-			return
-		}
+	searcher.SearchRecursiveAsync("file", false, func(results []GlobalSearchResult, isDone bool, inProgress bool) {
 		mu.Lock()
 		defer mu.Unlock()
-		finalResults = append([]GlobalSearchResult(nil), results...)
-		select {
-		case <-done:
-		default:
-			close(done)
+		if inProgress {
+			progressSeen = true
+		}
+		if isDone && !inProgress {
+			final = append([]GlobalSearchResult(nil), results...)
+			select {
+			case <-done:
+			default:
+				close(done)
+			}
 		}
 	})
 
@@ -91,11 +48,62 @@ func TestSearchRecursiveAsyncFindsMatches(t *testing.T) {
 		t.Fatalf("timed out waiting for async search")
 	}
 
-	if len(finalResults) == 0 {
-		t.Fatalf("expected async results, got none")
+	mu.Lock()
+	defer mu.Unlock()
+
+	if !progressSeen {
+		t.Fatalf("expected to see streaming progress before completion")
+	}
+	if len(final) != totalFiles {
+		t.Fatalf("expected %d results, got %d", totalFiles, len(final))
+	}
+	if final[0].FileName == "" {
+		t.Fatalf("expected filenames in results, got %#v", final[0])
+	}
+}
+
+func TestSearchRecursiveAsyncReadyIndexSingleCallback(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
 	}
 
-	if finalResults[0].FilePath != filePath {
-		t.Fatalf("unexpected result: %+v", finalResults[0])
+	searcher := NewGlobalSearcher(root, false, nil)
+	searcher.buildIndex(time.Now())
+
+	var mu sync.Mutex
+	callbacks := 0
+	done := make(chan struct{})
+
+	searcher.SearchRecursiveAsync("main", false, func(results []GlobalSearchResult, isDone bool, inProgress bool) {
+		mu.Lock()
+		callbacks++
+		mu.Unlock()
+		if !isDone {
+			t.Fatalf("expected only final callback when index ready")
+		}
+		if inProgress {
+			t.Fatalf("expected final callback to report inProgress=false")
+		}
+		if len(results) == 0 {
+			t.Fatalf("expected indexed results")
+		}
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
+	})
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("timed out waiting for indexed async search")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if callbacks != 1 {
+		t.Fatalf("expected exactly one callback, got %d", callbacks)
 	}
 }

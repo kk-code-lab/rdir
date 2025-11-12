@@ -7,23 +7,25 @@ import (
 )
 
 type asyncAccumulator struct {
-	mu       sync.Mutex
-	results  []GlobalSearchResult
-	sorted   []GlobalSearchResult
-	lastSize int
-	lastTime time.Time
-	callback func([]GlobalSearchResult, bool, bool)
+	mu             sync.Mutex
+	results        []GlobalSearchResult
+	sorted         []GlobalSearchResult
+	lastSize       int
+	lastTime       time.Time
+	callback       func([]GlobalSearchResult, bool, bool)
+	immediateFlush bool
 }
 
-func newAsyncAccumulator(capacity int, callback func([]GlobalSearchResult, bool, bool)) *asyncAccumulator {
+func newAsyncAccumulator(capacity int, callback func([]GlobalSearchResult, bool, bool), immediateFlush bool) *asyncAccumulator {
 	if capacity <= 0 {
 		capacity = 256
 	}
 	buf := borrowResultBuffer(capacity)
 	return &asyncAccumulator{
-		results:  buf,
-		lastTime: time.Now(),
-		callback: callback,
+		results:        buf,
+		lastTime:       time.Now(),
+		callback:       callback,
+		immediateFlush: immediateFlush,
 	}
 }
 
@@ -38,7 +40,7 @@ func (a *asyncAccumulator) Add(result GlobalSearchResult) {
 		a.results = growResultBuffer(a.results, len(a.results)+1)
 	}
 	a.results = append(a.results, result)
-	shouldForce := len(a.results) <= initialImmediateBatchSize
+	shouldForce := a.immediateFlush && len(a.results) <= initialImmediateBatchSize
 	a.mu.Unlock()
 
 	if shouldForce {

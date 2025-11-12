@@ -3,62 +3,67 @@ package search
 import (
 	"context"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
 
 const (
 	maxDisplayResults         = 10000
-	defaultIndexThreshold     = 0
 	defaultMaxIndexResults    = 1000000
-	envDisableIndex           = "RDIR_DISABLE_INDEX"
-	envIndexThreshold         = "RDIR_INDEX_THRESHOLD"
 	envMaxIndexResults        = "RDIR_INDEX_MAX_RESULTS"
 	envIndexMaxWorkers        = "RDIR_INDEX_MAX_WORKERS"
 	indexProgressInterval     = 150 * time.Millisecond
-	maxIndexArenaSize         = int64(^uint32(0))
 	batchIntervalFast         = 75 * time.Millisecond
 	batchIntervalSlow         = 200 * time.Millisecond
 	batchForceSize            = 400
 	batchFastThreshold        = 40
 	initialImmediateBatchSize = 10
 	mergeStatusMinimumResults = 200
+	indexStreamBatchSize      = 128
 )
 
-// GlobalSearcher handles recursive directory searching with fuzzy matching
-type GlobalSearcher struct {
-	matcher           *FuzzyMatcher
-	rootPath          string
-	ignoreProvider    *ignoreProvider
-	hideHidden        bool
-	useIndex          bool
-	indexEntries      []indexedEntry
-	indexPathArena    []byte
-	indexLowerArena   []byte
-	indexDisplayOrder []int
-	indexErr          error
-	indexReady        bool
-	indexThreshold    int
-	maxIndexResults   int
-	progress          IndexTelemetry
-	progressCb        func(IndexTelemetry)
+// indexSnapshot captures the current state of the incremental index build.
+type indexSnapshot struct {
+	Count int
+	Ready bool
+	Err   error
+}
 
-	indexMu        sync.Mutex
-	indexBuilding  bool
-	indexBuildHint bool
+// indexObserver delivers streaming index updates to a subscriber.
+type indexObserver struct {
+	gs *GlobalSearcher
+	id int
+	ch chan indexSnapshot
+}
+
+// GlobalSearcher handles recursive directory searching with fuzzy matching.
+type GlobalSearcher struct {
+	matcher        *FuzzyMatcher
+	rootPath       string
+	ignoreProvider *ignoreProvider
+	hideHidden     bool
+
+	maxIndexResults int
+	progress        IndexTelemetry
+	progressCb      func(IndexTelemetry)
+
+	indexMu          sync.Mutex
+	indexEntries     []indexedEntry
+	indexReady       bool
+	indexErr         error
+	indexBuilding    bool
+	indexWatchers    map[int]chan indexSnapshot
+	nextWatcherID    int
+	pendingBroadcast int
 
 	cancelMu sync.Mutex
 	cancel   context.CancelFunc
 	token    int
 }
 
-// NewGlobalSearcher creates a new global searcher from a root path
+// NewGlobalSearcher creates a new global searcher from a root path.
 func NewGlobalSearcher(rootPath string, hideHidden bool, progressCb func(IndexTelemetry)) *GlobalSearcher {
-	// Use rootPath as-is (don't normalize, as it's already from state.CurrentPath)
-	// This preserves the path as the user sees it
-
-	useIndex := os.Getenv(envDisableIndex) != "1"
-	indexThreshold := parseEnvInt(envIndexThreshold, defaultIndexThreshold)
 	maxIndexResults := parseEnvInt(envMaxIndexResults, defaultMaxIndexResults)
 	if maxIndexResults < maxDisplayResults {
 		maxIndexResults = maxDisplayResults
@@ -66,36 +71,38 @@ func NewGlobalSearcher(rootPath string, hideHidden bool, progressCb func(IndexTe
 
 	progress := IndexTelemetry{
 		RootPath:        rootPath,
-		Threshold:       indexThreshold,
 		MaxIndexResults: maxIndexResults,
-		UseIndex:        useIndex,
-		Disabled:        !useIndex,
+		UseIndex:        true,
+		Disabled:        false,
 	}
 
-	return &GlobalSearcher{
+	gs := &GlobalSearcher{
 		matcher:         NewFuzzyMatcher(),
 		rootPath:        rootPath,
 		ignoreProvider:  newIgnoreProvider(rootPath),
 		hideHidden:      hideHidden,
-		useIndex:        useIndex,
-		indexThreshold:  indexThreshold,
 		maxIndexResults: maxIndexResults,
 		progress:        progress,
 		progressCb:      progressCb,
-		indexReady:      false,
+		indexWatchers:   make(map[int]chan indexSnapshot),
 	}
+
+	return gs
 }
 
-// SearchRecursive performs global search from rootPath
-// Returns sorted results by fuzzy match score
+// SearchRecursive performs a blocking search by delegating to the async pipeline.
 func (gs *GlobalSearcher) SearchRecursive(query string, caseSensitive bool) []GlobalSearchResult {
-	if gs.maybeUseIndex() {
-		if results := gs.searchIndex(query, caseSensitive); len(results) > 0 {
-			return results
+	done := make(chan []GlobalSearchResult, 1)
+	gs.SearchRecursiveAsync(query, caseSensitive, func(results []GlobalSearchResult, isDone bool, inProgress bool) {
+		if !isDone || inProgress {
+			return
 		}
-	}
-
-	return gs.searchWalk(query, caseSensitive)
+		select {
+		case done <- append([]GlobalSearchResult(nil), results...):
+		default:
+		}
+	})
+	return <-done
 }
 
 // RootPath returns the directory where the searcher was initialized.
@@ -120,24 +127,19 @@ func (gs *GlobalSearcher) CancelOngoingSearch() {
 
 // UsingIndex reports whether the searcher can currently answer queries from the index.
 func (gs *GlobalSearcher) UsingIndex() bool {
-	ready, count, use := gs.indexSnapshot()
-	return use && ready && count > 0
-}
-
-// IndexThreshold returns the threshold configured for the searcher.
-func (gs *GlobalSearcher) IndexThreshold() int {
-	return gs.indexThreshold
-}
-
-// TriggerIndexBuild starts the index build asynchronously if it is enabled and not already running.
-func (gs *GlobalSearcher) TriggerIndexBuild() {
 	gs.indexMu.Lock()
-	if !gs.useIndex || gs.indexReady || gs.indexBuilding {
+	defer gs.indexMu.Unlock()
+	return gs.indexReady && len(gs.indexEntries) > 0
+}
+
+// ensureIndexStream starts the indexing goroutine if it is not already running.
+func (gs *GlobalSearcher) ensureIndexStream() {
+	gs.indexMu.Lock()
+	if gs.indexReady || gs.indexBuilding {
 		gs.indexMu.Unlock()
 		return
 	}
 	gs.indexBuilding = true
-	gs.indexBuildHint = true
 	gs.indexMu.Unlock()
 
 	start := time.Now()
@@ -148,10 +150,116 @@ func (gs *GlobalSearcher) TriggerIndexBuild() {
 		p.StartedAt = start
 		p.UpdatedAt = start
 		p.CompletedAt = time.Time{}
-		p.Duration = 0
-		p.FilesIndexed = 0
+		p.FilesIndexed = len(gs.indexEntries)
 		p.LastError = ""
 	})
 
 	go gs.buildIndex(start)
+}
+
+// newIndexObserver subscribes to incremental index updates.
+func (gs *GlobalSearcher) newIndexObserver() *indexObserver {
+	gs.indexMu.Lock()
+	defer gs.indexMu.Unlock()
+
+	if gs.indexWatchers == nil {
+		gs.indexWatchers = make(map[int]chan indexSnapshot)
+	}
+
+	id := gs.nextWatcherID
+	gs.nextWatcherID++
+	ch := make(chan indexSnapshot, 1)
+	ch <- indexSnapshot{Count: len(gs.indexEntries), Ready: gs.indexReady, Err: gs.indexErr}
+	gs.indexWatchers[id] = ch
+	return &indexObserver{gs: gs, id: id, ch: ch}
+}
+
+// broadcastSnapshotLocked notifies all observers about the latest index state.
+func (gs *GlobalSearcher) broadcastSnapshotLocked() {
+	snapshot := indexSnapshot{Count: len(gs.indexEntries), Ready: gs.indexReady, Err: gs.indexErr}
+	for id, ch := range gs.indexWatchers {
+		if !sendSnapshot(ch, snapshot) {
+			delete(gs.indexWatchers, id)
+		}
+	}
+}
+
+// sendSnapshot pushes the latest snapshot to a watcher without blocking.
+func sendSnapshot(ch chan indexSnapshot, snap indexSnapshot) bool {
+	if ch == nil {
+		return false
+	}
+	select {
+	case ch <- snap:
+		return true
+	default:
+		select {
+		case <-ch:
+		default:
+		}
+		select {
+		case ch <- snap:
+			return true
+		default:
+			return false
+		}
+	}
+}
+
+func (obs *indexObserver) Next(ctx context.Context) (indexSnapshot, bool) {
+	if obs == nil {
+		return indexSnapshot{}, false
+	}
+	select {
+	case snap, ok := <-obs.ch:
+		if !ok {
+			return indexSnapshot{}, false
+		}
+		return snap, true
+	case <-ctx.Done():
+		return indexSnapshot{}, false
+	}
+}
+
+func (obs *indexObserver) Close() {
+	if obs == nil || obs.gs == nil {
+		return
+	}
+	obs.gs.indexMu.Lock()
+	if ch, ok := obs.gs.indexWatchers[obs.id]; ok && ch == obs.ch {
+		delete(obs.gs.indexWatchers, obs.id)
+		close(ch)
+	}
+	obs.gs.indexMu.Unlock()
+}
+
+func parseEnvInt(name string, fallback int) int {
+	val := os.Getenv(name)
+	if val == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(val)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+
+	return parsed
+}
+
+func intMin(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func clampInt(val, minVal, maxVal int) int {
+	if val < minVal {
+		return minVal
+	}
+	if val > maxVal {
+		return maxVal
+	}
+	return val
 }

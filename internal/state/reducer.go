@@ -189,13 +189,7 @@ func (r *StateReducer) triggerGlobalSearch(state *AppState) {
 		return
 	}
 
-	usingIndex := searcher.UsingIndex()
-	if usingIndex {
-		state.GlobalSearchStatus = SearchStatusIndex
-	} else {
-		state.GlobalSearchStatus = SearchStatusWalking
-		searcher.TriggerIndexBuild()
-	}
+	state.GlobalSearchStatus = SearchStatusIndex
 
 	state.GlobalSearchIndexStatus = searcher.CurrentProgress()
 
@@ -214,10 +208,8 @@ func (r *StateReducer) triggerGlobalSearch(state *AppState) {
 		if inProgress {
 			if isDone {
 				phase = SearchStatusMerging
-			} else if usingIndex {
-				phase = SearchStatusIndex
 			} else {
-				phase = SearchStatusWalking
+				phase = SearchStatusIndex
 			}
 		}
 
@@ -843,17 +835,6 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			state.GlobalSearchIndexStatus = progress
 		}
 
-		if progress.Ready &&
-			state.GlobalSearchActive &&
-			state.GlobalSearchInProgress &&
-			state.GlobalSearchStatus == SearchStatusWalking &&
-			(state.GlobalSearcher == nil || progress.FilesIndexed >= state.GlobalSearcher.IndexThreshold()) {
-			if state.GlobalSearcher != nil {
-				state.GlobalSearcher.CancelOngoingSearch()
-			}
-			state.GlobalSearchStatus = SearchStatusIndex
-			r.triggerGlobalSearch(state)
-		}
 		return state, nil
 
 	case GlobalSearchResultsAction:
