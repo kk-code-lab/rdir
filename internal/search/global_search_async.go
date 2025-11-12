@@ -2,64 +2,101 @@ package search
 
 import (
 	"context"
-	"errors"
-	"io/fs"
 	"unicode/utf8"
 )
 
-// SearchRecursiveAsync performs global search asynchronously in a goroutine.
+const streamingEmitThreshold = 64
+
+// SearchRecursiveAsync performs global search asynchronously by streaming index updates.
 func (gs *GlobalSearcher) SearchRecursiveAsync(query string, caseSensitive bool, callback func(results []GlobalSearchResult, isDone bool, inProgress bool)) {
 	gs.cancelOngoingSearch()
+
+	if ready, count, useIndex := gs.indexSnapshot(); ready && useIndex && count > 0 {
+		go func() {
+			results := gs.searchIndex(query, caseSensitive)
+			callback(results, true, false)
+		}()
+		return
+	}
+
 	tokens, matchAll := prepareQueryTokens(query, caseSensitive)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	token := gs.setCancel(cancel)
 
-	startWalker := func() {
-		go gs.runWalkerAsync(ctx, cancel, token, query, caseSensitive, tokens, matchAll, callback)
-	}
+	gs.ensureIndexStream()
 
-	if gs.maybeUseIndex() {
-		go func() {
-			results := gs.searchIndex(query, caseSensitive)
-			if len(results) > 0 {
-				if gs.isTokenCurrent(token) {
-					callback(results, true, false)
-				}
-				cancel()
-				gs.clearCancel(token)
-				return
-			}
-			if !gs.isTokenCurrent(token) {
-				cancel()
-				gs.clearCancel(token)
-				return
-			}
-			startWalker()
-		}()
-		return
-	}
-
-	startWalker()
+	go gs.streamFromIndex(ctx, cancel, token, query, caseSensitive, tokens, matchAll, callback)
 }
 
-func (gs *GlobalSearcher) runWalkerAsync(ctx context.Context, cancel context.CancelFunc, token int, query string, caseSensitive bool, tokens []queryToken, matchAll bool, callback func([]GlobalSearchResult, bool, bool)) {
+func (gs *GlobalSearcher) streamFromIndex(ctx context.Context, cancel context.CancelFunc, token int, query string, caseSensitive bool, tokens []queryToken, matchAll bool, callback func([]GlobalSearchResult, bool, bool)) {
 	defer gs.clearCancel(token)
 	defer cancel()
 
-	acc := newAsyncAccumulator(256, callback)
+	observer := gs.newIndexObserver()
+	if observer == nil {
+		callback(nil, true, false)
+		return
+	}
+	defer observer.Close()
+
+	acc := newAsyncAccumulator(256, callback, false)
 	defer acc.Close()
 
-	filesScanned := 0
-	orderCounter := 0
+	processed := 0
+	hasResults := false
+	pendingMatches := 0
 
-	err := gs.walkFilesBFS(ctx, func(path string, relPath string, d fs.DirEntry) error {
-		filesScanned++
-		gs.maybeKickoffIndex(filesScanned)
+	for {
+		snap, ok := observer.Next(ctx)
+		if !ok {
+			return
+		}
+		if snap.Err != nil {
+			break
+		}
 
+		if snap.Count > processed {
+			added := gs.collectIndexRange(acc, processed, snap.Count, tokens, matchAll, query, caseSensitive)
+			processed = snap.Count
+			if added > 0 {
+				hasResults = true
+				pendingMatches += added
+				if pendingMatches >= streamingEmitThreshold {
+					acc.Flush(false)
+					pendingMatches = 0
+				}
+			}
+		}
+
+		if snap.Ready {
+			break
+		}
+	}
+
+	acc.FlushRemaining()
+	finalResults := acc.FinalResults()
+
+	if hasResults && len(finalResults) >= mergeStatusMinimumResults {
+		callback(finalResults, true, true)
+	}
+	callback(finalResults, true, false)
+}
+
+func (gs *GlobalSearcher) collectIndexRange(acc *asyncAccumulator, start, end int, tokens []queryToken, matchAll bool, query string, caseSensitive bool) int {
+	entries := gs.snapshotEntries(start, end)
+	if len(entries) == 0 {
+		return 0
+	}
+
+	hasMatch := !matchAll
+	added := 0
+	for i := range entries {
+		entry := &entries[i]
+		relPath := entry.relPath
 		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll)
 		if !matched {
-			return nil
+			continue
 		}
 
 		score += computeSegmentBoost(query, relPath, details)
@@ -68,41 +105,13 @@ func (gs *GlobalSearcher) runWalkerAsync(ctx context.Context, cancel context.Can
 		if pathLength == 0 {
 			pathLength = utf8.RuneCountInString(relPath)
 		}
-		matchStart := details.Start
-		matchEnd := details.End
-		matchCount := details.MatchCount
-		wordHits := details.WordHits
 		pathSegments := countPathSegments(relPath)
 
-		order := orderCounter
-		orderCounter++
-
-		info, infoErr := d.Info()
-		if infoErr != nil {
-			return nil
-		}
-		hasMatch := !matchAll
-		result := makeGlobalSearchResult(path, d, info, score, pathLength, matchStart, matchEnd, matchCount, wordHits, pathSegments, order, hasMatch, details.Spans)
-
+		result := gs.makeIndexedResult(entry, score, pathLength, details.Start, details.End, details.MatchCount, details.WordHits, pathSegments, hasMatch, details.Spans)
 		acc.Add(result)
-		acc.Flush(false)
-
-		return nil
-	})
-
-	if errors.Is(err, context.Canceled) {
-		return
+		added++
 	}
-
-	gs.considerIndexBuildAfterWalk(filesScanned)
-
-	acc.FlushRemaining()
-	finalResults := acc.FinalResults()
-
-	if len(finalResults) >= mergeStatusMinimumResults {
-		callback(finalResults, true, true)
-	}
-	callback(finalResults, true, false)
+	return added
 }
 
 func (gs *GlobalSearcher) cancelOngoingSearch() {
@@ -130,10 +139,4 @@ func (gs *GlobalSearcher) clearCancel(token int) {
 		gs.cancel = nil
 	}
 	gs.cancelMu.Unlock()
-}
-
-func (gs *GlobalSearcher) isTokenCurrent(token int) bool {
-	gs.cancelMu.Lock()
-	defer gs.cancelMu.Unlock()
-	return gs.token == token
 }

@@ -55,7 +55,6 @@ func TestGlobalSearchTokensApplyToIndexResults(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "alpha.txt"))
 
 	searcher := NewGlobalSearcher(root, false, nil)
-	searcher.useIndex = true
 	searcher.buildIndex(time.Now())
 
 	results := searcher.SearchRecursive("alpha beta", false)

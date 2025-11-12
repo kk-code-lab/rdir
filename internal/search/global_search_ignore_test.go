@@ -4,11 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestGlobalSearcherHonorsIgnoreRulesWalk(t *testing.T) {
-	t.Setenv(envDisableIndex, "1")
-
 	root, wantPresent, wantAbsent := createGlobalSearchIgnoreFixture(t)
 
 	searcher := NewGlobalSearcher(root, false, nil)
@@ -30,17 +29,12 @@ func TestGlobalSearcherHonorsIgnoreRulesWalk(t *testing.T) {
 }
 
 func TestGlobalSearcherHonorsIgnoreRulesIndex(t *testing.T) {
-	t.Setenv(envDisableIndex, "")
-	t.Setenv(envIndexThreshold, "1")
 	t.Setenv(envMaxIndexResults, "100")
 
 	root, wantPresent, wantAbsent := createGlobalSearchIgnoreFixture(t)
 
 	searcher := NewGlobalSearcher(root, false, nil)
-
-	// Kick off index build
-	_ = searcher.SearchRecursive("init", false)
-	waitForIndexReady(t, searcher)
+	searcher.buildIndex(time.Now())
 
 	results := searcher.SearchRecursive("", false)
 	paths := collectRelativePathSet(root, results)

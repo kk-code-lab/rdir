@@ -30,7 +30,6 @@ func BenchmarkGlobalSearcherWalk(b *testing.B) {
 	addIgnoredFixture(b, root)
 	createBenchmarkSentinelFiles(b, root)
 
-	b.Setenv(envDisableIndex, "1")
 	searcher := NewGlobalSearcher(root, false, nil)
 
 	b.Run("ManyMatches", func(b *testing.B) {
@@ -91,7 +90,6 @@ func BenchmarkFuzzyGlobalSearcherANDWalk(b *testing.B) {
 	addIgnoredFixture(b, root)
 	createBenchmarkSentinelFiles(b, root)
 
-	b.Setenv(envDisableIndex, "1")
 	searcher := NewGlobalSearcher(root, false, nil)
 
 	b.ResetTimer()
@@ -115,8 +113,6 @@ func BenchmarkGlobalSearcherIndexBuild(b *testing.B) {
 	root := createBenchmarkRepo(b, layout)
 	createBenchmarkSentinelFiles(b, root)
 
-	b.Setenv(envDisableIndex, "")
-	b.Setenv(envIndexThreshold, "1")
 	b.Setenv(envMaxIndexResults, strconv.Itoa(1_000_000))
 
 	b.ResetTimer()
@@ -139,8 +135,6 @@ func BenchmarkFuzzyGlobalSearcherANDIndex(b *testing.B) {
 	root := createBenchmarkRepo(b, layout)
 	createBenchmarkSentinelFiles(b, root)
 
-	b.Setenv(envDisableIndex, "")
-	b.Setenv(envIndexThreshold, "1")
 	b.Setenv(envMaxIndexResults, strconv.Itoa(1_000_000))
 
 	searcher := NewGlobalSearcher(root, false, nil)
@@ -168,8 +162,6 @@ func BenchmarkGlobalSearcherIndexQuery(b *testing.B) {
 	root := createBenchmarkRepo(b, layout)
 	createBenchmarkSentinelFiles(b, root)
 
-	b.Setenv(envDisableIndex, "")
-	b.Setenv(envIndexThreshold, "1")
 	b.Setenv(envMaxIndexResults, strconv.Itoa(1_000_000))
 
 	searcher := NewGlobalSearcher(root, false, nil)
@@ -233,7 +225,6 @@ func BenchmarkGlobalSearcherAsyncWalk(b *testing.B) {
 	root := createBenchmarkRepo(b, layout)
 	createBenchmarkSentinelFiles(b, root)
 
-	b.Setenv(envDisableIndex, "1")
 	searcher := NewGlobalSearcher(root, false, nil)
 
 	b.ResetTimer()
