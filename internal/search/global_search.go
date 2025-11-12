@@ -51,6 +51,7 @@ type GlobalSearcher struct {
 	indexMu          sync.Mutex
 	indexEntries     []indexedEntry
 	indexRuneBuckets map[rune][]int
+	indexTotalFiles  int
 	indexReady       bool
 	indexErr         error
 	indexBuilding    bool
