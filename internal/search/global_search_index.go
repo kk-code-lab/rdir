@@ -66,10 +66,6 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 	return collector.Results()
 }
 
-func (gs *GlobalSearcher) collectAllIndex() []GlobalSearchResult {
-	return gs.collectAllIndexFrom(gs.snapshotEntries(0, -1))
-}
-
 func (gs *GlobalSearcher) collectAllIndexFrom(entries []indexedEntry) []GlobalSearchResult {
 	if len(entries) == 0 {
 		return nil
@@ -165,10 +161,7 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 				relPath = filepath.Join(relDir, entry.Name())
 			}
 
-			if skip, skipDir := gs.shouldSkip(relPath, entry, fullPath, dirMatcher); skip {
-				if skipDir {
-					continue
-				}
+			if skip, _ := gs.shouldSkip(relPath, entry, fullPath, dirMatcher); skip {
 				continue
 			}
 

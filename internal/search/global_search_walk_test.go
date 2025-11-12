@@ -37,7 +37,7 @@ func (f fakeDirEntry) Type() fs.FileMode          { return f.info().Mode() }
 func (f fakeDirEntry) Info() (fs.FileInfo, error) { return f.info(), nil }
 
 func (f fakeDirEntry) info() fs.FileInfo {
-	return fakeFileInfo{name: f.name, dir: f.dir}
+	return fakeFileInfo(f)
 }
 
 type fakeFileInfo struct {
