@@ -125,6 +125,11 @@ func (gs *GlobalSearcher) CurrentProgress() IndexTelemetry {
 	return gs.currentProgress()
 }
 
+// CachedResults returns cached results for the exact query if available.
+func (gs *GlobalSearcher) CachedResults(query string, caseSensitive bool) ([]GlobalSearchResult, bool) {
+	return gs.lookupCache(query, caseSensitive)
+}
+
 // CancelOngoingSearch stops any in-flight work.
 func (gs *GlobalSearcher) CancelOngoingSearch() {
 	gs.cancelOngoingSearch()

@@ -657,6 +657,8 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 
 	case GlobalSearchCharAction:
 		if state.GlobalSearchActive {
+			prevResults := state.GlobalSearchResults
+			prevQuery := state.CleanGlobalSearchQuery()
 			state.clearDesiredGlobalSearchSelection()
 			state.clearGlobalSearchPendingIndex()
 			runes := []rune(state.GlobalSearchQuery)
@@ -681,12 +683,15 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 				state.GlobalSearchCaseSensitive = false
 			}
 
+			r.applyLocalSearchPreview(state, prevResults, prevQuery)
 			r.triggerGlobalSearch(state)
 		}
 		return state, nil
 
 	case GlobalSearchBackspaceAction:
 		if state.GlobalSearchActive && len(state.CleanGlobalSearchQuery()) > 0 {
+			prevResults := state.GlobalSearchResults
+			prevQuery := state.CleanGlobalSearchQuery()
 			state.clearDesiredGlobalSearchSelection()
 			state.clearGlobalSearchPendingIndex()
 			runes := []rune(state.GlobalSearchQuery)
@@ -716,12 +721,15 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 				state.GlobalSearchCaseSensitive = false
 			}
 
+			r.applyLocalSearchPreview(state, prevResults, prevQuery)
 			r.triggerGlobalSearch(state)
 		}
 		return state, nil
 
 	case GlobalSearchDeleteAction:
 		if state.GlobalSearchActive && len(state.CleanGlobalSearchQuery()) > 0 {
+			prevResults := state.GlobalSearchResults
+			prevQuery := state.CleanGlobalSearchQuery()
 			state.clearDesiredGlobalSearchSelection()
 			state.clearGlobalSearchPendingIndex()
 			runes := []rune(state.GlobalSearchQuery)
@@ -742,6 +750,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 				state.GlobalSearchCaseSensitive = false
 			}
 
+			r.applyLocalSearchPreview(state, prevResults, prevQuery)
 			r.triggerGlobalSearch(state)
 		}
 		return state, nil
@@ -1139,6 +1148,97 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 	default:
 		return state, fmt.Errorf("unknown action: %T", action)
 	}
+}
+
+func (r *StateReducer) applyLocalSearchPreview(state *AppState, prevResults []GlobalSearchResult, prevQuery string) {
+	query := state.CleanGlobalSearchQuery()
+	if query == "" {
+		return
+	}
+
+	if state.GlobalSearcher != nil {
+		if cached, ok := state.GlobalSearcher.CachedResults(query, state.GlobalSearchCaseSensitive); ok && len(cached) > 0 {
+			state.GlobalSearchResults = cloneResults(cached)
+			state.GlobalSearchInProgress = true
+			state.GlobalSearchStatus = SearchStatusIndex
+			state.clampGlobalSearchSelection()
+			return
+		}
+	}
+
+	if prevQuery == "" || len(prevResults) == 0 {
+		return
+	}
+
+	if !isQueryExtension(prevQuery, query, state.GlobalSearchCaseSensitive) {
+		return
+	}
+
+	filtered := filterResultsByQuery(prevResults, query, state.GlobalSearchCaseSensitive)
+	if len(filtered) == 0 {
+		return
+	}
+	state.GlobalSearchResults = filtered
+	state.GlobalSearchInProgress = true
+	state.GlobalSearchStatus = SearchStatusIndex
+	state.clampGlobalSearchSelection()
+}
+
+func cloneResults(results []GlobalSearchResult) []GlobalSearchResult {
+	if len(results) == 0 {
+		return nil
+	}
+	out := make([]GlobalSearchResult, len(results))
+	copy(out, results)
+	return out
+}
+
+func isQueryExtension(prev, current string, caseSensitive bool) bool {
+	if prev == "" {
+		return false
+	}
+	if !caseSensitive {
+		prev = strings.ToLower(prev)
+		current = strings.ToLower(current)
+	}
+	return strings.HasPrefix(current, prev)
+}
+
+func filterResultsByQuery(results []GlobalSearchResult, query string, caseSensitive bool) []GlobalSearchResult {
+	tokens := strings.Fields(query)
+	if len(tokens) == 0 {
+		return nil
+	}
+	if !caseSensitive {
+		for i := range tokens {
+			tokens[i] = strings.ToLower(tokens[i])
+		}
+	}
+
+	filtered := make([]GlobalSearchResult, 0, len(results))
+	for _, res := range results {
+		path := res.FilePath
+		compare := path
+		if !caseSensitive {
+			compare = strings.ToLower(compare)
+		}
+		match := true
+		for _, tok := range tokens {
+			if !strings.Contains(compare, tok) {
+				match = false
+				break
+			}
+		}
+		if match {
+			filtered = append(filtered, res)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	out := make([]GlobalSearchResult, len(filtered))
+	copy(out, filtered)
+	return out
 }
 
 // ===== PRIVATE HELPER METHODS =====
