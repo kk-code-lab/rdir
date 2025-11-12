@@ -368,6 +368,69 @@ func TestGlobalSearchDeleteAction(t *testing.T) {
 	}
 }
 
+func TestApplyLocalSearchPreviewFiltersExtension(t *testing.T) {
+	reducer := NewStateReducer()
+	prevResults := []GlobalSearchResult{
+		{FilePath: "/tmp/foo.txt", FileName: "foo.txt"},
+		{FilePath: "/tmp/foobar.txt", FileName: "foobar.txt"},
+		{FilePath: "/tmp/bar.txt", FileName: "bar.txt"},
+	}
+	state := &AppState{
+		GlobalSearchActive:        true,
+		GlobalSearchResults:       prevResults,
+		GlobalSearchCaseSensitive: false,
+		ScreenHeight:              24,
+	}
+	prevQuery := "foo"
+	state.setGlobalSearchQuery("foob")
+
+	reducer.applyLocalSearchPreview(state, prevResults, prevQuery)
+
+	if len(state.GlobalSearchResults) != 1 || state.GlobalSearchResults[0].FilePath != "/tmp/foobar.txt" {
+		t.Fatalf("expected preview to keep only foobar.txt, got %#v", state.GlobalSearchResults)
+	}
+}
+
+func TestApplyLocalSearchPreviewUsesCachedResults(t *testing.T) {
+	reducer := NewStateReducer()
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "alpha.txt"))
+
+	searcher := searchpkg.NewGlobalSearcher(root, false, nil)
+	results := searcher.SearchRecursive("alpha", false)
+	if len(results) == 0 {
+		t.Fatalf("expected search results")
+	}
+
+	state := &AppState{
+		GlobalSearchActive:        true,
+		GlobalSearchCaseSensitive: false,
+		GlobalSearcher:            searcher,
+		ScreenHeight:              24,
+		GlobalSearchRootPath:      root,
+	}
+	state.setGlobalSearchQuery("alpha")
+
+	reducer.applyLocalSearchPreview(state, nil, "")
+
+	if len(state.GlobalSearchResults) == 0 {
+		t.Fatalf("expected cached results to be applied")
+	}
+	if state.GlobalSearchResults[0].FileName != "alpha.txt" {
+		t.Fatalf("expected alpha.txt, got %#v", state.GlobalSearchResults[0])
+	}
+}
+
+func writeTestFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
 func TestGlobalSearchMoveCursorAction(t *testing.T) {
 	state := &AppState{
 		CurrentPath:           "/test",
