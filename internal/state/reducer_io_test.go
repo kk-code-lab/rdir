@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
@@ -94,6 +95,9 @@ func TestUpdateParentEntries_HideHiddenFiles(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(parentDir, name), 0o755); err != nil {
 			t.Fatalf("Failed to create child dir %q: %v", name, err)
 		}
+		if strings.HasPrefix(name, ".") {
+			ensureHidden(t, filepath.Join(parentDir, name))
+		}
 	}
 
 	state := &AppState{CurrentPath: filepath.Join(parentDir, "visible")}
@@ -125,6 +129,9 @@ func TestUpdateParentEntries_HideHiddenKeepsCurrentEntry(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(parentDir, name), 0o755); err != nil {
 			t.Fatalf("Failed to create child dir %q: %v", name, err)
 		}
+		if strings.HasPrefix(name, ".") {
+			ensureHidden(t, filepath.Join(parentDir, name))
+		}
 	}
 
 	state := &AppState{
@@ -137,6 +144,79 @@ func TestUpdateParentEntries_HideHiddenKeepsCurrentEntry(t *testing.T) {
 	expected := []string{".current", "visible"}
 	if !slices.Equal(names, expected) {
 		t.Fatalf("Expected parent entries %v when current directory is hidden, got %v", expected, names)
+	}
+}
+
+func TestUpdateParentEntries_ShouldHideFromListing(t *testing.T) {
+	tmpDir := t.TempDir()
+	parentDir := filepath.Join(tmpDir, "parent")
+	currentDir := filepath.Join(parentDir, "current")
+	skipDir := filepath.Join(parentDir, "skip-me")
+	keepDir := filepath.Join(parentDir, "keep-me")
+
+	for _, dir := range []string{currentDir, skipDir, keepDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("Failed to create dir %q: %v", dir, err)
+		}
+		if strings.HasPrefix(filepath.Base(dir), ".") {
+			ensureHidden(t, dir)
+		}
+	}
+
+	state := &AppState{
+		CurrentPath:     currentDir,
+		HideHiddenFiles: false,
+	}
+
+	prev := shouldHideFromListingFn
+	shouldHideFromListingFn = func(fullPath, name string) bool {
+		return filepath.Base(fullPath) == "skip-me" || name == "skip-me"
+	}
+	defer func() {
+		shouldHideFromListingFn = prev
+	}()
+
+	state.updateParentEntries()
+	names := extractParentNames(state.ParentEntries)
+	if containsName(names, "skip-me") {
+		t.Fatalf("skip-me should be omitted, got %v", names)
+	}
+	if !containsName(names, "keep-me") {
+		t.Fatalf("keep-me should remain, got %v", names)
+	}
+}
+
+func TestChangeDirectoryRespectsShouldHideFromListing(t *testing.T) {
+	tmpDir := t.TempDir()
+	skipDir := filepath.Join(tmpDir, "skip-me")
+	keepDir := filepath.Join(tmpDir, "keep-me")
+
+	for _, dir := range []string{skipDir, keepDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("Failed to create dir %q: %v", dir, err)
+		}
+	}
+
+	prev := shouldHideFromListingFn
+	shouldHideFromListingFn = func(fullPath, name string) bool {
+		return name == "skip-me"
+	}
+	defer func() {
+		shouldHideFromListingFn = prev
+	}()
+
+	state := &AppState{}
+	reducer := NewStateReducer()
+	if err := reducer.changeDirectory(state, tmpDir); err != nil {
+		t.Fatalf("changeDirectory failed: %v", err)
+	}
+
+	names := fileNames(state.Files)
+	if containsName(names, "skip-me") {
+		t.Fatalf("skip-me should be omitted from directory listing, got %v", names)
+	}
+	if !containsName(names, "keep-me") {
+		t.Fatalf("keep-me should remain, got %v", names)
 	}
 }
 
@@ -589,4 +669,24 @@ func extractParentNames(entries []FileEntry) []string {
 		names[i] = entry.Name
 	}
 	return names
+}
+
+func fileNames(entries []FileEntry) []string {
+	return extractParentNames(entries)
+}
+
+func containsName(names []string, target string) bool {
+	for _, name := range names {
+		if name == target {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureHidden(t *testing.T, path string) {
+	t.Helper()
+	if err := markHiddenForTest(path); err != nil {
+		t.Fatalf("failed to mark %s hidden: %v", path, err)
+	}
 }

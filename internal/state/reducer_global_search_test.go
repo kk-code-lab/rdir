@@ -1072,6 +1072,7 @@ func TestGlobalSearchFullPathMatching(t *testing.T) {
 	found := false
 	for _, r := range results {
 		relPath, _ := filepath.Rel(tempDir, r.FilePath)
+		relPath = filepath.ToSlash(relPath)
 		if relPath == "src/components/button.go" {
 			found = true
 			break
@@ -1091,6 +1092,7 @@ func TestGlobalSearchFullPathMatching(t *testing.T) {
 
 	for _, r := range results {
 		relPath, _ := filepath.Rel(tempDir, r.FilePath)
+		relPath = filepath.ToSlash(relPath)
 		if !strings.HasPrefix(relPath, "internal/models/") {
 			t.Errorf("Expected result to start with 'internal/models/', but got: %s", relPath)
 		}
@@ -1102,6 +1104,7 @@ func TestGlobalSearchFullPathMatching(t *testing.T) {
 	found = false
 	for _, r := range results {
 		relPath, _ := filepath.Rel(tempDir, r.FilePath)
+		relPath = filepath.ToSlash(relPath)
 		if strings.HasPrefix(relPath, "src/components/") {
 			found = true
 			break

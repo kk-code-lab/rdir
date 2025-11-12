@@ -198,6 +198,7 @@ func TestLoadDirectory_SymlinkWithHiddenFiles(t *testing.T) {
 	if err := os.Mkdir(targetDir, 0755); err != nil {
 		t.Fatalf("Failed to create hidden target dir: %v", err)
 	}
+	ensureHidden(t, targetDir)
 
 	// Create symlink to hidden directory
 	symlinkPath := filepath.Join(tmpDir, "hidden_link")

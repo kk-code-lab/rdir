@@ -10,6 +10,9 @@ import (
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 )
 
+// shouldHideFromListingFn mirrors fs.ShouldHideFromListing for test overrides.
+var shouldHideFromListingFn = fsutil.ShouldHideFromListing
+
 func (gs *GlobalSearcher) searchWalk(query string, caseSensitive bool) []GlobalSearchResult {
 	tokens, matchAll := prepareQueryTokens(query, caseSensitive)
 	hasExplicitQuery := !matchAll
@@ -167,6 +170,10 @@ func (gs *GlobalSearcher) shouldSkip(relPath string, d fs.DirEntry, absPath stri
 
 	if d.IsDir() && d.Name() == ".git" {
 		return true, true
+	}
+
+	if shouldHideFromListingFn(absPath, d.Name()) {
+		return true, d.IsDir()
 	}
 
 	if gs.hideHidden {

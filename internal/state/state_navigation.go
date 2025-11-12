@@ -5,8 +5,12 @@ import (
 	"path/filepath"
 	"sort"
 
+	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	"golang.org/x/text/unicode/norm"
 )
+
+// shouldHideFromListingFn mirrors fs.ShouldHideFromListing but is overridable in tests.
+var shouldHideFromListingFn = fsutil.ShouldHideFromListing
 
 func (s *AppState) updateParentEntries() {
 	parentPath := filepath.Dir(s.CurrentPath)
@@ -15,7 +19,7 @@ func (s *AppState) updateParentEntries() {
 		return
 	}
 
-	currentName := filepath.Base(s.CurrentPath)
+	currentName := norm.NFC.String(filepath.Base(s.CurrentPath))
 
 	entries, err := os.ReadDir(parentPath)
 	if err != nil {
@@ -30,18 +34,23 @@ func (s *AppState) updateParentEntries() {
 			continue
 		}
 
+		fullPath := filepath.Join(parentPath, e.Name())
+
+		name := norm.NFC.String(e.Name())
+		if shouldHideFromListingFn(fullPath, e.Name()) && name != currentName {
+			continue
+		}
+
 		isDir := e.IsDir()
 		isSymlink := (info.Mode() & os.ModeSymlink) != 0
 
 		if isSymlink {
-			targetInfo, err := os.Stat(filepath.Join(parentPath, e.Name()))
+			targetInfo, err := os.Stat(fullPath)
 			if err == nil {
 				isDir = targetInfo.IsDir()
 			}
 		}
 
-		name := norm.NFC.String(e.Name())
-		fullPath := filepath.Join(parentPath, e.Name())
 		entry := FileEntry{
 			Name:      name,
 			FullPath:  fullPath,

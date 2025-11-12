@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -27,12 +28,12 @@ func (app *Application) handleClipboard() bool {
 	return true
 }
 
-func normalizeClipboardPath(path string, goos string) string {
-	cleaned := filepath.Clean(path)
+func normalizeClipboardPath(inputPath string, goos string) string {
 	if strings.EqualFold(goos, "windows") {
-		cleaned = strings.ReplaceAll(cleaned, "/", `\`)
+		cleaned := filepath.Clean(inputPath)
+		return strings.ReplaceAll(cleaned, "/", `\`)
 	}
-	return cleaned
+	return path.Clean(filepath.ToSlash(inputPath))
 }
 
 func (app *Application) handleRightArrow() bool {
