@@ -11,9 +11,15 @@ const streamingEmitThreshold = 64
 func (gs *GlobalSearcher) SearchRecursiveAsync(query string, caseSensitive bool, callback func(results []GlobalSearchResult, isDone bool, inProgress bool)) {
 	gs.cancelOngoingSearch()
 
+	if cached, ok := gs.lookupCache(query, caseSensitive); ok {
+		go callback(cached, true, false)
+		return
+	}
+
 	if ready, count, useIndex := gs.indexSnapshot(); ready && useIndex && count > 0 {
 		go func() {
 			results := gs.searchIndex(query, caseSensitive)
+			gs.storeCache(query, caseSensitive, results)
 			callback(results, true, false)
 		}()
 		return
@@ -80,6 +86,7 @@ func (gs *GlobalSearcher) streamFromIndex(ctx context.Context, cancel context.Ca
 	if hasResults && len(finalResults) >= mergeStatusMinimumResults {
 		callback(finalResults, true, true)
 	}
+	gs.storeCache(query, caseSensitive, finalResults)
 	callback(finalResults, true, false)
 }
 
