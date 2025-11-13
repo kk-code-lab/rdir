@@ -641,7 +641,6 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 	case PreviewExitFullScreenAction:
 		if state.PreviewFullScreen {
 			state.PreviewFullScreen = false
-			state.PreviewWrap = false
 		}
 		return state, nil
 

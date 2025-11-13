@@ -6,6 +6,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 	"github.com/kk-code-lab/rdir/internal/ui/input"
+	pagerui "github.com/kk-code-lab/rdir/internal/ui/pager"
 	renderui "github.com/kk-code-lab/rdir/internal/ui/render"
 )
 
@@ -235,4 +236,23 @@ func (app *Application) handleAppAction(action statepkg.Action) bool {
 		app.state.LastError = err
 	}
 	return true
+}
+
+func (app *Application) runPreviewPager() (err error) {
+	view, err := pagerui.NewPreviewPager(app.state)
+	if err != nil {
+		return err
+	}
+
+	if err := app.screen.Suspend(); err != nil {
+		return err
+	}
+	defer func() {
+		if resumeErr := app.screen.Resume(); resumeErr != nil && err == nil {
+			err = resumeErr
+		}
+		app.screen.Sync()
+	}()
+
+	return view.Run()
 }
