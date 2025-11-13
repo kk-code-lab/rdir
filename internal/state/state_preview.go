@@ -85,6 +85,9 @@ func (s *AppState) previewLineCount() int {
 	if s == nil || s.PreviewData == nil {
 		return 0
 	}
+	if s.PreviewData.LineCount > 0 {
+		return s.PreviewData.LineCount
+	}
 	switch {
 	case s.PreviewData.IsDir:
 		return len(s.PreviewData.DirEntries)
@@ -102,6 +105,9 @@ func (s *AppState) previewVisibleLines() int {
 		return 0
 	}
 	lines := s.ScreenHeight - 2
+	if s.PreviewFullScreen {
+		lines = s.ScreenHeight - 4
+	}
 	if lines < 0 {
 		lines = 0
 	}
@@ -149,4 +155,21 @@ func (s *AppState) scrollPreviewBy(delta int) {
 	}
 	s.PreviewScrollOffset += delta
 	s.clampPreviewScroll()
+}
+
+func (s *AppState) normalizePreviewScroll() {
+	if s == nil {
+		return
+	}
+	total := s.previewLineCount()
+	visible := s.previewVisibleLines()
+	if visible <= 0 || total <= 0 {
+		return
+	}
+	if s.PreviewScrollOffset > total-visible {
+		s.PreviewScrollOffset = total - visible
+		if s.PreviewScrollOffset < 0 {
+			s.PreviewScrollOffset = 0
+		}
+	}
 }
