@@ -21,6 +21,7 @@ rdir
 - **→**: Open file in pager
 - **←/Backspace**: Go to parent
 - **/**: Fuzzy search
+- **r**: Refresh current directory listing
 - **[/]**: History navigation
 - **h**: Toggle hidden files
 - **q**: Exit

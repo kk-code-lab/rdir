@@ -44,6 +44,7 @@ type ResizeAction struct {
 type YankPathAction struct{}
 type ToggleHiddenFilesAction struct{}
 type OpenEditorAction struct{}
+type RefreshDirectoryAction struct{}
 
 // ===== GLOBAL SEARCH ACTIONS =====
 

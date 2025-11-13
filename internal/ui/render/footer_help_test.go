@@ -22,6 +22,7 @@ func TestBuildFooterHelpSegments_DefaultMode(t *testing.T) {
 		"~: home",
 		"/: filter",
 		"f: search",
+		"r: refresh",
 		".: toggle hidden",
 		"y: yank path",
 		"e: edit file",
