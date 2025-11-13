@@ -55,15 +55,15 @@ func TestPreviewScrollPagingClampsOffsets(t *testing.T) {
 	reducer := NewStateReducer()
 	state := &AppState{
 		PreviewData:       &PreviewData{TextLines: make([]string, 100)},
-		ScreenHeight:      8, // visible lines = 6
+		ScreenHeight:      8, // content rows = 4 with fullscreen padding
 		PreviewFullScreen: true,
 	}
 
 	if _, err := reducer.Reduce(state, PreviewScrollPageDownAction{}); err != nil {
 		t.Fatalf("page down failed: %v", err)
 	}
-	if state.PreviewScrollOffset != 6 {
-		t.Fatalf("expected offset 6 after page down, got %d", state.PreviewScrollOffset)
+	if state.PreviewScrollOffset != 4 {
+		t.Fatalf("expected offset 4 after page down, got %d", state.PreviewScrollOffset)
 	}
 
 	if _, err := reducer.Reduce(state, PreviewScrollToEndAction{}); err != nil {
@@ -90,14 +90,14 @@ func TestGeneratePreviewPreservesOffsetForSameFile(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	filePath := filepath.Join(tmpDir, "test.txt")
-	content := "line1\nline2\nline3\nline4\nline5\nline6"
+	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10"
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
 	reducer := NewStateReducer()
 	state := &AppState{
-		ScreenHeight: 4,
+		ScreenHeight: 10,
 		ScreenWidth:  80,
 	}
 

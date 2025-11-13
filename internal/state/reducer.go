@@ -641,7 +641,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		state.clampPreviewScroll()
 		return state, nil
 
-	// ===== PREVIEW =====
+		// ===== PREVIEW =====
 
 	case PreviewEnterFullScreenAction:
 		if state.PreviewData == nil {
@@ -651,6 +651,9 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		}
 		if state.PreviewData != nil {
 			state.PreviewFullScreen = true
+			if !state.restorePreviewScrollForPath(state.CurrentFilePath()) {
+				state.normalizePreviewScroll()
+			}
 			state.clampPreviewScroll()
 		}
 		return state, nil
@@ -1573,6 +1576,7 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 				preview.TextCharCount = charCount
 			} else {
 				preview.BinaryInfo = formatBinaryPreviewLines(content, info.Size())
+				preview.LineCount = int((info.Size()+binaryPreviewLineWidth-1)/binaryPreviewLineWidth) + 1
 			}
 		}
 		state.storeFilePreview(filePath, info, preview)
@@ -1580,13 +1584,13 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 
 	state.PreviewData = preview
 	if resetScroll {
-		if !state.restorePreviewScrollForPath(filePath) {
-			state.PreviewScrollOffset = 0
-			state.PreviewWrapOffset = 0
-		}
+		state.PreviewScrollOffset = 0
+		state.PreviewWrapOffset = 0
 		state.PreviewFullScreen = false
+	} else {
+		state.clampPreviewScroll()
+		state.rememberPreviewScrollForCurrentFile()
 	}
-	state.clampPreviewScroll()
 	return nil
 }
 
