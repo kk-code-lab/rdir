@@ -435,6 +435,12 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		}
 		return state, nil
 
+	case RefreshDirectoryAction:
+		if err := r.refreshDirectory(state); err != nil {
+			return state, err
+		}
+		return state, r.generatePreview(state)
+
 	// ===== FILTERING =====
 
 	case FilterStartAction:
@@ -1277,6 +1283,80 @@ func (r *StateReducer) ensureSelectionVisible(state *AppState) {
 // changeDirectory changes current directory and loads files
 func (r *StateReducer) changeDirectory(state *AppState, path string) error {
 	return LoadDirectory(state, path)
+}
+
+type filterSnapshot struct {
+	active        bool
+	query         string
+	caseSensitive bool
+	savedIndex    int
+}
+
+func snapshotFilterState(state *AppState) filterSnapshot {
+	return filterSnapshot{
+		active:        state.FilterActive,
+		query:         state.FilterQuery,
+		caseSensitive: state.FilterCaseSensitive,
+		savedIndex:    state.FilterSavedIndex,
+	}
+}
+
+func findFileIndexByName(files []FileEntry, name string) int {
+	for idx, file := range files {
+		if file.Name == name {
+			return idx
+		}
+	}
+	return -1
+}
+
+func (r *StateReducer) refreshDirectory(state *AppState) error {
+	prevFile := state.getCurrentFile()
+	prevFileName := ""
+	if prevFile != nil {
+		prevFileName = prevFile.Name
+	}
+
+	prevSelectedIndex := state.SelectedIndex
+	prevDisplayIdx := state.getDisplaySelectedIndex()
+	prevScrollOffset := state.ScrollOffset
+	prevFilter := snapshotFilterState(state)
+
+	if err := LoadDirectory(state); err != nil {
+		return err
+	}
+
+	restoredIndex := -1
+	if prevFileName != "" {
+		if idx := findFileIndexByName(state.Files, prevFileName); idx >= 0 {
+			state.SelectedIndex = idx
+			restoredIndex = idx
+		}
+	}
+
+	if restoredIndex == -1 && prevSelectedIndex >= 0 {
+		if prevSelectedIndex < len(state.Files) {
+			state.SelectedIndex = prevSelectedIndex
+		} else if len(state.Files) > 0 {
+			state.SelectedIndex = len(state.Files) - 1
+		} else {
+			state.SelectedIndex = -1
+		}
+		restoredIndex = state.SelectedIndex
+	}
+
+	if prevFilter.active {
+		state.FilterActive = true
+		state.FilterQuery = prevFilter.query
+		state.FilterCaseSensitive = prevFilter.caseSensitive
+		state.FilterSavedIndex = prevFilter.savedIndex
+		state.recomputeFilter()
+		state.retainSelectionAfterFilterChange(restoredIndex, prevDisplayIdx)
+	}
+
+	state.ScrollOffset = prevScrollOffset
+	state.updateScrollVisibility()
+	return nil
 }
 
 // addToHistory adds path to history, removing forward history if needed

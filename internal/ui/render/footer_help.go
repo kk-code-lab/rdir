@@ -52,6 +52,7 @@ func contextualHelpSegments(state *statepkg.AppState) []string {
 			"~: home",
 			"/: filter",
 			"f: search",
+			"r: refresh",
 		}
 	}
 }
