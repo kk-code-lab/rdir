@@ -199,6 +199,7 @@ internal/
 │   └── asm_benchmark_test.go     # arm64 microbenchmarks
 ├── ui/
 │   ├── input/handler.go          # tcell → Action mapping
+│   ├── pager/                    # Less-style full preview pager (raw terminal loop)
 │   └── render/                   # Renderer split into renderer.go + layout/text/preview/status helpers
 ├── fs/
 │   ├── entry.go                  # Shared file metadata struct
@@ -269,6 +270,20 @@ selectionHistory map[string]int  // path → cursor index
 - Populated when exiting directory
 - Restored when re-entering directory
 - Seamless navigation with cursor position memory
+
+### Full Preview Pager
+The `internal/ui/pager` package owns the full-screen preview mode. When the user hits `→` on a file the app:
+
+1. Dispatches `PreviewEnterFullScreenAction` to make sure preview data exists.
+2. Suspends the tcell screen and hands control to `PreviewPager.Run()`.
+3. Runs a minimal terminal loop on `/dev/tty` (raw mode) that:
+   - Clears the screen and draws a header with `path`, permissions, size, and mtime.
+   - Streams the preview content without reflowing lines; wrapping is delegated to the terminal so mouse copy grabs whole logical lines (less-style).
+   - Provides scrolling (`↑/↓/PgUp/PgDn/Home/End`, `space`, `b`) and wrap toggling (`w/W` or `→`). Wrap toggling flips DECAWM (`CSI ?7h/l`) so non-wrapped mode truncates to viewport width.
+   - Shows a status footer (`10-28/120 lines  wrap:on  …`) with the current key hints.
+4. When the pager exits (`q`, `Esc`, `←`, `Ctrl+C`), the loop restores the terminal, resumes tcell, and re-synchronizes the UI.
+
+The pager keeps `AppState.PreviewScrollOffset` and `PreviewWrap` in sync so the side preview reuses the last position, but it no longer draws anything through tcell—copy/paste fidelity matches the system pager.
 
 ### Navigation History
 ```go

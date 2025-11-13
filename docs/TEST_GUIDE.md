@@ -60,6 +60,8 @@ Every package keeps its own `_test.go` files under `internal/...`. Key areas:
 - `render/renderer_test.go` and `render/footer_help_test.go` check header/footer formatting,
   help text, and text-measurement helpers.
 - `input/handler_test.go` ensures keyboard events map to the right actions without a real screen.
+- `pager/` runs on a real TTY (raw mode), so it’s manually verified via `→`, scroll keys, `w` (wrap),
+  and `q`/`Esc` to exit; no automated harness yet.
 
 ---
 

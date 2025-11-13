@@ -51,6 +51,21 @@ func (app *Application) handleRightArrow() bool {
 
 	if _, err := app.reducer.Reduce(app.state, statepkg.PreviewEnterFullScreenAction{}); err != nil {
 		app.state.LastError = err
+		return true
+	}
+
+	if app.state.PreviewData == nil || !app.state.PreviewFullScreen {
+		return true
+	}
+
+	defer func() {
+		if _, err := app.reducer.Reduce(app.state, statepkg.PreviewExitFullScreenAction{}); err != nil {
+			app.state.LastError = err
+		}
+	}()
+
+	if err := app.runPreviewPager(); err != nil {
+		app.state.LastError = err
 	}
 	return true
 }
