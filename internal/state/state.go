@@ -32,15 +32,16 @@ const (
 
 // PreviewData contains preview information for selected file
 type PreviewData struct {
-	IsDir      bool
-	Name       string
-	Size       int64
-	Modified   time.Time
-	Mode       os.FileMode
-	LineCount  int
-	TextLines  []string
-	BinaryInfo BinaryPreview
-	DirEntries []FileEntry
+	IsDir         bool
+	Name          string
+	Size          int64
+	Modified      time.Time
+	Mode          os.FileMode
+	LineCount     int
+	TextLines     []string
+	TextCharCount int
+	BinaryInfo    BinaryPreview
+	DirEntries    []FileEntry
 }
 
 // BinaryPreview contains lightweight information about a binary file.
@@ -100,11 +101,13 @@ type AppState struct {
 	HideHiddenFiles bool // Whether to hide files starting with . (default true)
 
 	// Preview
-	PreviewData         *PreviewData
-	PreviewFullScreen   bool
-	PreviewWrap         bool
-	PreviewScrollOffset int
-	previewCache        map[string]previewCacheEntry
+	PreviewData          *PreviewData
+	PreviewFullScreen    bool
+	PreviewWrap          bool
+	PreviewScrollOffset  int
+	PreviewWrapOffset    int
+	previewCache         map[string]previewCacheEntry
+	previewScrollHistory map[string]previewScrollPosition
 
 	// Dimensions
 	ScreenWidth  int
@@ -134,6 +137,11 @@ type previewCacheEntry struct {
 	size    int64
 	modTime time.Time
 	data    *PreviewData
+}
+
+type previewScrollPosition struct {
+	scroll int
+	wrap   int
 }
 
 // ===== HELPER METHODS =====

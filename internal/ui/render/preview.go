@@ -101,13 +101,12 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		}
 		for i := startIdx; i < len(preview.TextLines); i++ {
 			line := preview.TextLines[i]
-			expanded := r.expandTabs(line, previewTabWidth)
 			if wrapEnabled {
-				if !r.drawWrappedPreviewText(expanded, startX, panelWidth, textStyle, &y, bottomLimit, w) {
+				if !r.drawWrappedPreviewText(line, startX, panelWidth, textStyle, &y, bottomLimit, w) {
 					break
 				}
 			} else {
-				if !r.drawPreviewTextLineClipped(expanded, startX, panelWidth, textStyle, y, bottomLimit, w) {
+				if !r.drawPreviewTextLineClipped(line, startX, panelWidth, textStyle, y, bottomLimit, w) {
 					break
 				}
 				y++

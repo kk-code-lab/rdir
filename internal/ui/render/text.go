@@ -88,33 +88,6 @@ func (r *Renderer) truncateTextToWidth(text string, maxWidth int) string {
 	return builder.String()
 }
 
-func (r *Renderer) expandTabs(text string, tabWidth int) string {
-	if tabWidth <= 0 || !strings.ContainsRune(text, '\t') {
-		return text
-	}
-
-	var builder strings.Builder
-	builder.Grow(len(text) + tabWidth)
-	column := 0
-	for _, ru := range text {
-		if ru == '\t' {
-			spaces := tabWidth - (column % tabWidth)
-			for i := 0; i < spaces; i++ {
-				builder.WriteByte(' ')
-			}
-			column += spaces
-			continue
-		}
-		builder.WriteRune(ru)
-		width := r.cachedRuneWidth(ru)
-		if width < 1 {
-			width = 1
-		}
-		column += width
-	}
-	return builder.String()
-}
-
 func (r *Renderer) drawTextLine(startX, y, maxWidth int, text string, style tcell.Style) int {
 	x := startX
 	runes := []rune(text)

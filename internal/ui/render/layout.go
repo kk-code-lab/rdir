@@ -35,7 +35,6 @@ const (
 	binaryHexPreviewMinWidth  = binaryHexContentWidth + (previewInnerPadding * 2)
 	previewWidthCap           = binaryFullPreviewMinWidth
 	textPreviewEstimateLines  = 40
-	previewTabWidth           = 4
 )
 
 func (r *Renderer) previewContainsBinary(state *statepkg.AppState) bool {
@@ -81,7 +80,7 @@ func (r *Renderer) estimateTextPreviewWidth(preview *statepkg.PreviewData) int {
 
 	maxWidth := 0
 	for i := 0; i < limit; i++ {
-		line := r.expandTabs(preview.TextLines[i], previewTabWidth)
+		line := preview.TextLines[i]
 		width := r.measureTextWidth(line)
 		if width > maxWidth {
 			maxWidth = width
