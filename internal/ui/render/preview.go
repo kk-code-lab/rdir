@@ -15,7 +15,7 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		return
 	}
 
-	baseStyle := tcell.StyleDefault.Background(r.theme.SidebarBg).Foreground(r.theme.SidebarFg)
+	baseStyle := tcell.StyleDefault.Background(r.theme.PreviewBg).Foreground(r.theme.PreviewFg)
 
 	for y := 1; y < h; y++ {
 		for x := startX; x < startX+panelWidth && x < w; x++ {
@@ -25,6 +25,9 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 
 	y := 1
 	if state.PreviewData == nil {
+		placeholder := " preview unavailable "
+		r.drawTextLine(startX, y, panelWidth, placeholder, baseStyle.Dim(true))
+		y++
 		for y < h-1 {
 			for x := startX; x < startX+panelWidth && x < w; x++ {
 				r.screen.SetContent(x, y, ' ', nil, baseStyle)
@@ -34,8 +37,17 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		return
 	}
 
-	preview := state.PreviewData
+	var preview *statepkg.PreviewData
+	wrapEnabled := false
+	if state != nil {
+		preview = state.PreviewData
+		wrapEnabled = state.PreviewFullScreen && state.PreviewWrap
+	}
 	bottomLimit := h - 1
+	startIdx := state.PreviewScrollOffset
+	if startIdx < 0 {
+		startIdx = 0
+	}
 
 	drawLine := func(text string, style tcell.Style) bool {
 		if y >= bottomLimit {
@@ -50,7 +62,11 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 	}
 
 	if preview.IsDir && len(preview.DirEntries) > 0 {
-		for _, entry := range preview.DirEntries {
+		if startIdx > len(preview.DirEntries) {
+			startIdx = len(preview.DirEntries)
+		}
+		for i := startIdx; i < len(preview.DirEntries); i++ {
+			entry := preview.DirEntries[i]
 			var rowStyle tcell.Style
 			if entry.IsSymlink {
 				rowStyle = baseStyle.Foreground(r.theme.SymlinkFg)
@@ -80,16 +96,30 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		}
 	} else if !preview.IsDir && len(preview.TextLines) > 0 {
 		textStyle := baseStyle.Foreground(r.theme.FileFg)
-		for _, line := range preview.TextLines {
+		if startIdx > len(preview.TextLines) {
+			startIdx = len(preview.TextLines)
+		}
+		for i := startIdx; i < len(preview.TextLines); i++ {
+			line := preview.TextLines[i]
 			expanded := r.expandTabs(line, previewTabWidth)
-			if !r.drawPreviewTextLineClipped(expanded, startX, panelWidth, textStyle, y, bottomLimit, w) {
-				break
+			if wrapEnabled {
+				if !r.drawWrappedPreviewText(expanded, startX, panelWidth, textStyle, &y, bottomLimit, w) {
+					break
+				}
+			} else {
+				if !r.drawPreviewTextLineClipped(expanded, startX, panelWidth, textStyle, y, bottomLimit, w) {
+					break
+				}
+				y++
 			}
-			y++
 		}
 	} else if !preview.IsDir && len(preview.BinaryInfo.Lines) > 0 {
 		textStyle := baseStyle.Foreground(r.theme.FileFg)
-		for _, line := range preview.BinaryInfo.Lines {
+		if startIdx > len(preview.BinaryInfo.Lines) {
+			startIdx = len(preview.BinaryInfo.Lines)
+		}
+		for i := startIdx; i < len(preview.BinaryInfo.Lines); i++ {
+			line := preview.BinaryInfo.Lines[i]
 			if !strings.Contains(line, "|") {
 				if !drawLine(line, textStyle) {
 					break
@@ -196,4 +226,89 @@ func (r *Renderer) drawPreviewTextLineClipped(text string, startX, panelWidth in
 	}
 
 	return true
+}
+
+func (r *Renderer) drawWrappedPreviewText(text string, startX, panelWidth int, style tcell.Style, y *int, bottomLimit, screenWidth int) bool {
+	if panelWidth <= 0 || y == nil {
+		return false
+	}
+	segments := r.wrapPreviewText(text, panelWidth)
+	if len(segments) == 0 {
+		segments = []string{""}
+	}
+	for _, segment := range segments {
+		if *y >= bottomLimit {
+			return false
+		}
+		_ = r.drawPreviewTextLineClipped(segment, startX, panelWidth, style, *y, bottomLimit, screenWidth)
+		*y++
+	}
+	return true
+}
+
+func (r *Renderer) wrapPreviewText(text string, maxWidth int) []string {
+	if maxWidth <= 0 {
+		return nil
+	}
+	var segments []string
+	var builder strings.Builder
+	currentWidth := 0
+
+	flush := func() {
+		segments = append(segments, builder.String())
+		builder.Reset()
+		currentWidth = 0
+	}
+
+	for _, ru := range text {
+		runeWidth := r.cachedRuneWidth(ru)
+		if runeWidth <= 0 {
+			runeWidth = 1
+		}
+		if currentWidth > 0 && currentWidth+runeWidth > maxWidth {
+			flush()
+		}
+		if runeWidth > maxWidth {
+			segments = append(segments, string(ru))
+			currentWidth = 0
+			builder.Reset()
+			continue
+		}
+		builder.WriteRune(ru)
+		currentWidth += runeWidth
+	}
+
+	if builder.Len() > 0 {
+		flush()
+	}
+
+	if len(segments) == 0 {
+		segments = append(segments, "")
+	}
+
+	return segments
+}
+
+func (r *Renderer) drawFullScreenPreview(state *statepkg.AppState, w, h int) {
+	layout := layoutMetrics{
+		previewStart: 0,
+		previewWidth: w,
+		showPreview:  true,
+		binaryMode:   r.fullScreenBinaryMode(state, w),
+	}
+	r.drawPreviewPanel(state, layout, w, h)
+}
+
+func (r *Renderer) fullScreenBinaryMode(state *statepkg.AppState, width int) binaryPreviewMode {
+	if !r.previewContainsBinary(state) {
+		return binaryPreviewModeNone
+	}
+	switch {
+	case width >= binaryFullPreviewMinWidth:
+		return binaryPreviewModeFull
+	case width >= binaryHexPreviewMinWidth:
+		return binaryPreviewModeHexOnly
+	default:
+		return binaryPreviewModeNone
+	}
 }

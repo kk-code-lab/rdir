@@ -45,6 +45,19 @@ type YankPathAction struct{}
 type ToggleHiddenFilesAction struct{}
 type OpenEditorAction struct{}
 type RefreshDirectoryAction struct{}
+type OpenPagerAction struct{}
+
+// ===== PREVIEW ACTIONS =====
+
+type PreviewEnterFullScreenAction struct{}
+type PreviewExitFullScreenAction struct{}
+type PreviewScrollUpAction struct{}
+type PreviewScrollDownAction struct{}
+type PreviewScrollPageUpAction struct{}
+type PreviewScrollPageDownAction struct{}
+type PreviewScrollToStartAction struct{}
+type PreviewScrollToEndAction struct{}
+type TogglePreviewWrapAction struct{}
 
 // ===== GLOBAL SEARCH ACTIONS =====
 

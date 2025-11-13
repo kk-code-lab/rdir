@@ -38,6 +38,14 @@ func (r *Renderer) Render(state *statepkg.AppState) {
 
 	w, h := r.screen.Size()
 
+	if state != nil && state.PreviewFullScreen {
+		r.drawHeader(state, w, h)
+		r.drawFullScreenPreview(state, w, h)
+		r.drawStatusLine(state, w, h)
+		r.screen.Show()
+		return
+	}
+
 	layout := r.computeLayout(w, state)
 
 	// Draw all panels

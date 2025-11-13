@@ -97,8 +97,24 @@ func TestPreviewWidthScalesWithTerminal(t *testing.T) {
 	if !narrow.showPreview || !wide.showPreview {
 		t.Fatalf("expected preview visible for both terminal widths")
 	}
-	if wide.previewWidth <= narrow.previewWidth {
-		t.Fatalf("expected wider terminal to produce larger preview (narrow=%d, wide=%d)", narrow.previewWidth, wide.previewWidth)
+	if wide.previewWidth < narrow.previewWidth {
+		t.Fatalf("expected wider terminal to produce >= preview width (narrow=%d, wide=%d)", narrow.previewWidth, wide.previewWidth)
+	}
+}
+
+func TestPreviewLayoutUsesFixedRatio(t *testing.T) {
+	r := NewRenderer(nil)
+	state := &statepkg.AppState{}
+
+	layout := r.computeLayout(200, state)
+	if !layout.showPreview {
+		t.Fatalf("expected preview to be visible for ratio check")
+	}
+
+	total := layout.mainPanelWidth + layout.previewWidth
+	expectedPreview := clampPreviewRatioWidth(total)
+	if diff := absInt(layout.previewWidth - expectedPreview); diff > 1 {
+		t.Fatalf("expected preview near %d cols (+/-1), got %d (diff=%d)", expectedPreview, layout.previewWidth, diff)
 	}
 }
 
@@ -129,7 +145,7 @@ func TestBinaryPreviewUsesHexOnlyModeWhenTight(t *testing.T) {
 	r := NewRenderer(nil)
 	state := binaryPreviewState()
 
-	layout := r.computeLayout(130, state)
+	layout := r.computeLayout(120, state)
 	if !layout.showPreview {
 		t.Fatalf("expected preview to be visible")
 	}
@@ -154,21 +170,11 @@ func TestBinaryPreviewKeepsAsciiWhenWide(t *testing.T) {
 	}
 }
 
-func TestPreviewWidthNeverExceedsCap(t *testing.T) {
-	r := NewRenderer(nil)
-	state := &statepkg.AppState{}
-
-	layout := r.computeLayout(260, state)
-	if layout.previewWidth > binaryFullPreviewMinWidth {
-		t.Fatalf("preview width should be capped at %d, got %d", binaryFullPreviewMinWidth, layout.previewWidth)
-	}
-}
-
 func TestBinaryPreviewHiddenWhenTooNarrow(t *testing.T) {
 	r := NewRenderer(nil)
 	state := binaryPreviewState()
 
-	layout := r.computeLayout(110, state)
+	layout := r.computeLayout(90, state)
 	if layout.showPreview {
 		t.Fatalf("preview should hide when width insufficient (width=%d)", layout.previewWidth)
 	}
@@ -188,24 +194,6 @@ func binaryPreviewState() *statepkg.AppState {
 	}
 }
 
-func TestTextPreviewEstimationUsesTabs(t *testing.T) {
-	r := NewRenderer(nil)
-	preview := &statepkg.PreviewData{
-		TextLines: []string{
-			"\tshort",
-			"\tfunc example() {",
-			"\t\treturn 42",
-			"\t}",
-		},
-	}
-
-	width := r.desiredPreviewWidth(130, minPreviewPanelWidth, preview)
-	expected := r.measureTextWidth(r.expandTabs(preview.TextLines[1], previewTabWidth))
-	if width < expected {
-		t.Fatalf("expected preview width >= %d to accommodate tabs, got %d", expected, width)
-	}
-}
-
 func TestComputeHighlightSpansDisjointMatches(t *testing.T) {
 	spans := computeHighlightSpans("cch", "cache_handler", false)
 	want := []highlightSpan{
@@ -220,6 +208,55 @@ func TestComputeHighlightSpansDisjointMatches(t *testing.T) {
 			t.Fatalf("span %d mismatch: got %+v want %+v", i, spans[i], want[i])
 		}
 	}
+}
+
+func TestPreviewWidthShrinksToTextContent(t *testing.T) {
+	r := NewRenderer(nil)
+	state := textPreviewState("short text", "another line")
+
+	layout := r.computeLayout(220, state)
+	if !layout.showPreview {
+		t.Fatalf("expected preview visible")
+	}
+
+	textWidth := r.estimateTextPreviewWidth(state.PreviewData) + previewInnerPadding*2
+	expected := maxInt(textWidth, minPreviewPanelWidth)
+	if layout.previewWidth != expected {
+		t.Fatalf("preview width should align with text (expected %d, got %d)", expected, layout.previewWidth)
+	}
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func clampPreviewRatioWidth(total int) int {
+	width := int(float64(total)*previewPanelRatio + 0.5)
+	if width < minPreviewPanelWidth {
+		width = minPreviewPanelWidth
+	}
+	if width > previewWidthCap {
+		width = previewWidthCap
+	}
+	return width
+}
+
+func textPreviewState(lines ...string) *statepkg.AppState {
+	return &statepkg.AppState{
+		PreviewData: &statepkg.PreviewData{
+			TextLines: lines,
+		},
+	}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func TestComputeHighlightSpansRespectsCaseSensitivity(t *testing.T) {

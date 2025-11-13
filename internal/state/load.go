@@ -67,6 +67,8 @@ func LoadDirectory(state *AppState, path ...string) error {
 	state.sortFiles()
 	state.resetViewport()
 	state.updateParentEntries()
+	state.PreviewData = nil
+	state.resetPreviewScroll()
 
 	return nil
 }

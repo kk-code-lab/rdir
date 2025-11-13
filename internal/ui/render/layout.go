@@ -26,7 +26,8 @@ const (
 	minMainPanelWidth         = 32
 	minPreviewPanelWidth      = 28
 	minPreviewTerminalWidth   = 100
-	previewWidthRatio         = 0.45
+	previewListRatio          = 0.20
+	previewPanelRatio         = 0.80
 	previewInnerPadding       = 1
 	binaryFullContentWidth    = 78
 	binaryHexContentWidth     = 60
@@ -45,34 +46,26 @@ func (r *Renderer) previewContainsBinary(state *statepkg.AppState) bool {
 	return !preview.IsDir && len(preview.BinaryInfo.Lines) > 0
 }
 
-func (r *Renderer) desiredPreviewWidth(contentWidth, previewMin int, preview *statepkg.PreviewData) int {
-	if contentWidth <= 0 {
-		return 0
-	}
-
-	var ratio float64
-	switch {
-	case contentWidth <= 120:
-		ratio = float64(previewMin) / float64(contentWidth)
-	case contentWidth <= 200:
-		progress := float64(contentWidth-120) / 80.0
-		ratio = 0.25 + progress*0.15
-	default:
-		ratio = previewWidthRatio
-	}
-
-	width := int(float64(contentWidth)*ratio + 0.5)
-	if preview != nil && len(preview.TextLines) > 0 {
-		if textWidth := r.estimateTextPreviewWidth(preview); textWidth > width {
-			width = textWidth
-		}
-	}
+func (r *Renderer) desiredPreviewWidth(combinedWidth, previewMin int, preview *statepkg.PreviewData) int {
+	width := int(float64(combinedWidth)*previewPanelRatio + 0.5)
 	if width < previewMin {
 		width = previewMin
 	}
 	if width > previewWidthCap {
 		width = previewWidthCap
 	}
+
+	if preview != nil && len(preview.TextLines) > 0 {
+		needed := r.estimateTextPreviewWidth(preview) + previewInnerPadding*2
+		if needed < previewMin {
+			needed = previewMin
+		}
+		if needed > previewWidthCap {
+			needed = previewWidthCap
+		}
+		width = needed
+	}
+
 	return width
 }
 
@@ -85,6 +78,7 @@ func (r *Renderer) estimateTextPreviewWidth(preview *statepkg.PreviewData) int {
 	if len(preview.TextLines) < limit {
 		limit = len(preview.TextLines)
 	}
+
 	maxWidth := 0
 	for i := 0; i < limit; i++ {
 		line := r.expandTabs(preview.TextLines[i], previewTabWidth)
@@ -93,6 +87,7 @@ func (r *Renderer) estimateTextPreviewWidth(preview *statepkg.PreviewData) int {
 			maxWidth = width
 		}
 	}
+
 	if maxWidth > previewWidthCap {
 		maxWidth = previewWidthCap
 	}
@@ -128,34 +123,24 @@ func (r *Renderer) computeLayout(w int, state *statepkg.AppState) layoutMetrics 
 		previewMinWidth = binaryHexPreviewMinWidth
 	}
 
-	canShowPreview := !state.GlobalSearchActive &&
+	previewAllowed := state != nil && !state.GlobalSearchActive
+	canShowPreview := previewAllowed &&
 		w >= minPreviewTerminalWidth &&
 		contentWidth >= (minMainPanelWidth+previewMinWidth+1)
 
 	if canShowPreview {
 		metrics.contentSeparatorWidth = 1
-		maxPreviewWidth := contentWidth - metrics.contentSeparatorWidth - minMainPanelWidth
-		if maxPreviewWidth >= previewMinWidth {
-			candidate := r.desiredPreviewWidth(contentWidth, previewMinWidth, state.PreviewData)
-			if candidate > maxPreviewWidth {
-				candidate = maxPreviewWidth
-			}
-			if isBinaryPreview && maxPreviewWidth >= binaryFullPreviewMinWidth && candidate < binaryFullPreviewMinWidth {
-				candidate = binaryFullPreviewMinWidth
-			}
+		combinedWidth := contentWidth - metrics.contentSeparatorWidth
+		if combinedWidth >= (minMainPanelWidth + previewMinWidth) {
+			previewWidth := r.desiredPreviewWidth(combinedWidth, previewMinWidth, state.PreviewData)
+			mainWidth := combinedWidth - previewWidth
 
-			previewWidth := candidate
-			mainWidth := contentWidth - metrics.contentSeparatorWidth - previewWidth
 			if mainWidth < minMainPanelWidth {
-				deficit := minMainPanelWidth - mainWidth
-				previewWidth -= deficit
 				mainWidth = minMainPanelWidth
-				if previewWidth < 0 {
-					previewWidth = 0
-				}
+				previewWidth = combinedWidth - mainWidth
 			}
 
-			if previewWidth >= previewMinWidth {
+			if previewWidth >= previewMinWidth && mainWidth >= minMainPanelWidth {
 				metrics.showPreview = true
 				metrics.previewWidth = previewWidth
 				metrics.mainPanelWidth = mainWidth
@@ -195,7 +180,7 @@ func (r *Renderer) computeLayout(w int, state *statepkg.AppState) layoutMetrics 
 }
 
 func (r *Renderer) sidebarWidthForWidth(w int, state *statepkg.AppState) int {
-	if state.GlobalSearchActive {
+	if state != nil && state.GlobalSearchActive {
 		return 0
 	}
 

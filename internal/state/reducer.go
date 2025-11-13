@@ -444,6 +444,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 	// ===== FILTERING =====
 
 	case FilterStartAction:
+		state.PreviewFullScreen = false
 		wasActive := state.FilterActive
 		if !wasActive {
 			state.FilterSavedIndex = state.SelectedIndex // Save current selection
@@ -620,11 +621,84 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		state.ScreenWidth = a.Width
 		state.ScreenHeight = a.Height
 		state.updateScrollVisibility()
+		state.clampPreviewScroll()
+		return state, nil
+
+	// ===== PREVIEW =====
+
+	case PreviewEnterFullScreenAction:
+		if state.PreviewData == nil {
+			if err := r.generatePreview(state); err != nil {
+				return state, err
+			}
+		}
+		if state.PreviewData != nil {
+			state.PreviewFullScreen = true
+			state.clampPreviewScroll()
+		}
+		return state, nil
+
+	case PreviewExitFullScreenAction:
+		if state.PreviewFullScreen {
+			state.PreviewFullScreen = false
+			state.PreviewWrap = false
+		}
+		return state, nil
+
+	case PreviewScrollUpAction:
+		if state.PreviewFullScreen && state.PreviewData != nil {
+			state.scrollPreviewBy(-1)
+		}
+		return state, nil
+
+	case PreviewScrollDownAction:
+		if state.PreviewFullScreen && state.PreviewData != nil {
+			state.scrollPreviewBy(1)
+		}
+		return state, nil
+
+	case PreviewScrollPageUpAction:
+		if state.PreviewFullScreen && state.PreviewData != nil {
+			lines := state.previewVisibleLines()
+			if lines <= 0 {
+				lines = 1
+			}
+			state.scrollPreviewBy(-lines)
+		}
+		return state, nil
+
+	case PreviewScrollPageDownAction:
+		if state.PreviewFullScreen && state.PreviewData != nil {
+			lines := state.previewVisibleLines()
+			if lines <= 0 {
+				lines = 1
+			}
+			state.scrollPreviewBy(lines)
+		}
+		return state, nil
+
+	case PreviewScrollToStartAction:
+		if state.PreviewFullScreen && state.PreviewData != nil {
+			state.PreviewScrollOffset = 0
+		}
+		return state, nil
+
+	case PreviewScrollToEndAction:
+		if state.PreviewFullScreen && state.PreviewData != nil {
+			state.PreviewScrollOffset = state.maxPreviewScrollOffset()
+		}
+		return state, nil
+
+	case TogglePreviewWrapAction:
+		if state.PreviewFullScreen && state.PreviewData != nil {
+			state.PreviewWrap = !state.PreviewWrap
+		}
 		return state, nil
 
 	// ===== GLOBAL SEARCH =====
 
 	case GlobalSearchStartAction:
+		state.PreviewFullScreen = false
 		// Start global search from current directory
 		state.GlobalSearchActive = true
 		state.setGlobalSearchQuery("")
@@ -1378,19 +1452,32 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 	file := state.getCurrentFile()
 	if file == nil {
 		state.PreviewData = nil
+		state.resetPreviewScroll()
 		return nil
 	}
+
+	sameFile := state.PreviewData != nil &&
+		state.PreviewData.Name == file.Name &&
+		state.PreviewData.IsDir == file.IsDir
+	resetScroll := !sameFile
 
 	filePath := filepath.Join(state.CurrentPath, file.Name)
 	info, err := os.Stat(filePath)
 	if err != nil {
 		state.PreviewData = nil
+		state.resetPreviewScroll()
 		return nil
 	}
 
 	if !info.IsDir() {
 		if cached, ok := state.getCachedFilePreview(filePath, info); ok {
 			state.PreviewData = cached
+			if resetScroll {
+				state.PreviewScrollOffset = 0
+				state.PreviewFullScreen = false
+			} else {
+				state.clampPreviewScroll()
+			}
 			return nil
 		}
 	}
@@ -1466,6 +1553,12 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 	}
 
 	state.PreviewData = preview
+	if resetScroll {
+		state.PreviewScrollOffset = 0
+		state.PreviewFullScreen = false
+	} else {
+		state.clampPreviewScroll()
+	}
 	return nil
 }
 
