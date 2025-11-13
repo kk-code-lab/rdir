@@ -138,47 +138,6 @@ func splitQueryTokens(query string) []string {
 	return tokens
 }
 
-func extractTokenSpans(pattern []rune, text []rune) []MatchSpan {
-	if len(pattern) == 0 || len(text) == 0 {
-		return nil
-	}
-
-	positions := make([]int, 0, len(pattern))
-	targetIdx := 0
-	for idx, ru := range text {
-		if targetIdx >= len(pattern) {
-			break
-		}
-		if ru != pattern[targetIdx] {
-			continue
-		}
-		positions = append(positions, idx)
-		targetIdx++
-		if targetIdx == len(pattern) {
-			break
-		}
-	}
-
-	if len(positions) == 0 {
-		return nil
-	}
-
-	spans := make([]MatchSpan, 0, len(positions))
-	spanStart := positions[0]
-	prev := positions[0]
-	for i := 1; i < len(positions); i++ {
-		if positions[i] == prev+1 {
-			prev = positions[i]
-			continue
-		}
-		spans = append(spans, MatchSpan{Start: spanStart, End: prev})
-		spanStart = positions[i]
-		prev = positions[i]
-	}
-	spans = append(spans, MatchSpan{Start: spanStart, End: prev})
-	return spans
-}
-
 func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string, textRunes []rune) (float64, MatchDetails, bool) {
 	totalScore := 0.0
 	agg := MatchDetails{
@@ -200,8 +159,8 @@ func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string
 		if details.WordHits > 0 {
 			agg.WordHits += details.WordHits
 		}
-		if spans := extractTokenSpans(token.runes, textRunes); len(spans) > 0 {
-			agg.Spans = append(agg.Spans, spans...)
+		if len(details.Spans) > 0 {
+			agg.Spans = append(agg.Spans, details.Spans...)
 		}
 		if details.Start >= 0 && details.Start < agg.Start {
 			agg.Start = details.Start

@@ -26,17 +26,40 @@ func TestMatchTokensAllowsNonContiguousMultiTokenQueries(t *testing.T) {
 	}
 }
 
-func TestExtractTokenSpansSplitsNonContiguousMatches(t *testing.T) {
-	text := []rune("modules")
-	pattern := []rune("ml")
-	spans := extractTokenSpans(pattern, text)
-	if len(spans) != 2 {
-		t.Fatalf("expected two spans for letters m and o, got %v", spans)
+func TestMatchTokensPropagatesMatcherSpans(t *testing.T) {
+	gs := &GlobalSearcher{
+		matcher: NewFuzzyMatcher(),
 	}
-	if spans[0].Start != 0 || spans[0].End != 0 {
-		t.Fatalf("unexpected first span %+v", spans[0])
+
+	query := "readme new"
+	tokens, matchAll := prepareQueryTokens(query, false)
+	if matchAll {
+		t.Fatalf("expected tokens for query %q", query)
 	}
-	if spans[1].Start != 4 || spans[1].End != 4 {
-		t.Fatalf("unexpected second span %+v", spans[1])
+
+	path := "third_party/newlib-cygwin/newlib/README"
+	_, matched, details := gs.matchTokens(tokens, path, false, matchAll)
+	if !matched {
+		t.Fatalf("expected query %q to match %q", query, path)
+	}
+	if len(details.Spans) == 0 {
+		t.Fatalf("expected spans for query %q", query)
+	}
+
+	pathRunes := []rune(path)
+	foundReadme := false
+	for _, span := range details.Spans {
+		if span.Start < 0 || span.End >= len(pathRunes) {
+			t.Fatalf("span %+v out of range for path %q", span, path)
+		}
+		sub := string(pathRunes[span.Start : span.End+1])
+		if sub == "README" {
+			foundReadme = true
+			break
+		}
+	}
+
+	if !foundReadme {
+		t.Fatalf("expected one of the spans to cover README, got %+v", details.Spans)
 	}
 }
