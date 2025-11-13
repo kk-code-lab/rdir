@@ -51,6 +51,36 @@ func (s *AppState) storeFilePreview(path string, info os.FileInfo, data *Preview
 	}
 }
 
+func (s *AppState) rememberPreviewScrollForCurrentFile() {
+	if s == nil {
+		return
+	}
+	path := s.CurrentFilePath()
+	if path == "" {
+		return
+	}
+	if s.previewScrollHistory == nil {
+		s.previewScrollHistory = make(map[string]previewScrollPosition)
+	}
+	s.previewScrollHistory[path] = previewScrollPosition{
+		scroll: s.PreviewScrollOffset,
+		wrap:   s.PreviewWrapOffset,
+	}
+}
+
+func (s *AppState) restorePreviewScrollForPath(path string) bool {
+	if s == nil || path == "" || s.previewScrollHistory == nil {
+		return false
+	}
+	pos, ok := s.previewScrollHistory[path]
+	if !ok {
+		return false
+	}
+	s.PreviewScrollOffset = pos.scroll
+	s.PreviewWrapOffset = pos.wrap
+	return true
+}
+
 func (s *AppState) previewLineCount() int {
 	if s == nil || s.PreviewData == nil {
 		return 0
@@ -106,6 +136,7 @@ func (s *AppState) resetPreviewScroll() {
 		return
 	}
 	s.PreviewScrollOffset = 0
+	s.PreviewWrapOffset = 0
 	if s.PreviewData == nil {
 		s.PreviewFullScreen = false
 		s.PreviewWrap = false

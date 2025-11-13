@@ -7,9 +7,11 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	searchpkg "github.com/kk-code-lab/rdir/internal/search"
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -17,6 +19,7 @@ const (
 	previewByteLimit       int64 = 64 * 1024
 	binaryPreviewMaxBytes        = 1024
 	binaryPreviewLineWidth       = 16
+	previewTabWidth              = 4
 )
 
 func min(a, b int) int {
@@ -88,6 +91,20 @@ func printableASCII(b byte) byte {
 		return b
 	}
 	return '.'
+}
+
+func expandPreviewTextLines(lines []string) ([]string, int) {
+	if len(lines) == 0 {
+		return nil, 0
+	}
+	expanded := make([]string, len(lines))
+	charCount := 0
+	for i, line := range lines {
+		text := textutil.ExpandTabs(line, previewTabWidth)
+		expanded[i] = text
+		charCount += utf8.RuneCountInString(text)
+	}
+	return expanded, charCount
 }
 
 // ===== REDUCER =====
@@ -640,6 +657,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 
 	case PreviewExitFullScreenAction:
 		if state.PreviewFullScreen {
+			state.rememberPreviewScrollForCurrentFile()
 			state.PreviewFullScreen = false
 		}
 		return state, nil
@@ -679,18 +697,23 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 	case PreviewScrollToStartAction:
 		if state.PreviewFullScreen && state.PreviewData != nil {
 			state.PreviewScrollOffset = 0
+			state.PreviewWrapOffset = 0
 		}
 		return state, nil
 
 	case PreviewScrollToEndAction:
 		if state.PreviewFullScreen && state.PreviewData != nil {
 			state.PreviewScrollOffset = state.maxPreviewScrollOffset()
+			state.PreviewWrapOffset = 0
 		}
 		return state, nil
 
 	case TogglePreviewWrapAction:
 		if state.PreviewFullScreen && state.PreviewData != nil {
 			state.PreviewWrap = !state.PreviewWrap
+			if !state.PreviewWrap {
+				state.PreviewWrapOffset = 0
+			}
 		}
 		return state, nil
 
@@ -1472,11 +1495,13 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 		if cached, ok := state.getCachedFilePreview(filePath, info); ok {
 			state.PreviewData = cached
 			if resetScroll {
-				state.PreviewScrollOffset = 0
+				if !state.restorePreviewScrollForPath(filePath) {
+					state.PreviewScrollOffset = 0
+					state.PreviewWrapOffset = 0
+				}
 				state.PreviewFullScreen = false
-			} else {
-				state.clampPreviewScroll()
 			}
+			state.clampPreviewScroll()
 			return nil
 		}
 	}
@@ -1542,8 +1567,10 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 			if fsutil.IsTextFile(filePath, content) {
 				textContent := fsutil.NormalizeTextContent(content)
 				lines := strings.Split(textContent, "\n")
-				preview.TextLines = append(preview.TextLines, lines...)
-				preview.LineCount = len(lines)
+				expanded, charCount := expandPreviewTextLines(lines)
+				preview.TextLines = expanded
+				preview.LineCount = len(expanded)
+				preview.TextCharCount = charCount
 			} else {
 				preview.BinaryInfo = formatBinaryPreviewLines(content, info.Size())
 			}
@@ -1553,11 +1580,13 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 
 	state.PreviewData = preview
 	if resetScroll {
-		state.PreviewScrollOffset = 0
+		if !state.restorePreviewScrollForPath(filePath) {
+			state.PreviewScrollOffset = 0
+			state.PreviewWrapOffset = 0
+		}
 		state.PreviewFullScreen = false
-	} else {
-		state.clampPreviewScroll()
 	}
+	state.clampPreviewScroll()
 	return nil
 }
 
