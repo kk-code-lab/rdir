@@ -100,8 +100,11 @@ type AppState struct {
 	HideHiddenFiles bool // Whether to hide files starting with . (default true)
 
 	// Preview
-	PreviewData  *PreviewData
-	previewCache map[string]previewCacheEntry
+	PreviewData         *PreviewData
+	PreviewFullScreen   bool
+	PreviewWrap         bool
+	PreviewScrollOffset int
+	previewCache        map[string]previewCacheEntry
 
 	// Dimensions
 	ScreenWidth  int

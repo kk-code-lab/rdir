@@ -54,6 +54,30 @@ func TestInputHandlerEscapeExitsGlobalSearchWhenQueryEmpty(t *testing.T) {
 	}
 }
 
+func TestInputHandlerEscapeExitsPreviewFullScreenBeforeFilter(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{
+		PreviewFullScreen: true,
+		PreviewData:       &statepkg.PreviewData{},
+		FilterActive:      true,
+	}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyEscape, 0, 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.PreviewExitFullScreenAction); !ok {
+			t.Fatalf("Expected PreviewExitFullScreenAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected PreviewExitFullScreenAction")
+	}
+}
+
 func TestInputHandlerRightArrowMovesCursorInGlobalSearch(t *testing.T) {
 	actionChan := make(chan statepkg.Action, 1)
 	handler := NewInputHandler(actionChan)
@@ -134,6 +158,26 @@ func TestInputHandlerRightArrowClearsFilterForDirectories(t *testing.T) {
 	}
 }
 
+func TestInputHandlerRightArrowIgnoredWhenPreviewFullScreen(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{
+		PreviewFullScreen: true,
+		PreviewData:       &statepkg.PreviewData{},
+	}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyRight, 0, 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		t.Fatalf("Did not expect action, got %T", action)
+	default:
+	}
+}
+
 func TestInputHandlerEnterInFilterModeOnlyClearsFilter(t *testing.T) {
 	actionChan := make(chan statepkg.Action, 2)
 	handler := NewInputHandler(actionChan)
@@ -180,6 +224,68 @@ func TestInputHandlerEnterOutsideFilterBehavesLikeRightArrow(t *testing.T) {
 	}
 }
 
+func TestInputHandlerUpArrowScrollsPreviewWhenFullScreen(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{
+		PreviewFullScreen: true,
+		PreviewData:       &statepkg.PreviewData{},
+	}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyUp, 0, 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.PreviewScrollUpAction); !ok {
+			t.Fatalf("Expected PreviewScrollUpAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected PreviewScrollUpAction")
+	}
+}
+
+func TestInputHandlerDotIgnoredInFullScreen(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{
+		PreviewFullScreen: true,
+	}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyRune, '.', 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		t.Fatalf("Did not expect action for '.', got %T", action)
+	default:
+	}
+}
+
+func TestInputHandlerDotTogglesHiddenNormally(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyRune, '.', 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.ToggleHiddenFilesAction); !ok {
+			t.Fatalf("Expected ToggleHiddenFilesAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected ToggleHiddenFilesAction for '.'")
+	}
+}
+
 func TestInputHandlerLeftArrowMovesCursorInGlobalSearch(t *testing.T) {
 	actionChan := make(chan statepkg.Action, 1)
 	handler := NewInputHandler(actionChan)
@@ -204,6 +310,118 @@ func TestInputHandlerLeftArrowMovesCursorInGlobalSearch(t *testing.T) {
 		}
 	default:
 		t.Fatal("Expected action to be emitted for left arrow")
+	}
+}
+
+func TestInputHandlerQExitsPreviewFullScreen(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{
+		PreviewFullScreen: true,
+		PreviewData:       &statepkg.PreviewData{},
+	}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'q', 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.PreviewExitFullScreenAction); !ok {
+			t.Fatalf("Expected PreviewExitFullScreenAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected PreviewExitFullScreenAction for 'q'")
+	}
+}
+
+func TestInputHandlerXExitsPreviewFullScreen(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{
+		PreviewFullScreen: true,
+		PreviewData:       &statepkg.PreviewData{},
+	}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'x', 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.PreviewExitFullScreenAction); !ok {
+			t.Fatalf("Expected PreviewExitFullScreenAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected PreviewExitFullScreenAction for 'x'")
+	}
+}
+
+func TestInputHandlerLeftArrowExitsPreviewFullScreen(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{
+		PreviewFullScreen: true,
+		PreviewData:       &statepkg.PreviewData{},
+	}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyLeft, 0, 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.PreviewExitFullScreenAction); !ok {
+			t.Fatalf("Expected PreviewExitFullScreenAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected PreviewExitFullScreenAction")
+	}
+}
+
+func TestInputHandlerWrapToggleInFullScreen(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{
+		PreviewFullScreen: true,
+		PreviewData:       &statepkg.PreviewData{},
+	}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'w', 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.TogglePreviewWrapAction); !ok {
+			t.Fatalf("Expected TogglePreviewWrapAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected TogglePreviewWrapAction for 'w'")
+	}
+}
+
+func TestInputHandlerRunePOpensPager(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'P', 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.OpenPagerAction); !ok {
+			t.Fatalf("Expected OpenPagerAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected OpenPagerAction for 'P'")
 	}
 }
 

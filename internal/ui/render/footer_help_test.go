@@ -23,10 +23,11 @@ func TestBuildFooterHelpSegments_DefaultMode(t *testing.T) {
 		"/: filter",
 		"f: search",
 		"r: refresh",
+		"→: preview full",
+		"P: open pager",
 		".: toggle hidden",
 		"y: yank path",
 		"e: edit file",
-		"q/x: quit/cd",
 	}
 
 	if !slices.Equal(got, want) {
@@ -82,5 +83,37 @@ func TestBuildFooterHelpTextPadding(t *testing.T) {
 	text := buildFooterHelpText(state)
 	if !strings.HasPrefix(text, " ") || !strings.HasSuffix(text, " ") {
 		t.Fatalf("help text missing padding: %q", text)
+	}
+}
+
+func TestBuildFooterHelpSegments_PreviewMode(t *testing.T) {
+	state := &statepkg.AppState{
+		PreviewFullScreen: true,
+		PreviewData:       &statepkg.PreviewData{},
+	}
+
+	got := buildFooterHelpSegments(state)
+	wantFocus := []string{
+		"Esc/←/q: exit",
+		"↑↓/Pg: scroll",
+		"Home/End: jump",
+		"w: toggle wrap",
+		"P: open pager",
+	}
+
+	if len(got) < len(wantFocus) {
+		t.Fatalf("expected preview focus help, got %v", got)
+	}
+
+	for i, want := range wantFocus {
+		if got[i] != want {
+			t.Fatalf("preview focus mismatch at %d: want %q got %q", i, want, got[i])
+		}
+	}
+
+	for _, segment := range got {
+		if segment == ".: toggle hidden" {
+			t.Fatal("fullscreen help should not include toggle hidden shortcut")
+		}
 	}
 }

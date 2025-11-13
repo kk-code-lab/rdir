@@ -227,6 +227,8 @@ func (app *Application) handleAppAction(action statepkg.Action) bool {
 		return app.handleRightArrow()
 	case statepkg.OpenEditorAction:
 		return app.handleEditorOpen()
+	case statepkg.OpenPagerAction:
+		return app.handleOpenPager()
 	}
 
 	if _, err := app.reducer.Reduce(app.state, action); err != nil {

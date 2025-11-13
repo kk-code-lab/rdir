@@ -45,6 +45,14 @@ func contextualHelpSegments(state *statepkg.AppState) []string {
 			"↵: accept selection",
 			"←: clear query",
 		}
+	case state.PreviewFullScreen:
+		return []string{
+			"Esc/←/q: exit",
+			"↑↓/Pg: scroll",
+			"Home/End: jump",
+			"w: toggle wrap",
+			"P: open pager",
+		}
 	default:
 		return []string{
 			"↑/↓/↵/→/←: navigate",
@@ -53,6 +61,8 @@ func contextualHelpSegments(state *statepkg.AppState) []string {
 			"/: filter",
 			"f: search",
 			"r: refresh",
+			"→: preview full",
+			"P: open pager",
 		}
 	}
 }
@@ -71,7 +81,10 @@ func persistentHelpSegments(state *statepkg.AppState) []string {
 		hiddenStatus = "hidden"
 	}
 
-	segments := []string{fmt.Sprintf(".: toggle %s", hiddenStatus)}
+	segments := []string{}
+	if !state.PreviewFullScreen {
+		segments = append(segments, fmt.Sprintf(".: toggle %s", hiddenStatus))
+	}
 
 	if state.ClipboardAvailable {
 		segments = append(segments, "y: yank path")
@@ -80,8 +93,6 @@ func persistentHelpSegments(state *statepkg.AppState) []string {
 	if state.EditorAvailable {
 		segments = append(segments, "e: edit file")
 	}
-
-	segments = append(segments, "q/x: quit/cd")
 
 	return segments
 }

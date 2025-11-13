@@ -50,3 +50,72 @@ func (s *AppState) storeFilePreview(path string, info os.FileInfo, data *Preview
 		data:    clonePreviewData(data),
 	}
 }
+
+func (s *AppState) previewLineCount() int {
+	if s == nil || s.PreviewData == nil {
+		return 0
+	}
+	switch {
+	case s.PreviewData.IsDir:
+		return len(s.PreviewData.DirEntries)
+	case len(s.PreviewData.TextLines) > 0:
+		return len(s.PreviewData.TextLines)
+	case len(s.PreviewData.BinaryInfo.Lines) > 0:
+		return len(s.PreviewData.BinaryInfo.Lines)
+	default:
+		return 0
+	}
+}
+
+func (s *AppState) previewVisibleLines() int {
+	if s == nil {
+		return 0
+	}
+	lines := s.ScreenHeight - 2
+	if lines < 0 {
+		lines = 0
+	}
+	return lines
+}
+
+func (s *AppState) maxPreviewScrollOffset() int {
+	lines := s.previewLineCount()
+	visible := s.previewVisibleLines()
+	if visible <= 0 || lines <= visible {
+		return 0
+	}
+	return lines - visible
+}
+
+func (s *AppState) clampPreviewScroll() {
+	if s == nil {
+		return
+	}
+	if s.PreviewScrollOffset < 0 {
+		s.PreviewScrollOffset = 0
+		return
+	}
+	maxOffset := s.maxPreviewScrollOffset()
+	if s.PreviewScrollOffset > maxOffset {
+		s.PreviewScrollOffset = maxOffset
+	}
+}
+
+func (s *AppState) resetPreviewScroll() {
+	if s == nil {
+		return
+	}
+	s.PreviewScrollOffset = 0
+	if s.PreviewData == nil {
+		s.PreviewFullScreen = false
+		s.PreviewWrap = false
+	}
+}
+
+func (s *AppState) scrollPreviewBy(delta int) {
+	if s == nil || delta == 0 {
+		return
+	}
+	s.PreviewScrollOffset += delta
+	s.clampPreviewScroll()
+}

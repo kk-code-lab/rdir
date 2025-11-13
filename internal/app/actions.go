@@ -38,15 +38,18 @@ func normalizeClipboardPath(inputPath string, goos string) string {
 
 func (app *Application) handleRightArrow() bool {
 	file := app.state.CurrentFile()
-	if file != nil && !file.IsDir {
-		filePath := filepath.Join(app.state.CurrentPath, file.Name)
-		if err := app.openFileInPager(filePath); err != nil {
+	if file == nil {
+		return true
+	}
+
+	if file.IsDir {
+		if _, err := app.reducer.Reduce(app.state, statepkg.EnterDirectoryAction{}); err != nil {
 			app.state.LastError = err
 		}
 		return true
 	}
 
-	if _, err := app.reducer.Reduce(app.state, statepkg.EnterDirectoryAction{}); err != nil {
+	if _, err := app.reducer.Reduce(app.state, statepkg.PreviewEnterFullScreenAction{}); err != nil {
 		app.state.LastError = err
 	}
 	return true
@@ -64,6 +67,19 @@ func (app *Application) handleEditorOpen() bool {
 
 	filePath := filepath.Join(app.state.CurrentPath, file.Name)
 	if err := app.openFileInEditor(filePath); err != nil {
+		app.state.LastError = err
+	}
+	return true
+}
+
+func (app *Application) handleOpenPager() bool {
+	file := app.state.CurrentFile()
+	if file == nil || file.IsDir {
+		return true
+	}
+
+	filePath := filepath.Join(app.state.CurrentPath, file.Name)
+	if err := app.openFileInPager(filePath); err != nil {
 		app.state.LastError = err
 	}
 	return true

@@ -45,11 +45,15 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 	inFilterMode := ih.state != nil && ih.state.FilterActive
 	inGlobalSearch := ih.state != nil && ih.state.GlobalSearchActive
 	inSearchMode := inFilterMode || inGlobalSearch
+	previewFullScreen := ih.state != nil && ih.state.PreviewFullScreen
+	previewAvailable := ih.state != nil && ih.state.PreviewData != nil
 
 	// Handle special keys first
 	switch ev.Key() {
 	case tcell.KeyEscape:
-		if inGlobalSearch {
+		if previewFullScreen {
+			ih.actionChan <- statepkg.PreviewExitFullScreenAction{}
+		} else if inGlobalSearch {
 			if ih.state != nil && ih.state.GlobalSearchQuery != "" {
 				ih.actionChan <- statepkg.GlobalSearchResetQueryAction{}
 			} else {
@@ -65,7 +69,9 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 		return false
 
 	case tcell.KeyUp:
-		if inGlobalSearch {
+		if previewFullScreen {
+			ih.actionChan <- statepkg.PreviewScrollUpAction{}
+		} else if inGlobalSearch {
 			ih.actionChan <- statepkg.GlobalSearchNavigateAction{Direction: "up"}
 		} else if inFilterMode || !inSearchMode {
 			ih.actionChan <- statepkg.NavigateUpAction{}
@@ -73,7 +79,9 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 		return true
 
 	case tcell.KeyDown:
-		if inGlobalSearch {
+		if previewFullScreen {
+			ih.actionChan <- statepkg.PreviewScrollDownAction{}
+		} else if inGlobalSearch {
 			ih.actionChan <- statepkg.GlobalSearchNavigateAction{Direction: "down"}
 		} else if inFilterMode || !inSearchMode {
 			ih.actionChan <- statepkg.NavigateDownAction{}
@@ -97,7 +105,13 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 			} else {
 				ih.actionChan <- statepkg.GlobalSearchMoveCursorAction{Direction: "right"}
 			}
-		} else if inFilterMode {
+			return true
+		}
+		if previewFullScreen {
+			return true
+		}
+
+		if inFilterMode {
 			// Stay in filter mode when previewing files; only clear when navigating into dirs
 			shouldClearFilter := true
 			if ih.state != nil {
@@ -109,9 +123,10 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 				ih.actionChan <- statepkg.FilterClearAction{}
 			}
 			ih.actionChan <- statepkg.RightArrowAction{}
-		} else {
-			ih.actionChan <- statepkg.RightArrowAction{}
+			return true
 		}
+
+		ih.actionChan <- statepkg.RightArrowAction{}
 		return true
 
 	case tcell.KeyLeft:
@@ -121,6 +136,8 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 			} else {
 				ih.actionChan <- statepkg.GlobalSearchMoveCursorAction{Direction: "left"}
 			}
+		} else if previewFullScreen {
+			ih.actionChan <- statepkg.PreviewExitFullScreenAction{}
 		} else if inFilterMode {
 			queryEmpty := true
 			if ih.state != nil {
@@ -137,7 +154,9 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 		return true
 
 	case tcell.KeyPgUp:
-		if inGlobalSearch {
+		if previewFullScreen {
+			ih.actionChan <- statepkg.PreviewScrollPageUpAction{}
+		} else if inGlobalSearch {
 			ih.actionChan <- statepkg.GlobalSearchPageUpAction{}
 		} else if !inFilterMode {
 			ih.actionChan <- statepkg.ScrollPageUpAction{}
@@ -145,7 +164,9 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 		return true
 
 	case tcell.KeyPgDn:
-		if inGlobalSearch {
+		if previewFullScreen {
+			ih.actionChan <- statepkg.PreviewScrollPageDownAction{}
+		} else if inGlobalSearch {
 			ih.actionChan <- statepkg.GlobalSearchPageDownAction{}
 		} else if !inFilterMode {
 			ih.actionChan <- statepkg.ScrollPageDownAction{}
@@ -153,7 +174,9 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 		return true
 
 	case tcell.KeyHome:
-		if inGlobalSearch {
+		if previewFullScreen {
+			ih.actionChan <- statepkg.PreviewScrollToStartAction{}
+		} else if inGlobalSearch {
 			ih.actionChan <- statepkg.GlobalSearchMoveCursorAction{Direction: "home"}
 		} else {
 			ih.actionChan <- statepkg.ScrollToStartAction{}
@@ -161,7 +184,9 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 		return true
 
 	case tcell.KeyEnd:
-		if inGlobalSearch {
+		if previewFullScreen {
+			ih.actionChan <- statepkg.PreviewScrollToEndAction{}
+		} else if inGlobalSearch {
 			ih.actionChan <- statepkg.GlobalSearchMoveCursorAction{Direction: "end"}
 		} else {
 			ih.actionChan <- statepkg.ScrollToEndAction{}
@@ -252,15 +277,36 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 		if !inSearchMode {
 			switch r {
 			case 'q':
+				if previewFullScreen {
+					ih.actionChan <- statepkg.PreviewExitFullScreenAction{}
+					return true
+				}
 				ih.actionChan <- statepkg.QuitAction{}
 				return false
 
 			case 'x':
+				if previewFullScreen {
+					ih.actionChan <- statepkg.PreviewExitFullScreenAction{}
+					return true
+				}
 				ih.actionChan <- statepkg.QuitAndChangeAction{}
 				return false
 
 			case '.':
+				if previewFullScreen {
+					return true
+				}
 				ih.actionChan <- statepkg.ToggleHiddenFilesAction{}
+				return true
+
+			case 'w', 'W':
+				if previewFullScreen && previewAvailable {
+					ih.actionChan <- statepkg.TogglePreviewWrapAction{}
+				}
+				return true
+
+			case 'P':
+				ih.actionChan <- statepkg.OpenPagerAction{}
 				return true
 
 			case '/':
