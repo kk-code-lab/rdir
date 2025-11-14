@@ -47,3 +47,8 @@
 
 - [ ] **Preview pager PTY tests**  
   Add end-to-end tests that run `PreviewPager.Run()` against a pseudo-terminal created with the standard library (`golang.org/x/term` + `os.Pipe`/`syscall`), drive key presses (e.g., `q`, `w`, `PgDn`), and assert that the pager restores cursor visibility/DECAWM and renders expected headers/status for text and binary files. This would catch regressje typu “ukryty kursor po wyjściu” i dokumentować wymianę sekwencji sterujących.
+
+- [ ] **Terminal injection audit**  
+  Walk every surface that prints user-controlled text (status bar, directory list, error banners, etc.) and ensure the same sanitization used in the pager header/dir entries is applied everywhere so ANSI escapes can’t leak to the terminal.
+- [ ] **External command safety review**  
+  Inventory all `exec.Command` usages (editor, pager, clipboard, future hooks) to confirm no shell invocation paths exist, arguments remain separated, and non-zero exits propagate back to the UI/logs. Add regression tests for the most common flows while at it.
