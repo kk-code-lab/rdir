@@ -101,12 +101,13 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		}
 		for i := startIdx; i < len(preview.TextLines); i++ {
 			line := preview.TextLines[i]
+			lineWidth := r.previewLineWidth(preview, i, line)
 			if wrapEnabled {
 				if !r.drawWrappedPreviewText(line, startX, panelWidth, textStyle, &y, bottomLimit, w) {
 					break
 				}
 			} else {
-				if !r.drawPreviewTextLineClipped(line, startX, panelWidth, textStyle, y, bottomLimit, w) {
+				if !r.drawPreviewTextLineClipped(line, lineWidth, startX, panelWidth, textStyle, y, bottomLimit, w) {
 					break
 				}
 				y++
@@ -182,7 +183,7 @@ func (r *Renderer) drawBinaryPreviewLine(line string, startX, panelWidth int, mo
 	return true
 }
 
-func (r *Renderer) drawPreviewTextLineClipped(text string, startX, panelWidth int, style tcell.Style, y, bottomLimit, screenWidth int) bool {
+func (r *Renderer) drawPreviewTextLineClipped(text string, lineWidth int, startX, panelWidth int, style tcell.Style, y, bottomLimit, screenWidth int) bool {
 	if panelWidth <= 0 || y >= bottomLimit {
 		return false
 	}
@@ -203,7 +204,11 @@ func (r *Renderer) drawPreviewTextLineClipped(text string, startX, panelWidth in
 	truncated := false
 	if renderWidth > 1 {
 		displayWidth := renderWidth
-		if r.measureTextWidth(text) > displayWidth {
+		effectiveWidth := lineWidth
+		if effectiveWidth <= 0 {
+			effectiveWidth = r.measureTextWidth(text)
+		}
+		if effectiveWidth > displayWidth {
 			displayWidth--
 			clipped, wasTruncated := r.clipTextToWidth(text, displayWidth)
 			truncated = wasTruncated
@@ -214,7 +219,11 @@ func (r *Renderer) drawPreviewTextLineClipped(text string, startX, panelWidth in
 			r.drawTextLine(startX, y, displayWidth, text, style)
 		}
 	} else if renderWidth == 1 {
-		truncated = r.measureTextWidth(text) > 1
+		effectiveWidth := lineWidth
+		if effectiveWidth <= 0 {
+			effectiveWidth = r.measureTextWidth(text)
+		}
+		truncated = effectiveWidth > 1
 	}
 
 	if truncated && available > 0 {
@@ -239,7 +248,7 @@ func (r *Renderer) drawWrappedPreviewText(text string, startX, panelWidth int, s
 		if *y >= bottomLimit {
 			return false
 		}
-		_ = r.drawPreviewTextLineClipped(segment, startX, panelWidth, style, *y, bottomLimit, screenWidth)
+		_ = r.drawPreviewTextLineClipped(segment, 0, startX, panelWidth, style, *y, bottomLimit, screenWidth)
 		*y++
 	}
 	return true
@@ -310,4 +319,13 @@ func (r *Renderer) fullScreenBinaryMode(state *statepkg.AppState, width int) bin
 	default:
 		return binaryPreviewModeNone
 	}
+}
+
+func (r *Renderer) previewLineWidth(preview *statepkg.PreviewData, idx int, text string) int {
+	if preview != nil && idx >= 0 && idx < len(preview.TextLineMeta) {
+		if width := preview.TextLineMeta[idx].DisplayWidth; width > 0 {
+			return width
+		}
+	}
+	return r.measureTextWidth(text)
 }

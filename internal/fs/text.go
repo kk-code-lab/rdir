@@ -16,13 +16,13 @@ const (
 	nonPrintableThresholdPercent = 30
 )
 
-type unicodeEncoding int
+type UnicodeEncoding int
 
 const (
-	encodingUnknown unicodeEncoding = iota
-	encodingUTF8BOM
-	encodingUTF16LE
-	encodingUTF16BE
+	EncodingUnknown UnicodeEncoding = iota
+	EncodingUTF8BOM
+	EncodingUTF16LE
+	EncodingUTF16BE
 )
 
 var binaryExtensions = map[string]struct{}{
@@ -88,7 +88,7 @@ func IsTextFile(path string, content []byte) bool {
 		sample = sample[:textDetectionSampleSize]
 	}
 
-	if enc := detectUnicodeEncoding(sample); enc != encodingUnknown {
+	if enc := DetectUnicodeEncoding(sample); enc != EncodingUnknown {
 		return true
 	}
 
@@ -163,19 +163,19 @@ func isCommonTextByte(b byte) bool {
 	}
 }
 
-func detectUnicodeEncoding(sample []byte) unicodeEncoding {
+func DetectUnicodeEncoding(sample []byte) UnicodeEncoding {
 	if len(sample) >= 3 && sample[0] == 0xEF && sample[1] == 0xBB && sample[2] == 0xBF {
-		return encodingUTF8BOM
+		return EncodingUTF8BOM
 	}
 	if len(sample) >= 2 {
 		switch {
 		case sample[0] == 0xFF && sample[1] == 0xFE:
-			return encodingUTF16LE
+			return EncodingUTF16LE
 		case sample[0] == 0xFE && sample[1] == 0xFF:
-			return encodingUTF16BE
+			return EncodingUTF16BE
 		}
 	}
-	return encodingUnknown
+	return EncodingUnknown
 }
 
 // NormalizeTextContent converts known Unicode BOM-encoded content into UTF-8 strings.
@@ -184,12 +184,12 @@ func NormalizeTextContent(content []byte) string {
 		return ""
 	}
 
-	switch detectUnicodeEncoding(content) {
-	case encodingUTF8BOM:
+	switch DetectUnicodeEncoding(content) {
+	case EncodingUTF8BOM:
 		return string(content[3:])
-	case encodingUTF16LE:
+	case EncodingUTF16LE:
 		return decodeUTF16(content, unicode.LittleEndian)
-	case encodingUTF16BE:
+	case EncodingUTF16BE:
 		return decodeUTF16(content, unicode.BigEndian)
 	default:
 		return string(content)

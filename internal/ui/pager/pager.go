@@ -21,6 +21,8 @@ const (
 	binaryPreviewLineWidth = 16
 	binaryPagerChunkSize   = 64 * 1024
 	binaryPagerMaxChunks   = 8
+	headerBarStyle         = "\x1b[48;5;238m\x1b[97m"
+	statusBarStyle         = "\x1b[48;5;236m\x1b[97m"
 )
 
 var termGetSize = term.GetSize
@@ -44,6 +46,9 @@ type PreviewPager struct {
 	charCount       int
 	binaryMode      bool
 	binarySource    *binaryPagerSource
+	textSource      *textPagerSource
+	preloadLines    int
+	showInfo        bool
 }
 
 func NewPreviewPager(state *statepkg.AppState) (*PreviewPager, error) {
@@ -59,14 +64,24 @@ func NewPreviewPager(state *statepkg.AppState) (*PreviewPager, error) {
 }
 
 func (p *PreviewPager) prepareContent() {
-	lines, charCount, binarySource := p.buildContentLines()
+	lines, charCount, binarySource, textSource := p.buildContentLines()
 	if binarySource != nil {
 		p.binaryMode = true
 		p.wrapEnabled = false
 		p.binarySource = binarySource
+		p.textSource = nil
 		p.lines = nil
 		p.lineWidths = nil
 		p.charCount = charCount
+		return
+	}
+	if textSource != nil {
+		p.binaryMode = false
+		p.textSource = textSource
+		p.binarySource = nil
+		p.lines = nil
+		p.lineWidths = nil
+		p.charCount = textSource.CharCount()
 		return
 	}
 	if len(lines) == 0 {
@@ -79,6 +94,8 @@ func (p *PreviewPager) prepareContent() {
 	p.lines = lines
 	p.lineWidths = widths
 	p.charCount = charCount
+	p.textSource = nil
+	p.binarySource = nil
 }
 
 func (p *PreviewPager) Run() error {
@@ -143,6 +160,9 @@ func (p *PreviewPager) initTerminal() error {
 func (p *PreviewPager) cleanupTerminal() {
 	if p.binarySource != nil {
 		p.binarySource.Close()
+	}
+	if p.textSource != nil {
+		p.textSource.Close()
 	}
 	if p.input != nil && p.restoreTerm != nil {
 		_ = term.Restore(int(p.input.Fd()), p.restoreTerm)
@@ -209,7 +229,7 @@ func (p *PreviewPager) render() error {
 	p.ensureRowMetrics()
 
 	header := p.headerLines()
-	headerRows := len(header) + 1 // + blank separator line
+	headerRows := len(header)
 	if headerRows >= p.height {
 		headerRows = p.height - 1
 		if headerRows < 0 {
@@ -220,6 +240,18 @@ func (p *PreviewPager) render() error {
 	contentRows := p.height - headerRows - 1 // leave space for status
 	if contentRows < 1 {
 		contentRows = 1
+	}
+	contentRowLimit := p.height - 1
+	if contentRowLimit < 1 {
+		contentRowLimit = 1
+	}
+
+	if p.textSource != nil {
+		target := p.state.PreviewScrollOffset + contentRows + 2
+		if target < 0 {
+			target = 0
+		}
+		p.preloadLines = target
 	}
 
 	totalLines := p.lineCount()
@@ -234,12 +266,7 @@ func (p *PreviewPager) render() error {
 		if row > p.height-1 {
 			break
 		}
-		p.drawRow(row, line, true)
-		row++
-	}
-
-	if row <= p.height-1 {
-		p.drawRow(row, "", false)
+		p.drawStyledRow(row, line, false, headerBarStyle)
 		row++
 	}
 
@@ -256,7 +283,7 @@ func (p *PreviewPager) render() error {
 		skipRows = p.state.PreviewWrapOffset
 	}
 
-	for i := start; i < totalLines && row <= p.height-1; i++ {
+	for i := start; i < totalLines && row <= contentRowLimit; i++ {
 		text := p.lineAt(i)
 		currentSkip := skipRows
 		if p.wrapEnabled && currentSkip > 0 {
@@ -274,12 +301,12 @@ func (p *PreviewPager) render() error {
 		skipRows = 0
 	}
 
-	for row <= p.height-1 {
+	for row <= contentRowLimit {
 		p.drawRow(row, "", false)
 		row++
 	}
 
-	status := p.statusLine(totalLines, contentRows, p.charCount)
+	status := p.statusLine(totalLines, contentRows, p.totalCharCount())
 	p.drawStatus(status)
 
 	if p.writer != nil {
@@ -313,16 +340,64 @@ func (p *PreviewPager) drawRow(row int, text string, bold bool) {
 	}
 }
 
+func (p *PreviewPager) drawStyledRow(row int, text string, bold bool, style string) {
+	if row < 1 {
+		row = 1
+	}
+	if row > p.height {
+		return
+	}
+
+	p.printf("\x1b[%d;1H", row)
+	p.writeString("\x1b[2K")
+
+	if style != "" {
+		p.writeString(style)
+	}
+	if bold {
+		p.writeString("\x1b[1m")
+	}
+
+	renderText := text
+	available := p.width
+	if available < 0 {
+		available = 0
+	}
+
+	needsPadding := style == headerBarStyle
+	if needsPadding && available >= 2 {
+		available -= 2
+		renderText = truncateToWidth(renderText, available)
+		p.writeString(" " + renderText)
+		if displayWidth(renderText) < available {
+			p.writeString(" ")
+		} else {
+			p.writeString("…")
+		}
+	} else {
+		if available > 0 {
+			renderText = truncateToWidth(renderText, available)
+		}
+		p.writeString(renderText)
+	}
+
+	if bold {
+		p.writeString("\x1b[22m")
+	}
+	if style != "" || bold {
+		p.writeString("\x1b[0m")
+	}
+}
+
 func (p *PreviewPager) drawStatus(text string) {
 	if p.height < 1 {
 		return
 	}
-	p.printf("\x1b[%d;1H", p.height)
-	p.writeString("\x1b[2K")
-	if len(text) > p.width && p.width > 0 {
-		text = truncateToWidth(text, p.width)
+	display := " " + text + " "
+	if p.width > 0 && displayWidth(display) > p.width {
+		display = truncateToWidth(display, p.width)
 	}
-	p.printf("\x1b[7m %s \x1b[0m", text)
+	p.drawStyledRow(p.height, display, false, statusBarStyle)
 }
 
 func (p *PreviewPager) clampScroll(totalLines, visible int) {
@@ -388,14 +463,21 @@ func (p *PreviewPager) clampScroll(totalLines, visible int) {
 }
 
 func (p *PreviewPager) handleKey(ev keyEvent) bool {
-	totalLines := p.lineCount()
-	if p.wrapEnabled {
-		p.ensureRowMetrics()
-	}
-
 	contentRows := p.height - (len(p.headerLines()) + 1) - 1
 	if contentRows < 1 {
 		contentRows = 1
+	}
+	if p.textSource != nil {
+		target := p.state.PreviewScrollOffset + contentRows + 2
+		if target < 0 {
+			target = 0
+		}
+		p.preloadLines = target
+	}
+
+	totalLines := p.lineCount()
+	if p.wrapEnabled {
+		p.ensureRowMetrics()
 	}
 
 	switch ev.kind {
@@ -447,6 +529,8 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		} else {
 			p.state.PreviewScrollOffset += contentRows
 		}
+	case keyToggleInfo:
+		p.showInfo = !p.showInfo
 	}
 
 	p.clampScroll(totalLines, contentRows)
@@ -457,6 +541,10 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 	wrap := "off"
 	if p.wrapEnabled {
 		wrap = "on"
+	}
+	info := "off"
+	if p.showInfo {
+		info = "on"
 	}
 
 	if p.wrapEnabled {
@@ -473,8 +561,8 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 			endRow = totalRows
 		}
 		percent := p.progressPercent(startRow, totalRows)
-		return fmt.Sprintf("%d-%d/%d rows (%d lines, %d%%)  %d chars  wrap:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap",
-			startRow, endRow, totalRows, totalLines, percent, charCount, wrap)
+		return fmt.Sprintf("%d-%d/%d rows (%d lines, %d%%)  %d chars  wrap:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  i info",
+			startRow, endRow, totalRows, totalLines, percent, charCount, wrap, info)
 	}
 
 	start := 0
@@ -489,11 +577,23 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		end = totalLines
 	}
 	percent := p.progressPercent(start, totalLines)
-	return fmt.Sprintf("%d-%d/%d lines (%d%%)  %d chars  wrap:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap",
-		start, end, totalLines, percent, charCount, wrap)
+	return fmt.Sprintf("%d-%d/%d lines (%d%%)  %d chars  wrap:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  i info",
+		start, end, totalLines, percent, charCount, wrap, info)
 }
 
 func (p *PreviewPager) lineCount() int {
+	if p.textSource != nil {
+		target := p.preloadLines
+		min := p.state.PreviewScrollOffset + 1
+		if target < min {
+			target = min
+		}
+		if target < 0 {
+			target = 0
+		}
+		_ = p.textSource.EnsureLine(target)
+		return p.textSource.LineCount()
+	}
 	if p.binaryMode {
 		if p.binarySource == nil {
 			return 0
@@ -503,7 +603,17 @@ func (p *PreviewPager) lineCount() int {
 	return len(p.lines)
 }
 
+func (p *PreviewPager) totalCharCount() int {
+	if p.textSource != nil {
+		return p.textSource.CharCount()
+	}
+	return p.charCount
+}
+
 func (p *PreviewPager) lineAt(idx int) string {
+	if p.textSource != nil {
+		return p.textSource.Line(idx)
+	}
 	if p.binaryMode {
 		if p.binarySource == nil {
 			return ""
@@ -539,10 +649,11 @@ func (p *PreviewPager) headerLines() []string {
 	mod := preview.Modified.Format("2006-01-02 15:04:05")
 	mode := preview.Mode.String()
 
-	return []string{
-		fullPath,
-		fmt.Sprintf("%s  %s  %s", mode, size, mod),
+	lines := []string{fullPath}
+	if p.showInfo {
+		lines = append(lines, fmt.Sprintf("%s  %s  %s", mode, size, mod))
 	}
+	return lines
 }
 
 func (p *PreviewPager) applyWrapSetting() {
@@ -559,6 +670,14 @@ func (p *PreviewPager) applyWrapSetting() {
 func (p *PreviewPager) rowSpanForIndex(idx int) int {
 	if p.binaryMode {
 		return 1
+	}
+	if p.textSource != nil {
+		if p.wrapEnabled && p.width > 0 && idx >= 0 && idx < len(p.rowSpans) && p.rowMetricsWidth == p.width {
+			if span := p.rowSpans[idx]; span > 0 {
+				return span
+			}
+		}
+		return p.rowSpanFromWidth(p.lineWidth(idx))
 	}
 	if idx < 0 || idx >= len(p.lines) {
 		return 1
@@ -589,6 +708,9 @@ func (p *PreviewPager) rowSpanFromWidth(width int) int {
 }
 
 func (p *PreviewPager) lineWidth(idx int) int {
+	if p.textSource != nil {
+		return p.textSource.LineWidth(idx)
+	}
 	if p.binaryMode {
 		return displayWidth(p.lineAt(idx))
 	}
@@ -599,7 +721,35 @@ func (p *PreviewPager) lineWidth(idx int) int {
 }
 
 func (p *PreviewPager) ensureRowMetrics() {
-	if p.binaryMode || !p.wrapEnabled || p.width <= 0 || len(p.lines) == 0 {
+	if p.binaryMode || !p.wrapEnabled || p.width <= 0 {
+		p.rowSpans = nil
+		p.rowPrefix = nil
+		p.rowMetricsWidth = 0
+		return
+	}
+	if p.textSource != nil {
+		count := p.lineCount()
+		if count == 0 {
+			p.rowSpans = nil
+			p.rowPrefix = nil
+			p.rowMetricsWidth = p.width
+			return
+		}
+		if p.rowMetricsWidth != p.width || len(p.rowPrefix) == 0 {
+			p.rowSpans = make([]int, 0, count)
+			p.rowPrefix = []int{0}
+		}
+		for len(p.rowSpans) < count {
+			width := p.lineWidth(len(p.rowSpans))
+			span := p.rowSpanFromWidth(width)
+			p.rowSpans = append(p.rowSpans, span)
+			last := p.rowPrefix[len(p.rowPrefix)-1]
+			p.rowPrefix = append(p.rowPrefix, last+span)
+		}
+		p.rowMetricsWidth = p.width
+		return
+	}
+	if len(p.lines) == 0 {
 		p.rowSpans = nil
 		p.rowPrefix = nil
 		p.rowMetricsWidth = 0
@@ -805,6 +955,11 @@ func (p *PreviewPager) scrollRows(totalLines int, delta int) {
 }
 
 func (p *PreviewPager) scrollToEnd(totalLines int) {
+	if p.textSource != nil {
+		_ = p.textSource.EnsureAll()
+		totalLines = p.textSource.LineCount()
+		p.rowMetricsWidth = 0
+	}
 	if totalLines <= 0 {
 		p.state.PreviewScrollOffset = 0
 		p.state.PreviewWrapOffset = 0
@@ -824,32 +979,38 @@ func (p *PreviewPager) scrollToEnd(totalLines int) {
 	p.state.PreviewWrapOffset = rows - 1
 }
 
-func (p *PreviewPager) buildContentLines() ([]string, int, *binaryPagerSource) {
+func (p *PreviewPager) buildContentLines() ([]string, int, *binaryPagerSource, *textPagerSource) {
 	if p.state == nil || p.state.PreviewData == nil {
-		return nil, 0, nil
+		return nil, 0, nil, nil
 	}
 
 	preview := p.state.PreviewData
 	switch {
 	case preview.IsDir:
 		lines := formatDirectoryPreview(preview)
-		return lines, lineCharCount(lines), nil
+		return lines, lineCharCount(lines), nil, nil
 	case len(preview.TextLines) > 0:
-		return preview.TextLines, preview.TextCharCount, nil
+		if preview.TextTruncated && len(preview.TextLineMeta) == len(preview.TextLines) {
+			filePath := filepath.Join(p.state.CurrentPath, preview.Name)
+			if source, err := newTextPagerSource(filePath, preview); err == nil {
+				return nil, preview.TextCharCount, nil, source
+			}
+		}
+		return preview.TextLines, preview.TextCharCount, nil, nil
 	case len(preview.BinaryInfo.Lines) > 0:
 		filePath := filepath.Join(p.state.CurrentPath, preview.Name)
 		source, err := newBinaryPagerSource(filePath, preview.BinaryInfo.TotalBytes)
 		if err == nil {
-			return nil, int(preview.BinaryInfo.TotalBytes), source
+			return nil, int(preview.BinaryInfo.TotalBytes), source, nil
 		}
 		lines := append([]string(nil), preview.BinaryInfo.Lines...)
 		if len(lines) > 0 {
 			lines = lines[1:]
 		}
-		return lines, lineCharCount(lines), nil
+		return lines, lineCharCount(lines), nil, nil
 	default:
 		lines := []string{"(no preview available)"}
-		return lines, lineCharCount(lines), nil
+		return lines, lineCharCount(lines), nil, nil
 	}
 }
 
@@ -870,6 +1031,7 @@ const (
 	keyToggleWrap
 	keySpace
 	keyCtrlC
+	keyToggleInfo
 )
 
 type keyEvent struct {
@@ -898,6 +1060,8 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keyQuit}, nil
 	case 'w', 'W':
 		return keyEvent{kind: keyToggleWrap}, nil
+	case 'i', 'I':
+		return keyEvent{kind: keyToggleInfo}, nil
 	case ' ':
 		return keyEvent{kind: keySpace}, nil
 	case 'b', 'B':
