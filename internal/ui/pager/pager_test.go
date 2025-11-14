@@ -2,11 +2,13 @@ package pager
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 )
 
@@ -133,5 +135,51 @@ func TestUpdateSizeFallsBackToOutputFd(t *testing.T) {
 	}
 	if len(seen) < 2 {
 		t.Fatalf("expected both descriptors to be attempted, got %v", seen)
+	}
+}
+
+func TestTextPagerSourceStreamsLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.txt")
+	var builder strings.Builder
+	totalLines := 300
+	for i := 0; i < totalLines; i++ {
+		fmt.Fprintf(&builder, "line-%d\n", i)
+	}
+	if err := os.WriteFile(path, []byte(builder.String()), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	preview := &statepkg.PreviewData{
+		TextEncoding:  fsutil.EncodingUnknown,
+		TextTruncated: true,
+		TextBytesRead: 0,
+	}
+	source, err := newTextPagerSource(path, preview)
+	if err != nil {
+		t.Fatalf("newTextPagerSource: %v", err)
+	}
+	defer source.Close()
+
+	if err := source.EnsureLine(120); err != nil {
+		t.Fatalf("EnsureLine: %v", err)
+	}
+	if count := source.LineCount(); count <= 120 {
+		t.Fatalf("expected to load more than 120 lines, got %d", count)
+	}
+
+	line := source.Line(123)
+	if line != "line-123" {
+		t.Fatalf("unexpected line 123 content: %q", line)
+	}
+
+	if err := source.EnsureAll(); err != nil {
+		t.Fatalf("EnsureAll: %v", err)
+	}
+	if count := source.LineCount(); count != totalLines {
+		t.Fatalf("expected %d total lines, got %d", totalLines, count)
+	}
+	if source.CharCount() <= 0 {
+		t.Fatalf("expected char count to be tracked")
 	}
 }

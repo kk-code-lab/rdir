@@ -11,6 +11,12 @@ func clonePreviewData(src *PreviewData) *PreviewData {
 	if len(src.TextLines) > 0 {
 		copyData.TextLines = append([]string(nil), src.TextLines...)
 	}
+	if len(src.TextLineMeta) > 0 {
+		copyData.TextLineMeta = append([]TextLineMetadata(nil), src.TextLineMeta...)
+	}
+	if len(src.TextRemainder) > 0 {
+		copyData.TextRemainder = append([]byte(nil), src.TextRemainder...)
+	}
 	if len(src.BinaryInfo.Lines) > 0 {
 		copyData.BinaryInfo.Lines = append([]string(nil), src.BinaryInfo.Lines...)
 	}

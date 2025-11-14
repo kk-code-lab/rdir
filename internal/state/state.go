@@ -39,7 +39,12 @@ type PreviewData struct {
 	Mode          os.FileMode
 	LineCount     int
 	TextLines     []string
+	TextLineMeta  []TextLineMetadata
 	TextCharCount int
+	TextTruncated bool
+	TextBytesRead int64
+	TextRemainder []byte
+	TextEncoding  fsutil.UnicodeEncoding
 	BinaryInfo    BinaryPreview
 	DirEntries    []FileEntry
 }
@@ -49,6 +54,14 @@ type BinaryPreview struct {
 	Lines      []string
 	ByteCount  int
 	TotalBytes int64
+}
+
+// TextLineMetadata describes a preview line, including offsets for streaming.
+type TextLineMetadata struct {
+	Offset       int64
+	Length       int
+	RuneCount    int
+	DisplayWidth int
 }
 
 // AppState is the single source of truth

@@ -17,13 +17,14 @@
 - [x] **Hidden-file detection uses wrong paths**  
   Hidden-file checks now receive full paths everywhere, so Windows can consult `GetFileAttributes` correctly. Directory loading, parent sidebar, and global search all pass the absolute path, and tests cover mixed hidden/visible data.
 
+
 ## Preview Streaming
 
-- [ ] **Chunked text previews**  
-  Fullscreen pager still loads up to 64 KB for text files. Introduce a `textPagerSource` analogous to the binary version that reads files via `ReadAt`, splits on newlines per chunk, and keeps wrap-aware offsets so multi-GB logs remain responsive.
+- [x] **Chunked text previews**  
+  Fullscreen pager now streams multi-GB logs via `textPagerSource`, using `ReadAt` plus newline-aware chunking so responsiveness no longer depends on 64 KB caps.
 
-- [ ] **Shared wrap metadata**  
-  With chunked text, pager needs to cache per-line width/row spans lazily. Design a small struct (line start offset, rune count, display width) so both the sidebar preview and pager can reuse calculations without re-reading the file.
+- [x] **Shared wrap metadata**  
+  Per-line offsets, rune counts, and display widths live in `PreviewData.TextLineMeta`, letting both the sidebar preview and pager reuse wrap math without re-reading files.
 
 - [ ] **Streaming search inside pager**  
   Large text previews should support `/pattern` search without loading everything. Consider two-phase search: scan current chunk first, then stream subsequent chunks, highlighting matches as they load.

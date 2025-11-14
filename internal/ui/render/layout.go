@@ -81,7 +81,13 @@ func (r *Renderer) estimateTextPreviewWidth(preview *statepkg.PreviewData) int {
 	maxWidth := 0
 	for i := 0; i < limit; i++ {
 		line := preview.TextLines[i]
-		width := r.measureTextWidth(line)
+		width := 0
+		if i < len(preview.TextLineMeta) {
+			width = preview.TextLineMeta[i].DisplayWidth
+		}
+		if width <= 0 {
+			width = r.measureTextWidth(line)
+		}
 		if width > maxWidth {
 			maxWidth = width
 		}

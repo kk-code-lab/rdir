@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,7 +20,6 @@ const (
 	previewByteLimit       int64 = 64 * 1024
 	binaryPreviewMaxBytes        = 1024
 	binaryPreviewLineWidth       = 16
-	previewTabWidth              = 4
 )
 
 func min(a, b int) int {
@@ -100,11 +100,96 @@ func expandPreviewTextLines(lines []string) ([]string, int) {
 	expanded := make([]string, len(lines))
 	charCount := 0
 	for i, line := range lines {
-		text := textutil.ExpandTabs(line, previewTabWidth)
+		text := textutil.ExpandTabs(line, textutil.DefaultTabWidth)
 		expanded[i] = text
 		charCount += utf8.RuneCountInString(text)
 	}
 	return expanded, charCount
+}
+
+func buildTextPreview(content []byte, truncated bool, encoding fsutil.UnicodeEncoding) ([]string, []TextLineMetadata, int, []byte) {
+	if len(content) == 0 {
+		return nil, nil, 0, nil
+	}
+
+	data := content
+	offset := int64(0)
+	if encoding == fsutil.EncodingUTF8BOM && len(data) >= 3 {
+		data = data[3:]
+		offset = 3
+	}
+
+	lines := make([]string, 0, 128)
+	meta := make([]TextLineMetadata, 0, 128)
+	charCount := 0
+	cursor := 0
+
+	for cursor < len(data) {
+		relative := bytes.IndexByte(data[cursor:], '\n')
+		if relative == -1 {
+			break
+		}
+		lineBytes := data[cursor : cursor+relative]
+		if len(lineBytes) > 0 && lineBytes[len(lineBytes)-1] == '\r' {
+			lineBytes = lineBytes[:len(lineBytes)-1]
+		}
+		text := string(lineBytes)
+		expanded := textutil.ExpandTabs(text, textutil.DefaultTabWidth)
+		runes := utf8.RuneCountInString(expanded)
+		width := textutil.DisplayWidth(expanded)
+		startOffset := offset + int64(cursor)
+		meta = append(meta, TextLineMetadata{
+			Offset:       startOffset,
+			Length:       len(lineBytes),
+			RuneCount:    runes,
+			DisplayWidth: width,
+		})
+		lines = append(lines, expanded)
+		charCount += runes
+		cursor += relative + 1
+	}
+
+	tail := data[cursor:]
+	if !truncated && len(tail) > 0 {
+		if len(tail) > 0 && tail[len(tail)-1] == '\r' {
+			tail = tail[:len(tail)-1]
+		}
+		text := string(tail)
+		expanded := textutil.ExpandTabs(text, textutil.DefaultTabWidth)
+		runes := utf8.RuneCountInString(expanded)
+		width := textutil.DisplayWidth(expanded)
+		startOffset := offset + int64(cursor)
+		meta = append(meta, TextLineMetadata{
+			Offset:       startOffset,
+			Length:       len(tail),
+			RuneCount:    runes,
+			DisplayWidth: width,
+		})
+		lines = append(lines, expanded)
+		charCount += runes
+		return lines, meta, charCount, nil
+	}
+
+	remainder := append([]byte(nil), tail...)
+	return lines, meta, charCount, remainder
+}
+
+func textLineMetadataFromLines(lines []string) []TextLineMetadata {
+	if len(lines) == 0 {
+		return nil
+	}
+	meta := make([]TextLineMetadata, len(lines))
+	var offset int64
+	for i, line := range lines {
+		meta[i] = TextLineMetadata{
+			Offset:       offset,
+			Length:       len(line),
+			RuneCount:    utf8.RuneCountInString(line),
+			DisplayWidth: textutil.DisplayWidth(line),
+		}
+		offset += int64(len(line))
+	}
+	return meta
 }
 
 // ===== REDUCER =====
@@ -1568,12 +1653,33 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 		content, err := fsutil.ReadFileHead(filePath, previewByteLimit)
 		if err == nil {
 			if fsutil.IsTextFile(filePath, content) {
-				textContent := fsutil.NormalizeTextContent(content)
-				lines := strings.Split(textContent, "\n")
-				expanded, charCount := expandPreviewTextLines(lines)
-				preview.TextLines = expanded
-				preview.LineCount = len(expanded)
-				preview.TextCharCount = charCount
+				encoding := fsutil.DetectUnicodeEncoding(content)
+				preview.TextEncoding = encoding
+				truncated := info.Size() > int64(len(content))
+				if encoding == fsutil.EncodingUTF16LE || encoding == fsutil.EncodingUTF16BE {
+					textContent := fsutil.NormalizeTextContent(content)
+					lines := strings.Split(textContent, "\n")
+					expanded, charCount := expandPreviewTextLines(lines)
+					preview.TextLines = expanded
+					preview.TextLineMeta = textLineMetadataFromLines(expanded)
+					preview.LineCount = len(expanded)
+					preview.TextCharCount = charCount
+					preview.TextTruncated = truncated
+					preview.TextBytesRead = int64(len(content))
+				} else {
+					lines, meta, charCount, remainder := buildTextPreview(content, truncated, encoding)
+					preview.TextLines = lines
+					preview.TextLineMeta = meta
+					preview.LineCount = len(lines)
+					preview.TextCharCount = charCount
+					preview.TextTruncated = truncated
+					preview.TextBytesRead = int64(len(content))
+					if len(remainder) > 0 {
+						preview.TextRemainder = remainder
+					} else {
+						preview.TextRemainder = nil
+					}
+				}
 			} else {
 				preview.BinaryInfo = formatBinaryPreviewLines(content, info.Size())
 				preview.LineCount = int((info.Size()+binaryPreviewLineWidth-1)/binaryPreviewLineWidth) + 1
