@@ -23,9 +23,12 @@ const (
 	binaryPagerMaxChunks   = 8
 )
 
+var termGetSize = term.GetSize
+
 type PreviewPager struct {
 	state           *statepkg.AppState
 	input           *os.File
+	outputFile      *os.File
 	output          io.Writer
 	reader          *bufio.Reader
 	writer          *bufio.Writer
@@ -112,12 +115,14 @@ func (p *PreviewPager) initTerminal() error {
 		if runtime.GOOS == "windows" {
 			p.input = os.Stdin
 			p.output = os.Stdout
+			p.outputFile = os.Stdout
 		} else {
 			return err
 		}
 	} else {
 		p.input = tty
 		p.output = tty
+		p.outputFile = tty
 	}
 
 	if p.input == nil {
@@ -171,14 +176,25 @@ func (p *PreviewPager) printf(format string, args ...interface{}) {
 }
 
 func (p *PreviewPager) updateSize() {
-	if p.input == nil {
+	if p.tryUpdateSizeFromFile(p.input) {
 		return
 	}
-	width, height, err := term.GetSize(int(p.input.Fd()))
-	if err == nil {
-		p.width = width
-		p.height = height
+	if p.outputFile != nil && p.outputFile != p.input {
+		_ = p.tryUpdateSizeFromFile(p.outputFile)
 	}
+}
+
+func (p *PreviewPager) tryUpdateSizeFromFile(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	width, height, err := termGetSize(int(file.Fd()))
+	if err != nil || width <= 0 || height <= 0 {
+		return false
+	}
+	p.width = width
+	p.height = height
+	return true
 }
 
 func (p *PreviewPager) render() error {
