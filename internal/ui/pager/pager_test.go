@@ -1,6 +1,7 @@
 package pager
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,5 +94,44 @@ func TestBinaryPagerSourceReadsChunks(t *testing.T) {
 	line = source.Line(secondChunkIdx)
 	if !strings.HasPrefix(line, "00010000") {
 		t.Fatalf("expected offset 0x10000, got %q", line)
+	}
+}
+
+func TestUpdateSizeFallsBackToOutputFd(t *testing.T) {
+	original := termGetSize
+	t.Cleanup(func() {
+		termGetSize = original
+	})
+
+	var seen []int
+	termGetSize = func(fd int) (int, int, error) {
+		seen = append(seen, fd)
+		if fd == 10 {
+			return 0, 0, errors.New("no size")
+		}
+		if fd == 11 {
+			return 80, 25, nil
+		}
+		return 0, 0, errors.New("unexpected fd")
+	}
+
+	input := os.NewFile(uintptr(10), "input-fd")
+	output := os.NewFile(uintptr(11), "output-fd")
+	t.Cleanup(func() {
+		_ = input.Close()
+		_ = output.Close()
+	})
+
+	p := &PreviewPager{
+		input:      input,
+		outputFile: output,
+	}
+	p.updateSize()
+
+	if p.width != 80 || p.height != 25 {
+		t.Fatalf("expected fallback size 80x25, got %dx%d", p.width, p.height)
+	}
+	if len(seen) < 2 {
+		t.Fatalf("expected both descriptors to be attempted, got %v", seen)
 	}
 }
