@@ -1227,9 +1227,10 @@ func dirEntryLine(entry statepkg.FileEntry) string {
 	case entry.IsDir:
 		icon = "/"
 	}
+	name := sanitizeTerminalText(entry.Name)
 	size := formatSize(entry.Size)
 	mod := entry.Modified.Format("2006-01-02 15:04:05")
-	return fmt.Sprintf(" %s %-20s %12s  %s  %s", icon, entry.Name, size, entry.Mode.String(), mod)
+	return fmt.Sprintf(" %s %-20s %12s  %s  %s", icon, name, size, entry.Mode.String(), mod)
 }
 
 func formatSize(size int64) string {

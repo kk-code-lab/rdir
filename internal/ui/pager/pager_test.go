@@ -227,3 +227,17 @@ func TestHeaderLinesSanitizeControlCharacters(t *testing.T) {
 		t.Fatalf("metadata line should not contain control characters: %q", lines[1])
 	}
 }
+
+func TestDirEntryLineSanitizesNames(t *testing.T) {
+	entry := statepkg.FileEntry{
+		Name: "weird\x1b[0m\nname",
+		Mode: 0o644,
+	}
+	line := dirEntryLine(entry)
+	if strings.Contains(line, "\x1b") || strings.Contains(line, "\n") {
+		t.Fatalf("directory entry line should not include control characters: %q", line)
+	}
+	if !strings.Contains(line, "weird?") {
+		t.Fatalf("sanitized name should retain visible characters, got %q", line)
+	}
+}
