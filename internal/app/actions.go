@@ -142,13 +142,13 @@ func (app *Application) openFileInPager(filePath string) error {
 	cmd.Stdin = tty
 	cmd.Stdout = tty
 	cmd.Stderr = tty
-	_ = cmd.Run()
+	runErr := cmd.Run()
 
 	if err := app.screen.Resume(); err != nil {
 		return fmt.Errorf("failed to resume screen: %w", err)
 	}
 	app.screen.Sync()
-	return nil
+	return runErr
 }
 
 func (app *Application) openFileInPagerFallback(args []string) error {
