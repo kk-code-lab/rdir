@@ -170,8 +170,14 @@ func (p *PreviewPager) cleanupTerminal() {
 	if p.writer != nil {
 		_ = p.writer.Flush()
 	}
-	p.writeString("\x1b[?25h")
-	p.writeString("\x1b[?7h")
+	if p.writer != nil {
+		p.writeString("\x1b[?25h")
+		p.writeString("\x1b[?7h")
+		_ = p.writer.Flush()
+	} else {
+		p.writeString("\x1b[?25h")
+		p.writeString("\x1b[?7h")
+	}
 	if p.input != nil && p.input.Name() == "/dev/tty" {
 		_ = p.input.Close()
 	}
@@ -649,11 +655,42 @@ func (p *PreviewPager) headerLines() []string {
 	mod := preview.Modified.Format("2006-01-02 15:04:05")
 	mode := preview.Mode.String()
 
-	lines := []string{fullPath}
+	lines := []string{sanitizeTerminalText(fullPath)}
 	if p.showInfo {
-		lines = append(lines, fmt.Sprintf("%s  %s  %s", mode, size, mod))
+		meta := fmt.Sprintf("%s  %s  %s", mode, size, mod)
+		lines = append(lines, sanitizeTerminalText(meta))
 	}
 	return lines
+}
+
+func sanitizeTerminalText(text string) string {
+	clean := true
+	for _, r := range text {
+		if (r < 0x20 && r != '\t') || r == 0x7f {
+			clean = false
+			break
+		}
+		if r == '\n' || r == '\r' {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return text
+	}
+
+	var b strings.Builder
+	for _, r := range text {
+		switch {
+		case r == '\t', r == '\n', r == '\r':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			b.WriteByte('?')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (p *PreviewPager) applyWrapSetting() {

@@ -1,12 +1,15 @@
 package pager
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
@@ -181,5 +184,46 @@ func TestTextPagerSourceStreamsLines(t *testing.T) {
 	}
 	if source.CharCount() <= 0 {
 		t.Fatalf("expected char count to be tracked")
+	}
+}
+
+func TestCleanupTerminalRestoresCursorAndWrap(t *testing.T) {
+	var buf bytes.Buffer
+	p := &PreviewPager{
+		writer: bufio.NewWriter(&buf),
+		output: &buf,
+	}
+
+	p.cleanupTerminal()
+
+	if got := buf.String(); got != "\x1b[?25h\x1b[?7h" {
+		t.Fatalf("expected cleanup to write cursor/wrap restore, got %q", got)
+	}
+}
+
+func TestHeaderLinesSanitizeControlCharacters(t *testing.T) {
+	state := &statepkg.AppState{
+		CurrentPath: "/tmp",
+		PreviewData: &statepkg.PreviewData{
+			Name:     "bad\x1b[31m\nfile",
+			Size:     42,
+			Modified: time.Unix(0, 0),
+			Mode:     0o644,
+		},
+	}
+	p := &PreviewPager{
+		state:    state,
+		showInfo: true,
+	}
+
+	lines := p.headerLines()
+	if len(lines) != 2 {
+		t.Fatalf("expected two header lines, got %d", len(lines))
+	}
+	if lines[0] != "/tmp/bad?[31m file" {
+		t.Fatalf("unexpected sanitized path: %q", lines[0])
+	}
+	if strings.Contains(lines[1], "\x1b") || strings.Contains(lines[1], "\n") {
+		t.Fatalf("metadata line should not contain control characters: %q", lines[1])
 	}
 }
