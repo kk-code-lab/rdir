@@ -149,6 +149,29 @@ func TestMarkdownBreakTag(t *testing.T) {
 	}
 }
 
+func TestHardLineBreaksInListsAndQuotes(t *testing.T) {
+	lines := []string{
+		"- item line  ",
+		"  continues",
+		"",
+		"> quoted line  ",
+		"> next",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"• item line",
+		"  continues",
+		"",
+		"│ quoted line",
+		"│ next",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
 func TestMarkdownBlockParsing(t *testing.T) {
 	lines := []string{
 		"```go",
@@ -212,6 +235,26 @@ func TestTableSplittingRespectsEscapedPipes(t *testing.T) {
 		"│ `code | span` | raw │ value │",
 		"│ x | y               │ z     │",
 		"└─────────────────────┴───────┘",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestInvalidTableDoesNotParse(t *testing.T) {
+	lines := []string{
+		"A | B | C",
+		"----|----",
+		"",
+		"after",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"A | B | C ----|----",
+		"",
+		"after",
 	}
 
 	if diff := diffLines(want, got); diff != "" {
