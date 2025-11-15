@@ -4,12 +4,12 @@ package search
 
 import "math"
 
-func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int, bool) {
+func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int, []MatchSpan, bool) {
 	m := len(pattern)
 	n := len(text)
 	if n == 0 || m == 0 || m > n {
-		score, matched, start, end, targetLen, matchCount, wordHits := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
-		return score, matched, start, end, targetLen, matchCount, wordHits, true
+		score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
+		return score, matched, start, end, targetLen, matchCount, wordHits, spans, true
 	}
 
 	cols := n
@@ -24,10 +24,10 @@ func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *b
 	prefix32 := s.prefix32[:cols]
 	prefixIdx32 := s.prefixIdx32[:cols]
 
-	fallback := func() (float64, bool, int, int, int, int, int, bool) {
+	fallback := func() (float64, bool, int, int, int, int, int, []MatchSpan, bool) {
 		releaseDPScratch(s)
-		score, matched, start, end, targetLen, matchCount, wordHits := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
-		return score, matched, start, end, targetLen, matchCount, wordHits, true
+		score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
+		return score, matched, start, end, targetLen, matchCount, wordHits, spans, true
 	}
 
 	if cols > 0 {
@@ -180,7 +180,7 @@ func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *b
 	if withinEnvelope {
 		if dpFailed {
 			releaseDPScratch(s)
-			return 0.0, false, -1, -1, n, 0, 0, true
+			return 0.0, false, -1, -1, n, 0, 0, nil, true
 		}
 		bestEnd := -1
 		bestVal := negInf32
@@ -192,7 +192,7 @@ func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *b
 		}
 		if bestEnd == -1 {
 			releaseDPScratch(s)
-			return 0.0, false, -1, -1, n, 0, 0, true
+			return 0.0, false, -1, -1, n, 0, 0, nil, true
 		}
 		positions := make([]int, m)
 		k := bestEnd
@@ -202,12 +202,12 @@ func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *b
 				cell := i*s.cols + k
 				if s.backtrackGen[cell] != s.generation {
 					releaseDPScratch(s)
-					return 0.0, false, -1, -1, n, 0, 0, true
+					return 0.0, false, -1, -1, n, 0, 0, nil, true
 				}
 				k = s.backtrack[cell]
 				if k == -1 {
 					releaseDPScratch(s)
-					return 0.0, false, -1, -1, n, 0, 0, true
+					return 0.0, false, -1, -1, n, 0, 0, nil, true
 				}
 			}
 		}
@@ -224,8 +224,9 @@ func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *b
 		}
 		start := positions[0]
 		end := positions[m-1]
+		spans := makeMatchSpansFromPositions(positions)
 		releaseDPScratch(s)
-		return score, true, start, end, n, m, hits, true
+		return score, true, start, end, n, m, hits, spans, true
 	}
 
 	return fallback()

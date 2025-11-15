@@ -190,6 +190,7 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 	targetLen := len(textRunes)
 	matchCount := len(patternRunes)
 	wordHits := 0
+	var spans []MatchSpan
 	var boundaryBuf *boundaryBuffer
 	defer func() {
 		if boundaryBuf != nil {
@@ -205,6 +206,7 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 			baseScore = contiguousScore
 			wordHits = contiguousWordHits
 			matched = true
+			spans = []MatchSpan{{Start: start, End: end}}
 		}
 	}
 
@@ -214,10 +216,12 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 		}
 		var dpScore float64
 		var dpMatched bool
-		dpScore, dpMatched, start, end, targetLen, matchCount, wordHits = fm.matchRunesDP(patternRunes, textRunes, boundaryBuf, asciiText, asciiPattern)
+		var dpSpans []MatchSpan
+		dpScore, dpMatched, start, end, targetLen, matchCount, wordHits, dpSpans = fm.matchRunesDP(patternRunes, textRunes, boundaryBuf, asciiText, asciiPattern)
 		if dpMatched {
 			baseScore = dpScore
 			matched = true
+			spans = dpSpans
 		}
 	}
 
@@ -282,39 +286,41 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 
 	score += fm.wordHitBonus * float64(wordHits)
 
+	if len(spans) == 0 && start <= end {
+		spans = []MatchSpan{{Start: start, End: end}}
+	}
+
 	return score, true, MatchDetails{
 		Start:        start,
 		End:          end,
 		TargetLength: targetLen,
 		MatchCount:   matchCount,
 		WordHits:     wordHits,
-		Spans: []MatchSpan{
-			{Start: start, End: end},
-		},
+		Spans:        spans,
 	}, substringIdx
 }
 
-func (fm *FuzzyMatcher) matchRunesDP(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int) {
+func (fm *FuzzyMatcher) matchRunesDP(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int, []MatchSpan) {
 	useASCII := asciiText != nil && asciiPattern != nil && len(asciiText) == len(text) && len(asciiPattern) == len(pattern)
 	if useASCII && fuzzySIMDDPEnabled() {
-		if score, matched, start, end, targetLen, matchCount, wordHits, ok := fm.matchRunesDPASCII(pattern, text, boundaryBuf, asciiText, asciiPattern); ok {
-			return score, matched, start, end, targetLen, matchCount, wordHits
+		if score, matched, start, end, targetLen, matchCount, wordHits, spans, ok := fm.matchRunesDPASCII(pattern, text, boundaryBuf, asciiText, asciiPattern); ok {
+			return score, matched, start, end, targetLen, matchCount, wordHits, spans
 		}
 	}
 	// Experimental: float32 ASCII DP (NEON primitives). Guarded by env flag.
 	if useASCII && fuzzyASCII32Enabled() {
-		if score, matched, start, end, targetLen, matchCount, wordHits, ok := fm.matchRunesDPASCII32(pattern, text, boundaryBuf, asciiText, asciiPattern); ok {
-			return score, matched, start, end, targetLen, matchCount, wordHits
+		if score, matched, start, end, targetLen, matchCount, wordHits, spans, ok := fm.matchRunesDPASCII32(pattern, text, boundaryBuf, asciiText, asciiPattern); ok {
+			return score, matched, start, end, targetLen, matchCount, wordHits, spans
 		}
 	}
 	return fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
 }
 
-func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int) {
+func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int, []MatchSpan) {
 	m := len(pattern)
 	n := len(text)
 	if n == 0 || m > n {
-		return 0.0, false, -1, -1, n, 0, 0
+		return 0.0, false, -1, -1, n, 0, 0, nil
 	}
 
 	const dpBeamWidth = 96
@@ -358,7 +364,7 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 	}
 
 	if maxActive == -1 {
-		return 0.0, false, -1, -1, n, 0, 0
+		return 0.0, false, -1, -1, n, 0, 0, nil
 	}
 
 	for i := 1; i < m; i++ {
@@ -437,7 +443,7 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 
 		dpPrev, dpCurr = dpCurr, dpPrev
 		if nextMaxActive == -1 {
-			return 0.0, false, -1, -1, n, 0, 0
+			return 0.0, false, -1, -1, n, 0, 0, nil
 		}
 		minActive = nextMinActive - dpBeamMargin
 		if minActive < 0 {
@@ -451,7 +457,7 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 
 	bestEnd := maxIndex(dpPrev)
 	if bestEnd == -1 {
-		return 0.0, false, -1, -1, n, 0, 0
+		return 0.0, false, -1, -1, n, 0, 0, nil
 	}
 
 	positions := make([]int, m)
@@ -461,11 +467,11 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 		if i > 0 {
 			cell := i*cols + k
 			if backtrackGen[cell] != scratch.generation {
-				return 0.0, false, -1, -1, n, 0, 0
+				return 0.0, false, -1, -1, n, 0, 0, nil
 			}
 			k = backtrack[cell]
 			if k == -1 {
-				return 0.0, false, -1, -1, n, 0, 0
+				return 0.0, false, -1, -1, n, 0, 0, nil
 			}
 		}
 	}
@@ -483,7 +489,28 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 		}
 	}
 
-	return bestScore, true, positions[0], positions[m-1], n, m, wordHits
+	spans := makeMatchSpansFromPositions(positions)
+
+	return bestScore, true, positions[0], positions[m-1], n, m, wordHits, spans
+}
+
+func makeMatchSpansFromPositions(positions []int) []MatchSpan {
+	if len(positions) == 0 {
+		return nil
+	}
+	spans := make([]MatchSpan, 0, len(positions))
+	start := positions[0]
+	prev := positions[0]
+	for i := 1; i < len(positions); i++ {
+		pos := positions[i]
+		if pos != prev+1 {
+			spans = append(spans, MatchSpan{Start: start, End: prev})
+			start = pos
+		}
+		prev = pos
+	}
+	spans = append(spans, MatchSpan{Start: start, End: prev})
+	return spans
 }
 
 func (fm *FuzzyMatcher) contiguousMatchScore(patternRunes, textRunes []rune, boundaryBuf *boundaryBuffer, start int) (float64, int, int, int) {

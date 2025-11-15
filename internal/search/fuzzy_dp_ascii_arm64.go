@@ -25,14 +25,14 @@ func fuzzyCopyRangeF32Asm(dst *float32, src *float32, count int)
 //go:noescape
 func fuzzySetRangeF32NegInfAsm(dst *float32, count int)
 
-func (fm *FuzzyMatcher) matchRunesDPASCII(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int, bool) {
+func (fm *FuzzyMatcher) matchRunesDPASCII(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int, []MatchSpan, bool) {
 	if !cpu.ARM64.HasASIMD {
-		score, matched, start, end, targetLen, matchCount, wordHits := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
-		return score, matched, start, end, targetLen, matchCount, wordHits, true
+		score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
+		return score, matched, start, end, targetLen, matchCount, wordHits, spans, true
 	}
 
-	score, matched, start, end, targetLen, matchCount, wordHits := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
-	return score, matched, start, end, targetLen, matchCount, wordHits, true
+	score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
+	return score, matched, start, end, targetLen, matchCount, wordHits, spans, true
 }
 
 func runPrefixASCII(prefix []float32, prefixIdx []int32, dpPrev []float32, start, end int, gap float32) {

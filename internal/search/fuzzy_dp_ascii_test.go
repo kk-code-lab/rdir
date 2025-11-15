@@ -181,11 +181,11 @@ func TestMatchRunesDPASCIIEqualsScalar(t *testing.T) {
 		asciiPattern, asciiPatternBuf := runeSliceToASCIIBytes(patternRunes)
 
 		scalarBoundary := acquireBoundaryBuffer(len(textRunes))
-		scoreScalar, matchedScalar, startScalar, endScalar, targetScalar, matchCountScalar, wordHitsScalar := fm.matchRunesDPScalar(patternRunes, textRunes, scalarBoundary, asciiText, asciiPattern)
+		scoreScalar, matchedScalar, startScalar, endScalar, targetScalar, matchCountScalar, wordHitsScalar, spansScalar := fm.matchRunesDPScalar(patternRunes, textRunes, scalarBoundary, asciiText, asciiPattern)
 		releaseBoundaryBuffer(scalarBoundary)
 
 		asciiBoundary := acquireBoundaryBuffer(len(textRunes))
-		scoreASCII, matchedASCII, startASCII, endASCII, targetASCII, matchCountASCII, wordHitsASCII, _ := fm.matchRunesDPASCII(patternRunes, textRunes, asciiBoundary, asciiText, asciiPattern)
+		scoreASCII, matchedASCII, startASCII, endASCII, targetASCII, matchCountASCII, wordHitsASCII, spansASCII, _ := fm.matchRunesDPASCII(patternRunes, textRunes, asciiBoundary, asciiText, asciiPattern)
 		releaseBoundaryBuffer(asciiBoundary)
 
 		releaseByteBuffer(asciiPatternBuf)
@@ -202,7 +202,7 @@ func TestMatchRunesDPASCIIEqualsScalar(t *testing.T) {
 		if scoreScalar != scoreASCII {
 			t.Fatalf("case %q/%q: score mismatch (scalar=%f ascii=%f)", tc.pattern, tc.text, scoreScalar, scoreASCII)
 		}
-		if startScalar != startASCII || endScalar != endASCII || targetScalar != targetASCII || matchCountScalar != matchCountASCII || wordHitsScalar != wordHitsASCII {
+		if startScalar != startASCII || endScalar != endASCII || targetScalar != targetASCII || matchCountScalar != matchCountASCII || wordHitsScalar != wordHitsASCII || !equalMatchSpans(spansScalar, spansASCII) {
 			t.Fatalf("case %q/%q: metadata mismatch", tc.pattern, tc.text)
 		}
 	}

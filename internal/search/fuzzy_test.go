@@ -206,6 +206,50 @@ func TestFuzzyMatch_Scoring(t *testing.T) {
 	}
 }
 
+func TestMatchDetailedProvidesPreciseSpans(t *testing.T) {
+	fm := NewFuzzyMatcher()
+
+	tests := []struct {
+		name    string
+		pattern string
+		text    string
+		want    []string
+	}{
+		{
+			name:    "contiguous substring",
+			pattern: "cbl",
+			text:    "COBTUPDT.cbl",
+			want:    []string{"cbl"},
+		},
+		{
+			name:    "non-contiguous characters",
+			pattern: "cbl",
+			text:    "c-alpha_b/bravo-lima",
+			want:    []string{"c", "b", "l"},
+		},
+	}
+
+	for _, tt := range tests {
+		_, matched, details := fm.MatchDetailed(tt.pattern, tt.text)
+		if !matched {
+			t.Fatalf("%s: expected match", tt.name)
+		}
+		if len(details.Spans) != len(tt.want) {
+			t.Fatalf("%s: expected %d spans, got %d (%v)", tt.name, len(tt.want), len(details.Spans), details.Spans)
+		}
+		runes := []rune(tt.text)
+		for i, span := range details.Spans {
+			if span.Start < 0 || span.End >= len(runes) {
+				t.Fatalf("%s: span %d out of range: %+v", tt.name, i, span)
+			}
+			sub := string(runes[span.Start : span.End+1])
+			if sub != tt.want[i] {
+				t.Fatalf("%s: span %d got %q want %q", tt.name, i, sub, tt.want[i])
+			}
+		}
+	}
+}
+
 func TestFuzzyMatch_PathologicalReadmeOrdering(t *testing.T) {
 	fm := NewFuzzyMatcher()
 	pattern := "readme"
