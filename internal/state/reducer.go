@@ -193,6 +193,30 @@ func textLineMetadataFromLines(lines []string) []TextLineMetadata {
 	return meta
 }
 
+func textLineMetadataFromSegments(lines [][]StyledTextSegment) []TextLineMetadata {
+	if len(lines) == 0 {
+		return nil
+	}
+	meta := make([]TextLineMetadata, len(lines))
+	var offset int64
+	for i, line := range lines {
+		width := 0
+		length := 0
+		for _, seg := range line {
+			width += textutil.DisplayWidth(seg.Text)
+			length += len(seg.Text)
+		}
+		meta[i] = TextLineMetadata{
+			Offset:       offset,
+			Length:       length,
+			RuneCount:    utf8.RuneCountInString(joinSegmentsText(line)),
+			DisplayWidth: width,
+		}
+		offset += int64(length)
+	}
+	return meta
+}
+
 // ===== REDUCER =====
 
 // StateReducer applies actions to state

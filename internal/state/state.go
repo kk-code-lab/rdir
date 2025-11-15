@@ -42,6 +42,8 @@ type PreviewData struct {
 	TextLineMeta               []TextLineMetadata
 	FormattedTextLines         []string
 	FormattedTextLineMeta      []TextLineMetadata
+	FormattedSegments          [][]StyledTextSegment
+	FormattedSegmentLineMeta   []TextLineMetadata
 	FormattedUnavailableReason string
 	TextCharCount              int
 	TextTruncated              bool
