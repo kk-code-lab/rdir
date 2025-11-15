@@ -2,8 +2,6 @@ package state
 
 import (
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -18,12 +16,6 @@ var (
 		".mkdown":   {},
 		".mdwn":     {},
 	}
-	mdStrong    = regexp.MustCompile(`\*\*([^*]+)\*\*|__([^_]+)__`)
-	mdEmphasis  = regexp.MustCompile(`\*([^*]+)\*|_([^_]+)_`)
-	mdCode      = regexp.MustCompile("`([^`]+)`")
-	mdStrike    = regexp.MustCompile(`~~([^~]+)~~`)
-	mdImageLink = regexp.MustCompile(`!\[([^\]]+)\]\(([^)]+)\)`)
-	mdLink      = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
 )
 
 func (markdownPreviewFormatter) CanHandle(ctx previewFormatContext) bool {
@@ -53,47 +45,12 @@ func (markdownPreviewFormatter) Format(ctx previewFormatContext, preview *Previe
 		return
 	}
 
-	formatted := make([]string, len(preview.TextLines))
-	for i, line := range preview.TextLines {
-		formatted[i] = formatMarkdownLine(line)
-	}
+	segments := formatMarkdownSegments(preview.TextLines)
+	formatted := formatMarkdownLines(preview.TextLines)
+
+	preview.FormattedSegments = segments
+	preview.FormattedSegmentLineMeta = textLineMetadataFromSegments(segments)
 	preview.FormattedTextLines = formatted
-	preview.FormattedTextLineMeta = textLineMetadataFromLines(formatted)
+	preview.FormattedTextLineMeta = textLineMetadataFromSegments(segments)
 	preview.FormattedUnavailableReason = ""
-}
-
-func formatMarkdownLine(line string) string {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
-		return ""
-	}
-
-	// Headings
-	if strings.HasPrefix(trimmed, "#") {
-		level := 0
-		for level < len(trimmed) && level < 6 && trimmed[level] == '#' {
-			level++
-		}
-		if level > 0 {
-			rest := strings.TrimSpace(trimmed[level:])
-			return strings.TrimSpace("H" + strconv.Itoa(level) + " " + rest)
-		}
-	}
-
-	// Blockquote
-	if strings.HasPrefix(trimmed, ">") {
-		return strings.TrimSpace(strings.TrimLeft(trimmed[1:], " "))
-	}
-
-	return formatMarkdownInline(line)
-}
-
-func formatMarkdownInline(line string) string {
-	line = mdImageLink.ReplaceAllString(line, "$1 ($2)")
-	line = mdLink.ReplaceAllString(line, "$1 ($2)")
-	line = mdCode.ReplaceAllString(line, "$1")
-	line = mdStrong.ReplaceAllString(line, "$1$2")
-	line = mdEmphasis.ReplaceAllString(line, "$1$2")
-	line = mdStrike.ReplaceAllString(line, "$1")
-	return line
 }

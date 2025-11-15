@@ -20,6 +20,12 @@ func clonePreviewData(src *PreviewData) *PreviewData {
 	if len(src.FormattedTextLineMeta) > 0 {
 		copyData.FormattedTextLineMeta = append([]TextLineMetadata(nil), src.FormattedTextLineMeta...)
 	}
+	if len(src.FormattedSegments) > 0 {
+		copyData.FormattedSegments = deepCopySegments(src.FormattedSegments)
+	}
+	if len(src.FormattedSegmentLineMeta) > 0 {
+		copyData.FormattedSegmentLineMeta = append([]TextLineMetadata(nil), src.FormattedSegmentLineMeta...)
+	}
 	copyData.FormattedUnavailableReason = src.FormattedUnavailableReason
 	if len(src.TextRemainder) > 0 {
 		copyData.TextRemainder = append([]byte(nil), src.TextRemainder...)
@@ -100,6 +106,9 @@ func (s *AppState) previewLineCount() int {
 	}
 	if len(s.PreviewData.FormattedTextLines) > 0 {
 		return len(s.PreviewData.FormattedTextLines)
+	}
+	if len(s.PreviewData.FormattedSegments) > 0 {
+		return len(s.PreviewData.FormattedSegments)
 	}
 	if len(s.PreviewData.TextLines) > 0 {
 		return len(s.PreviewData.TextLines)

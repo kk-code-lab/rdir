@@ -95,25 +95,47 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 				break
 			}
 		}
-	} else if !preview.IsDir && (len(preview.TextLines) > 0 || len(preview.FormattedTextLines) > 0) {
-		lines, meta := previewTextLines(preview)
+	} else if !preview.IsDir && (len(preview.TextLines) > 0 || len(preview.FormattedTextLines) > 0 || len(preview.FormattedSegments) > 0) {
 		textStyle := baseStyle.Foreground(r.theme.FileFg)
-		if startIdx > len(lines) {
-			startIdx = len(lines)
-		}
-		for i := startIdx; i < len(lines); i++ {
-			line := lines[i]
-			safeLine := textutil.SanitizeTerminalText(line)
-			lineWidth := r.previewLineWidth(meta, i, safeLine)
-			if wrapEnabled {
-				if !r.drawWrappedPreviewText(safeLine, startX, panelWidth, textStyle, &y, bottomLimit, w) {
-					break
+		if len(preview.FormattedSegments) > 0 {
+			lines := preview.FormattedSegments
+			meta := preview.FormattedSegmentLineMeta
+			if startIdx > len(lines) {
+				startIdx = len(lines)
+			}
+			for i := startIdx; i < len(lines); i++ {
+				segLine := lines[i]
+				lineWidth := r.previewSegmentLineWidth(meta, i, segLine)
+				if wrapEnabled {
+					if !r.drawWrappedSegmentLine(segLine, startX, panelWidth, textStyle, &y, bottomLimit, w) {
+						break
+					}
+				} else {
+					if !r.drawSegmentLineClipped(segLine, lineWidth, startX, panelWidth, textStyle, y, bottomLimit, w) {
+						break
+					}
+					y++
 				}
-			} else {
-				if !r.drawPreviewTextLineClipped(safeLine, lineWidth, startX, panelWidth, textStyle, y, bottomLimit, w) {
-					break
+			}
+		} else {
+			lines, meta := previewTextLines(preview)
+			if startIdx > len(lines) {
+				startIdx = len(lines)
+			}
+			for i := startIdx; i < len(lines); i++ {
+				line := lines[i]
+				safeLine := textutil.SanitizeTerminalText(line)
+				lineWidth := r.previewLineWidth(meta, i, safeLine)
+				if wrapEnabled {
+					if !r.drawWrappedPreviewText(safeLine, startX, panelWidth, textStyle, &y, bottomLimit, w) {
+						break
+					}
+				} else {
+					if !r.drawPreviewTextLineClipped(safeLine, lineWidth, startX, panelWidth, textStyle, y, bottomLimit, w) {
+						break
+					}
+					y++
 				}
-				y++
 			}
 		}
 	} else if !preview.IsDir && len(preview.BinaryInfo.Lines) > 0 {
@@ -240,6 +262,56 @@ func (r *Renderer) drawPreviewTextLineClipped(text string, lineWidth int, startX
 	return true
 }
 
+func (r *Renderer) drawSegmentLineClipped(segments []statepkg.StyledTextSegment, lineWidth int, startX, panelWidth int, baseStyle tcell.Style, y, bottomLimit, screenWidth int) bool {
+	if panelWidth <= 0 || y >= bottomLimit {
+		return false
+	}
+
+	if isRuleLine(segments) {
+		available := panelWidth
+		if screenWidth-startX < available {
+			available = screenWidth - startX
+			if available <= 0 {
+				return false
+			}
+		}
+		style := r.styleForSegment(baseStyle, statepkg.TextStyleRule)
+		for i := 0; i < available && startX+i < screenWidth; i++ {
+			r.screen.SetContent(startX+i, y, '─', nil, style)
+		}
+		return true
+	}
+
+	available := panelWidth
+	if screenWidth-startX < available {
+		available = screenWidth - startX
+		if available <= 0 {
+			return false
+		}
+	}
+
+	for x := startX; x < startX+available && x < screenWidth; x++ {
+		r.screen.SetContent(x, y, ' ', nil, baseStyle)
+	}
+
+	renderWidth := available
+	truncateWidth := renderWidth
+	if lineWidth > 0 && lineWidth >= renderWidth {
+		truncateWidth = renderWidth - 1
+		if truncateWidth < 0 {
+			truncateWidth = 0
+		}
+	}
+	r.drawSegments(startX, y, truncateWidth, segments, baseStyle)
+	if lineWidth > renderWidth && available > 0 {
+		indicatorX := startX + available - 1
+		if indicatorX < screenWidth && indicatorX >= startX {
+			r.screen.SetContent(indicatorX, y, '…', nil, baseStyle)
+		}
+	}
+	return true
+}
+
 func (r *Renderer) drawWrappedPreviewText(text string, startX, panelWidth int, style tcell.Style, y *int, bottomLimit, screenWidth int) bool {
 	if panelWidth <= 0 || y == nil {
 		return false
@@ -253,6 +325,27 @@ func (r *Renderer) drawWrappedPreviewText(text string, startX, panelWidth int, s
 			return false
 		}
 		_ = r.drawPreviewTextLineClipped(segment, 0, startX, panelWidth, style, *y, bottomLimit, screenWidth)
+		*y++
+	}
+	return true
+}
+
+func (r *Renderer) drawWrappedSegmentLine(segments []statepkg.StyledTextSegment, startX, panelWidth int, baseStyle tcell.Style, y *int, bottomLimit, screenWidth int) bool {
+	if panelWidth <= 0 || y == nil {
+		return false
+	}
+	if isRuleLine(segments) {
+		return r.drawSegmentLineClipped(segments, 0, startX, panelWidth, baseStyle, *y, bottomLimit, screenWidth)
+	}
+	wrapped := wrapSegments(segments, panelWidth)
+	if len(wrapped) == 0 {
+		wrapped = [][]statepkg.StyledTextSegment{{}}
+	}
+	for _, line := range wrapped {
+		if *y >= bottomLimit {
+			return false
+		}
+		_ = r.drawSegmentLineClipped(line, 0, startX, panelWidth, baseStyle, *y, bottomLimit, screenWidth)
 		*y++
 	}
 	return true
@@ -342,4 +435,124 @@ func (r *Renderer) previewLineWidth(meta []statepkg.TextLineMetadata, idx int, t
 		}
 	}
 	return r.measureTextWidth(text)
+}
+
+func (r *Renderer) previewSegmentLineWidth(meta []statepkg.TextLineMetadata, idx int, segments []statepkg.StyledTextSegment) int {
+	if len(meta) > 0 && idx >= 0 && idx < len(meta) {
+		if width := meta[idx].DisplayWidth; width > 0 {
+			return width
+		}
+	}
+	width := 0
+	for _, seg := range segments {
+		width += textutil.DisplayWidth(seg.Text)
+	}
+	return width
+}
+
+func (r *Renderer) drawSegments(startX, y, maxWidth int, segments []statepkg.StyledTextSegment, baseStyle tcell.Style) {
+	x := startX
+	remaining := maxWidth
+	for _, seg := range segments {
+		if remaining <= 0 {
+			return
+		}
+		text := textutil.SanitizeTerminalText(seg.Text)
+		style := r.styleForSegment(baseStyle, seg.Style)
+		for _, ru := range text {
+			width := textutil.DisplayWidth(string(ru))
+			if width > remaining {
+				return
+			}
+			r.screen.SetContent(x, y, ru, nil, style)
+			x += width
+			remaining -= width
+		}
+	}
+}
+
+func wrapSegments(segments []statepkg.StyledTextSegment, maxWidth int) [][]statepkg.StyledTextSegment {
+	if maxWidth <= 0 {
+		return [][]statepkg.StyledTextSegment{segments}
+	}
+	if isRuleLine(segments) {
+		return [][]statepkg.StyledTextSegment{segments}
+	}
+	var lines [][]statepkg.StyledTextSegment
+	var current []statepkg.StyledTextSegment
+	currentWidth := 0
+
+	flush := func() {
+		line := make([]statepkg.StyledTextSegment, len(current))
+		copy(line, current)
+		lines = append(lines, line)
+		current = current[:0]
+		currentWidth = 0
+	}
+
+	for _, seg := range segments {
+		text := textutil.SanitizeTerminalText(seg.Text)
+		if text == "" {
+			continue
+		}
+		var buf strings.Builder
+		for _, ru := range text {
+			w := textutil.DisplayWidth(string(ru))
+			if currentWidth > 0 && currentWidth+w > maxWidth {
+				current = append(current, statepkg.StyledTextSegment{Text: buf.String(), Style: seg.Style})
+				buf.Reset()
+				flush()
+			}
+			if w > maxWidth {
+				continue
+			}
+			buf.WriteRune(ru)
+			currentWidth += w
+			if currentWidth == maxWidth {
+				current = append(current, statepkg.StyledTextSegment{Text: buf.String(), Style: seg.Style})
+				buf.Reset()
+				flush()
+			}
+		}
+		if buf.Len() > 0 {
+			current = append(current, statepkg.StyledTextSegment{Text: buf.String(), Style: seg.Style})
+		}
+	}
+	if len(current) > 0 || len(lines) == 0 {
+		line := make([]statepkg.StyledTextSegment, len(current))
+		copy(line, current)
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func (r *Renderer) styleForSegment(base tcell.Style, kind statepkg.TextStyleKind) tcell.Style {
+	switch kind {
+	case statepkg.TextStyleStrong, statepkg.TextStyleHeading:
+		return base.Bold(true)
+	case statepkg.TextStyleEmphasis:
+		return base.Italic(true)
+	case statepkg.TextStyleStrike:
+		return base.StrikeThrough(true)
+	case statepkg.TextStyleCode:
+		return base.Dim(true)
+	case statepkg.TextStyleLink:
+		return base.Underline(true)
+	case statepkg.TextStyleRule:
+		return base.Dim(true)
+	default:
+		return base
+	}
+}
+
+func isRuleLine(segments []statepkg.StyledTextSegment) bool {
+	if len(segments) == 0 {
+		return false
+	}
+	for _, seg := range segments {
+		if seg.Style != statepkg.TextStyleRule {
+			return false
+		}
+	}
+	return true
 }

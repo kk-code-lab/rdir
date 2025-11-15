@@ -34,8 +34,8 @@
 
 ## Preview Formatters
 
-- [ ] **Markdown parser without new deps**  
-  Replace regex-based Markdown prettifier with a small internal parser: block-level tokenizer (headings, lists, code fences, blockquotes, HR), inline tokenizer (emphasis, strong, code, links/images, escapes), AST, and a plaintext renderer for TUI (no HTML, neutralize inline HTML). Keep limits (32 KiB default) and bail to raw view for oversized/truncated files. Aim for CommonMark subset (no tables/footnotes initially) and add table-driven tests for edge cases (nested emphasis, backticks inside text, escaped markers).
+- [x] **Markdown parser without new deps**  
+  Internal parser replaces regex with block/inline tokenizers, AST, and fancy formatted output: headings, lists, code fences/indented blocks, blockquotes, HR, links/images, autolinks, strike, tables with box-drawing, and styled segments for preview/pager (full-width HR, fancy bullets). Limits and truncation behavior preserved; tests cover edge cases and table rendering.
 
 ## Performance & Search
 

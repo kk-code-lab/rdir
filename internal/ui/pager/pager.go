@@ -48,6 +48,8 @@ type PreviewPager struct {
 	rawLineWidths   []int
 	formattedLines  []string
 	formattedWidths []int
+	formattedRules  []bool
+	formattedStyles []string
 	rowSpans        []int
 	rowPrefix       []int
 	rowMetricsWidth int
@@ -109,15 +111,38 @@ func (p *PreviewPager) prepareContent() {
 		p.charCount = charCount
 	}
 
-	if preview := p.state.PreviewData; preview != nil && len(preview.FormattedTextLines) > 0 {
-		p.formattedLines = append([]string(nil), preview.FormattedTextLines...)
-		p.formattedWidths = make([]int, len(p.formattedLines))
-		for i, line := range p.formattedLines {
-			p.formattedWidths[i] = displayWidth(line)
+	if preview := p.state.PreviewData; preview != nil {
+		if len(preview.FormattedSegments) > 0 {
+			formatted := make([]string, len(preview.FormattedSegments))
+			widths := make([]int, len(preview.FormattedSegments))
+			rules := make([]bool, len(preview.FormattedSegments))
+			ruleStyles := make([]string, len(preview.FormattedSegments))
+			for i, line := range preview.FormattedSegments {
+				formatted[i], rules[i], ruleStyles[i] = ansiFromSegments(line)
+				if i < len(preview.FormattedSegmentLineMeta) && preview.FormattedSegmentLineMeta[i].DisplayWidth > 0 {
+					widths[i] = preview.FormattedSegmentLineMeta[i].DisplayWidth
+				} else {
+					widths[i] = segmentDisplayWidth(line)
+				}
+			}
+			p.formattedLines = formatted
+			p.formattedWidths = widths
+			p.formattedRules = rules
+			p.formattedStyles = ruleStyles
+		} else if len(preview.FormattedTextLines) > 0 {
+			p.formattedLines = append([]string(nil), preview.FormattedTextLines...)
+			p.formattedWidths = make([]int, len(p.formattedLines))
+			for i, line := range p.formattedLines {
+				p.formattedWidths[i] = displayWidth(line)
+			}
+			p.formattedRules = nil
+			p.formattedStyles = nil
+		} else {
+			p.formattedLines = nil
+			p.formattedWidths = nil
+			p.formattedRules = nil
+			p.formattedStyles = nil
 		}
-	} else {
-		p.formattedLines = nil
-		p.formattedWidths = nil
 	}
 
 	p.applyFormatPreference(true)
@@ -778,6 +803,24 @@ func (p *PreviewPager) lineAt(idx int) string {
 	if idx < 0 || idx >= len(p.lines) {
 		return ""
 	}
+	if p.showFormatted && idx < len(p.formattedRules) && p.formattedRules[idx] {
+		width := p.width
+		if width <= 0 {
+			width = displayWidth(p.lines[idx])
+			if width <= 0 {
+				width = 1
+			}
+		}
+		style := ""
+		if idx < len(p.formattedStyles) {
+			style = p.formattedStyles[idx]
+		}
+		reset := ""
+		if style != "" {
+			reset = "\x1b[0m"
+		}
+		return style + strings.Repeat("─", width) + reset
+	}
 	return p.lines[idx]
 }
 
@@ -869,6 +912,11 @@ func (p *PreviewPager) lineWidth(idx int) int {
 	}
 	if p.binaryMode {
 		return displayWidth(p.lineAt(idx))
+	}
+	if p.showFormatted && idx >= 0 && idx < len(p.formattedRules) && p.formattedRules[idx] {
+		if p.width > 0 {
+			return p.width
+		}
 	}
 	if idx < 0 || idx >= len(p.lineWidths) {
 		return 0
@@ -1036,6 +1084,17 @@ func (p *PreviewPager) trimWrappedPrefix(text string, skipRows int) string {
 	consumed := 0
 	index := 0
 	for index < len(text) && consumed < target {
+		if text[index] == '\x1b' && index+1 < len(text) && text[index+1] == '[' {
+			end := index + 2
+			for end < len(text) && text[end] != 'm' {
+				end++
+			}
+			if end < len(text) {
+				end++
+			}
+			index = end
+			continue
+		}
 		ru, size := utf8.DecodeRuneInString(text[index:])
 		if ru == utf8.RuneError && size == 1 {
 			consumed++
@@ -1424,72 +1483,175 @@ func truncateToWidth(text string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if displayWidth(text) <= width {
+	if ansiDisplayWidth(text) <= width {
 		return text
 	}
-
-	const ellipsis = "…"
-	ellipsisWidth := runewidth.RuneWidth([]rune(ellipsis)[0])
-	if ellipsisWidth <= 0 {
-		ellipsisWidth = 1
-	}
-	if width <= ellipsisWidth {
-		return ellipsis
-	}
-
-	target := width - ellipsisWidth
-	var builder strings.Builder
-	current := 0
-	for _, ru := range text {
-		w := runewidth.RuneWidth(ru)
-		if w <= 0 {
-			w = 1
-		}
-		if current+w > target {
-			break
-		}
-		builder.WriteRune(ru)
-		current += w
-	}
-	builder.WriteString(ellipsis)
-	return builder.String()
+	truncated, _ := ansiTruncate(text, width, true)
+	return truncated
 }
 
 func clipTextToWidth(text string, width int) (string, bool) {
-	totalWidth := displayWidth(text)
 	if width <= 0 {
-		return "", totalWidth > 0
+		return "", ansiDisplayWidth(text) > 0
 	}
-	if totalWidth <= width {
-		return text, false
-	}
-
-	var builder strings.Builder
-	current := 0
-	for _, ru := range text {
-		w := runewidth.RuneWidth(ru)
-		if w <= 0 {
-			w = 1
-		}
-		if current+w > width {
-			break
-		}
-		builder.WriteRune(ru)
-		current += w
-	}
-	return builder.String(), true
+	return ansiTruncate(text, width, false)
 }
 
 func displayWidth(text string) int {
+	return ansiDisplayWidth(text)
+}
+
+func ansiFromSegments(segments []statepkg.StyledTextSegment) (string, bool, string) {
+	if len(segments) == 0 {
+		return "", false, ""
+	}
+	rule := true
+	for _, seg := range segments {
+		if seg.Style != statepkg.TextStyleRule {
+			rule = false
+			break
+		}
+	}
+
+	var b strings.Builder
+	reset := "\x1b[0m"
+	var styleCode string
+	for _, seg := range segments {
+		text := textutil.SanitizeTerminalText(seg.Text)
+		if text == "" {
+			continue
+		}
+		code := ansiForStyle(seg.Style)
+		if code != "" {
+			b.WriteString(code)
+			if styleCode == "" {
+				styleCode = code
+			}
+		}
+		b.WriteString(text)
+		if seg.Style != statepkg.TextStylePlain {
+			b.WriteString(reset)
+		}
+	}
+	return b.String(), rule, styleCode
+}
+
+func ansiForStyle(kind statepkg.TextStyleKind) string {
+	switch kind {
+	case statepkg.TextStyleStrong, statepkg.TextStyleHeading:
+		return "\x1b[1m"
+	case statepkg.TextStyleEmphasis:
+		return "\x1b[3m"
+	case statepkg.TextStyleStrike:
+		return "\x1b[9m"
+	case statepkg.TextStyleCode:
+		return "\x1b[2m"
+	case statepkg.TextStyleLink:
+		return "\x1b[4m"
+	case statepkg.TextStyleRule:
+		return "\x1b[2m"
+	default:
+		return ""
+	}
+}
+
+func segmentDisplayWidth(segments []statepkg.StyledTextSegment) int {
 	width := 0
-	for _, ru := range text {
+	for _, seg := range segments {
+		width += displayWidth(seg.Text)
+	}
+	return width
+}
+
+func ansiDisplayWidth(text string) int {
+	width := 0
+	for i := 0; i < len(text); {
+		if text[i] == '\x1b' && i+1 < len(text) && text[i+1] == '[' {
+			j := i + 2
+			for j < len(text) && text[j] != 'm' {
+				j++
+			}
+			if j < len(text) {
+				j++
+			}
+			i = j
+			continue
+		}
+		ru, size := utf8.DecodeRuneInString(text[i:])
+		if ru == utf8.RuneError && size == 1 {
+			width++
+			i++
+			continue
+		}
 		w := runewidth.RuneWidth(ru)
 		if w <= 0 {
 			w = 1
 		}
 		width += w
+		i += size
 	}
 	return width
+}
+
+func ansiTruncate(text string, width int, withEllipsis bool) (string, bool) {
+	if width <= 0 {
+		return "", ansiDisplayWidth(text) > 0
+	}
+	const ellipsisRune = '…'
+	ellipsisWidth := runewidth.RuneWidth(ellipsisRune)
+	if ellipsisWidth <= 0 {
+		ellipsisWidth = 1
+	}
+	target := width
+	if withEllipsis {
+		if width <= ellipsisWidth {
+			return string(ellipsisRune), true
+		}
+		target = width - ellipsisWidth
+	}
+
+	var b strings.Builder
+	consumed := 0
+	for i := 0; i < len(text) && consumed < target; {
+		if text[i] == '\x1b' && i+1 < len(text) && text[i+1] == '[' {
+			j := i + 2
+			for j < len(text) && text[j] != 'm' {
+				j++
+			}
+			if j < len(text) {
+				j++
+			}
+			b.WriteString(text[i:j])
+			i = j
+			continue
+		}
+		ru, size := utf8.DecodeRuneInString(text[i:])
+		if ru == utf8.RuneError && size == 1 {
+			if consumed+1 > target {
+				break
+			}
+			b.WriteByte(text[i])
+			consumed++
+			i++
+			continue
+		}
+		w := runewidth.RuneWidth(ru)
+		if w <= 0 {
+			w = 1
+		}
+		if consumed+w > target {
+			break
+		}
+		b.WriteRune(ru)
+		consumed += w
+		i += size
+	}
+
+	truncated := consumed < ansiDisplayWidth(text)
+	if withEllipsis && truncated {
+		b.WriteRune(ellipsisRune)
+	}
+	return b.String(), truncated
 }
 
 func lineCharCount(lines []string) int {
