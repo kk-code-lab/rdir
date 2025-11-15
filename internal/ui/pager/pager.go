@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -105,22 +106,82 @@ func (p *PreviewPager) Run() error {
 	}
 	defer p.cleanupTerminal()
 
+	done := make(chan struct{})
+	defer close(done)
+
+	resizeEvents := p.startResizeWatcher(done)
+	var keyEvents <-chan keyEvent
+	var keyErrs <-chan error
+	if resizeEvents != nil {
+		keyEvents, keyErrs = p.startKeyReader(done)
+	}
+
 	p.updateSize()
 	p.applyWrapSetting()
+	needsRender := true
 	for {
-		if err := p.render(); err != nil {
-			return err
+		if needsRender {
+			if err := p.render(); err != nil {
+				return err
+			}
+			needsRender = false
 		}
 
-		event, err := p.readKeyEvent()
-		if err != nil {
-			return err
+		if resizeEvents == nil || keyEvents == nil {
+			event, err := p.readKeyEvent()
+			if err != nil {
+				return err
+			}
+			if done := p.handleKey(event); done {
+				return nil
+			}
+			needsRender = true
+			continue
 		}
 
-		if done := p.handleKey(event); done {
+		select {
+		case <-resizeEvents:
+			needsRender = true
+		case event := <-keyEvents:
+			if done := p.handleKey(event); done {
+				return nil
+			}
+			needsRender = true
+		case err := <-keyErrs:
+			if err != nil {
+				return err
+			}
 			return nil
 		}
 	}
+}
+
+func (p *PreviewPager) startResizeWatcher(done <-chan struct{}) <-chan struct{} {
+	signals := resizeSignals()
+	if len(signals) == 0 {
+		return nil
+	}
+	resizeCh := make(chan struct{}, 1)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, signals...)
+	go func() {
+		defer signal.Stop(sigCh)
+		for {
+			select {
+			case <-done:
+				return
+			case _, ok := <-sigCh:
+				if !ok {
+					return
+				}
+				select {
+				case resizeCh <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+	return resizeCh
 }
 
 func (p *PreviewPager) initTerminal() error {
@@ -373,13 +434,19 @@ func (p *PreviewPager) drawStyledRow(row int, text string, bold bool, style stri
 
 	needsPadding := style == headerBarStyle
 	if needsPadding && available >= 2 {
-		available -= 2
-		renderText = truncateToWidth(renderText, available)
+		bodyWidth := available - 2
+		clipped, truncated := clipTextToWidth(renderText, bodyWidth)
+		renderText = clipped
 		p.writeString(" " + renderText)
-		if displayWidth(renderText) < available {
-			p.writeString(" ")
-		} else {
+		renderWidth := displayWidth(renderText)
+		padding := bodyWidth - renderWidth
+		if padding > 0 {
+			p.writeString(strings.Repeat(" ", padding))
+		}
+		if truncated {
 			p.writeString("…")
+		} else {
+			p.writeString(" ")
 		}
 	} else {
 		if available > 0 {
@@ -1250,6 +1317,31 @@ func truncateToWidth(text string, width int) string {
 	}
 	builder.WriteString(ellipsis)
 	return builder.String()
+}
+
+func clipTextToWidth(text string, width int) (string, bool) {
+	totalWidth := displayWidth(text)
+	if width <= 0 {
+		return "", totalWidth > 0
+	}
+	if totalWidth <= width {
+		return text, false
+	}
+
+	var builder strings.Builder
+	current := 0
+	for _, ru := range text {
+		w := runewidth.RuneWidth(ru)
+		if w <= 0 {
+			w = 1
+		}
+		if current+w > width {
+			break
+		}
+		builder.WriteRune(ru)
+		current += w
+	}
+	return builder.String(), true
 }
 
 func displayWidth(text string) int {

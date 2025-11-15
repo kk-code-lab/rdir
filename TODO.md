@@ -29,6 +29,9 @@
 - [ ] **Streaming search inside pager**  
   Large text previews should support `/pattern` search without loading everything. Consider two-phase search: scan current chunk first, then stream subsequent chunks, highlighting matches as they load.
 
+- [ ] **Window resize on Windows pager**  
+  Unix pagers now redraw immediately when the terminal resizes (SIGWINCH + `select`). Windows still requires a keypress because we never consume `WINDOW_BUFFER_SIZE_EVENT`. Implement a Windows-specific key reader that uses `ReadConsoleInput`/`golang.org/x/sys/windows` to listen for both `KEY_EVENT` and `WINDOW_BUFFER_SIZE_EVENT`, toggles raw mode via `SetConsoleMode`, and pushes synthetic resize events into the pager loop so `p.updateSize()`/`render()` fire without waiting for input.
+
 ## Performance & Search
 
 - [ ] **Token heuristics & order**  
