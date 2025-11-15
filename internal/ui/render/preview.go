@@ -95,15 +95,16 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 				break
 			}
 		}
-	} else if !preview.IsDir && len(preview.TextLines) > 0 {
+	} else if !preview.IsDir && (len(preview.TextLines) > 0 || len(preview.FormattedTextLines) > 0) {
+		lines, meta := previewTextLines(preview)
 		textStyle := baseStyle.Foreground(r.theme.FileFg)
-		if startIdx > len(preview.TextLines) {
-			startIdx = len(preview.TextLines)
+		if startIdx > len(lines) {
+			startIdx = len(lines)
 		}
-		for i := startIdx; i < len(preview.TextLines); i++ {
-			line := preview.TextLines[i]
+		for i := startIdx; i < len(lines); i++ {
+			line := lines[i]
 			safeLine := textutil.SanitizeTerminalText(line)
-			lineWidth := r.previewLineWidth(preview, i, safeLine)
+			lineWidth := r.previewLineWidth(meta, i, safeLine)
 			if wrapEnabled {
 				if !r.drawWrappedPreviewText(safeLine, startX, panelWidth, textStyle, &y, bottomLimit, w) {
 					break
@@ -324,9 +325,19 @@ func (r *Renderer) fullScreenBinaryMode(state *statepkg.AppState, width int) bin
 	}
 }
 
-func (r *Renderer) previewLineWidth(preview *statepkg.PreviewData, idx int, text string) int {
-	if preview != nil && idx >= 0 && idx < len(preview.TextLineMeta) {
-		if width := preview.TextLineMeta[idx].DisplayWidth; width > 0 {
+func previewTextLines(preview *statepkg.PreviewData) ([]string, []statepkg.TextLineMetadata) {
+	if preview == nil {
+		return nil, nil
+	}
+	if len(preview.FormattedTextLines) > 0 {
+		return preview.FormattedTextLines, preview.FormattedTextLineMeta
+	}
+	return preview.TextLines, preview.TextLineMeta
+}
+
+func (r *Renderer) previewLineWidth(meta []statepkg.TextLineMetadata, idx int, text string) int {
+	if len(meta) > 0 && idx >= 0 && idx < len(meta) {
+		if width := meta[idx].DisplayWidth; width > 0 {
 			return width
 		}
 	}

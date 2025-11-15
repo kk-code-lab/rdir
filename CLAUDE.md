@@ -304,10 +304,15 @@ screenHeight    // Terminal height
 
 ### Adding a Preview Type
 
-1. Update `PreviewData` struct in `internal/state/state.go` if needed
+1. Update `PreviewData` struct in `internal/state/state.go` if needed (e.g., formatted lines, reasons for unavailability)
 2. Extend `generatePreview()` in `internal/state/reducer.go`
 3. Add rendering in `internal/ui/render/renderer.go`
-4. Write tests in `internal/state/reducer_io_test.go`
+4. Write tests in `internal/state/reducer_io_test.go` (and formatter-specific tests)
+
+Current formats:
+- Text: first 64 KB, tabs expanded, UTF-16 normalized.
+- JSON/Markdown: prettified when the file is not truncated and <=32 KB; otherwise stays raw and records `FormattedUnavailableReason`.
+- Binary: hex dump up to 1 KB plus ASCII gutter.
 
 ## Performance Notes
 

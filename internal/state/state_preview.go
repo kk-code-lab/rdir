@@ -14,6 +14,13 @@ func clonePreviewData(src *PreviewData) *PreviewData {
 	if len(src.TextLineMeta) > 0 {
 		copyData.TextLineMeta = append([]TextLineMetadata(nil), src.TextLineMeta...)
 	}
+	if len(src.FormattedTextLines) > 0 {
+		copyData.FormattedTextLines = append([]string(nil), src.FormattedTextLines...)
+	}
+	if len(src.FormattedTextLineMeta) > 0 {
+		copyData.FormattedTextLineMeta = append([]TextLineMetadata(nil), src.FormattedTextLineMeta...)
+	}
+	copyData.FormattedUnavailableReason = src.FormattedUnavailableReason
 	if len(src.TextRemainder) > 0 {
 		copyData.TextRemainder = append([]byte(nil), src.TextRemainder...)
 	}
@@ -91,19 +98,22 @@ func (s *AppState) previewLineCount() int {
 	if s == nil || s.PreviewData == nil {
 		return 0
 	}
+	if len(s.PreviewData.FormattedTextLines) > 0 {
+		return len(s.PreviewData.FormattedTextLines)
+	}
+	if len(s.PreviewData.TextLines) > 0 {
+		return len(s.PreviewData.TextLines)
+	}
 	if s.PreviewData.LineCount > 0 {
 		return s.PreviewData.LineCount
 	}
-	switch {
-	case s.PreviewData.IsDir:
+	if s.PreviewData.IsDir {
 		return len(s.PreviewData.DirEntries)
-	case len(s.PreviewData.TextLines) > 0:
-		return len(s.PreviewData.TextLines)
-	case len(s.PreviewData.BinaryInfo.Lines) > 0:
-		return len(s.PreviewData.BinaryInfo.Lines)
-	default:
-		return 0
 	}
+	if len(s.PreviewData.BinaryInfo.Lines) > 0 {
+		return len(s.PreviewData.BinaryInfo.Lines)
+	}
+	return 0
 }
 
 func (s *AppState) previewVisibleLines() int {
