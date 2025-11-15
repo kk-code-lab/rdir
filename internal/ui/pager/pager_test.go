@@ -201,6 +201,36 @@ func TestCleanupTerminalRestoresCursorAndWrap(t *testing.T) {
 	}
 }
 
+func TestReadKeyEventShiftArrows(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		input string
+		want  keyKind
+	}{
+		{name: "shift-up", input: "\x1b[1;2A", want: keyShiftUp},
+		{name: "shift-down", input: "\x1b[1;2B", want: keyShiftDown},
+		{name: "ctrl-up", input: "\x1b[1;5A", want: keyUp},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := &PreviewPager{
+				reader: bufio.NewReader(strings.NewReader(tc.input)),
+			}
+			ev, err := p.readKeyEvent()
+			if err != nil {
+				t.Fatalf("readKeyEvent: %v", err)
+			}
+			if ev.kind != tc.want {
+				t.Fatalf("expected %v, got %v", tc.want, ev.kind)
+			}
+		})
+	}
+}
+
 func TestHeaderLinesSanitizeControlCharacters(t *testing.T) {
 	state := &statepkg.AppState{
 		CurrentPath: "/tmp",
