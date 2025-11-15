@@ -539,7 +539,7 @@ func startsBlock(lines []string, index int) bool {
 	if _, ok := parseListMarker(trimmed); ok {
 		return true
 	}
-	if looksLikeTableHeader(trimmed) && index+1 < len(lines) && looksLikeTableSeparator(strings.TrimSpace(lines[index+1])) {
+	if looksLikeTableStart(lines, index) {
 		return true
 	}
 	return false
@@ -1447,6 +1447,20 @@ func joinParagraphLines(lines []string) string {
 		hardPrev = hard
 	}
 	return b.String()
+}
+
+func looksLikeTableStart(lines []string, index int) bool {
+	if index+1 >= len(lines) {
+		return false
+	}
+	header := strings.TrimSpace(lines[index])
+	separator := strings.TrimSpace(lines[index+1])
+	if !looksLikeTableHeader(header) || !looksLikeTableSeparator(separator) {
+		return false
+	}
+	headers := splitTableRow(header)
+	separators := splitTableRow(separator)
+	return len(headers) > 0 && len(headers) == len(separators)
 }
 
 func normalizeParagraphLine(line string) (string, bool) {
