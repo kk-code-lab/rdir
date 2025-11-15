@@ -90,6 +90,21 @@ func TestMarkdownInlineParsingEdgeCases(t *testing.T) {
 			line: "See <https://example.com> or <mailto:test@example.com> now.",
 			want: "See https://example.com (https://example.com) or test@example.com (mailto:test@example.com) now.",
 		},
+		{
+			name: "inline pipe without table",
+			line: "Value | with pipe characters",
+			want: "Value | with pipe characters",
+		},
+		{
+			name: "link with parentheses",
+			line: "See [docs](https://example.com/foo(bar)/baz)",
+			want: "See docs (https://example.com/foo(bar)/baz)",
+		},
+		{
+			name: "underscore inside identifier unchanged",
+			line: "config_map_value should stay intact",
+			want: "config_map_value should stay intact",
+		},
 	}
 
 	for _, tt := range tests {
@@ -102,6 +117,35 @@ func TestMarkdownInlineParsingEdgeCases(t *testing.T) {
 				t.Fatalf("want %q, got %q", tt.want, got[0])
 			}
 		})
+	}
+}
+
+func TestMarkdownHardLineBreaks(t *testing.T) {
+	lines := []string{
+		"First line  ",
+		"Second line",
+		"Line with \\",
+		"backslash break",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"First line",
+		"Second line Line with",
+		"backslash break",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestMarkdownBreakTag(t *testing.T) {
+	got := formatMarkdownLines([]string{"Hello<br>world"})
+	want := []string{"Hello", "world"}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
 	}
 }
 
@@ -145,6 +189,75 @@ func TestMarkdownBlockParsing(t *testing.T) {
 		"├────┼────┤",
 		"│ c1 │ c2 │",
 		"└────┴────┘",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestTableSplittingRespectsEscapedPipes(t *testing.T) {
+	lines := []string{
+		"A | B",
+		"---|---",
+		"`code | span` \\| raw | value",
+		"x \\| y | z",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"┌─────────────────────┬───────┐",
+		"│ A                   │ B     │",
+		"├─────────────────────┼───────┤",
+		"│ `code | span` | raw │ value │",
+		"│ x | y               │ z     │",
+		"└─────────────────────┴───────┘",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestMarkdownBlockquotePreservesBlankLines(t *testing.T) {
+	lines := []string{
+		"> first line",
+		"",
+		"> second line",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"│ first line",
+		"│ ",
+		"│ second line",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestMarkdownListWithFencedCodeBlock(t *testing.T) {
+	lines := []string{
+		"- item with code",
+		"  ```go",
+		"  fmt.Println(\"ok\")",
+		"  ```",
+		"  tail",
+		"2. second top-level item",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"• item with code",
+		"  ",
+		"      [go]",
+		"      fmt.Println(\"ok\")",
+		"  ",
+		"  tail",
+		"",
+		"2. second top-level item",
 	}
 
 	if diff := diffLines(want, got); diff != "" {

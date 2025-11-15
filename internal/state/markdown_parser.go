@@ -37,6 +37,7 @@ const (
 	inlineCode
 	inlineLink
 	inlineImage
+	inlineLineBreak
 )
 
 type markdownInline struct {
@@ -211,15 +212,14 @@ func parseParagraph(lines []string, start int) (markdownParagraph, int) {
 		}
 
 		indent := leadingSpaces(line)
-		trimmed := strings.TrimLeft(line, " \t")
-		if indent >= 4 || startsBlock(trimmed) {
+		if indent >= 4 || startsBlock(lines, i) {
 			break
 		}
-		parts = append(parts, strings.TrimRight(line, " \t"))
+		parts = append(parts, line)
 		i++
 	}
 
-	text := strings.Join(parts, " ")
+	text := joinParagraphLines(parts)
 	return markdownParagraph{text: parseInline(text)}, i
 }
 
@@ -229,6 +229,7 @@ func parseBlockquote(lines []string, start int) (markdownBlockquote, int) {
 	for i < len(lines) {
 		line := lines[i]
 		if isBlankLine(line) {
+			quoteLines = append(quoteLines, "")
 			i++
 			continue
 		}
@@ -358,6 +359,9 @@ func parseList(lines []string, start int) (markdownList, int, bool) {
 		itemLines := []string{m.content}
 		contentIndent := baseIndent + m.markerLen + 1
 		codeIndent := contentIndent + 4
+		inFence := false
+		var fenceDelimiter rune
+		var fenceLength int
 		i++
 		for i < len(lines) {
 			line := lines[i]
@@ -367,30 +371,49 @@ func parseList(lines []string, start int) (markdownList, int, bool) {
 				continue
 			}
 
-			if nextMarker, ok := parseListMarker(line); ok && nextMarker.indent == baseIndent {
+			if !inFence {
+				if nextMarker, ok := parseListMarker(line); ok && nextMarker.indent == baseIndent {
+					break
+				}
+			}
+
+			if leadingSpaces(line) < contentIndent {
 				break
 			}
 
-			if leadingSpaces(line) >= codeIndent {
-				rel := line[contentIndent:]
-				if strings.HasPrefix(strings.TrimLeft(rel, " \t"), "```") || strings.HasPrefix(strings.TrimLeft(rel, " \t"), "~~~") {
-					break
+			content := line[contentIndent:]
+			trimmedContent := strings.TrimLeft(content, " \t")
+
+			if inFence {
+				itemLines = append(itemLines, trimmedContent)
+				if count := countRepeatRune(trimmedContent, fenceDelimiter); count >= fenceLength {
+					inFence = false
 				}
-				itemLines = append(itemLines, strings.TrimLeft(line[contentIndent:], " \t"))
 				i++
 				continue
 			}
 
-			if leadingSpaces(line) >= contentIndent {
-				startCol := contentIndent
-				if startCol > len(line) {
-					startCol = len(line)
-				}
-				itemLines = append(itemLines, line[startCol:])
+			if fence, ok := detectFence(trimmedContent); ok {
+				inFence = true
+				fenceDelimiter = fence.delimiter
+				fenceLength = fence.length
+				itemLines = append(itemLines, trimmedContent)
 				i++
 				continue
 			}
-			break
+
+			if leadingSpaces(line) >= codeIndent {
+				itemLines = append(itemLines, trimmedContent)
+				i++
+				continue
+			}
+
+			startCol := contentIndent
+			if startCol > len(line) {
+				startCol = len(line)
+			}
+			itemLines = append(itemLines, line[startCol:])
+			i++
 		}
 
 		itemBlocks, _ := parseBlocks(itemLines, 0)
@@ -493,7 +516,11 @@ func parseSetextHeading(lines []string, index int) (int, bool) {
 	return level, true
 }
 
-func startsBlock(trimmed string) bool {
+func startsBlock(lines []string, index int) bool {
+	if index >= len(lines) {
+		return false
+	}
+	trimmed := strings.TrimLeft(lines[index], " \t")
 	if trimmed == "" {
 		return false
 	}
@@ -512,7 +539,7 @@ func startsBlock(trimmed string) bool {
 	if _, ok := parseListMarker(trimmed); ok {
 		return true
 	}
-	if looksLikeTableHeader(trimmed) {
+	if looksLikeTableHeader(trimmed) && index+1 < len(lines) && looksLikeTableSeparator(strings.TrimSpace(lines[index+1])) {
 		return true
 	}
 	return false
@@ -566,6 +593,10 @@ func parseInline(text string) []markdownInline {
 				buf = append(buf, r)
 				i++
 			}
+		case '\n':
+			flushText()
+			nodes = append(nodes, markdownInline{kind: inlineLineBreak})
+			i++
 		case '`':
 			count := countRepeat(runes[i:], '`')
 			end := findClosingBackticks(runes[i+count:], count)
@@ -601,6 +632,12 @@ func parseInline(text string) []markdownInline {
 			buf = append(buf, r)
 			i++
 		case '<':
+			if brLen := detectBreakTag(runes[i:]); brLen > 0 {
+				flushText()
+				nodes = append(nodes, markdownInline{kind: inlineLineBreak})
+				i += brLen
+				continue
+			}
 			end := findAutolinkEnd(runes[i+1:])
 			if end >= 0 {
 				candidate := string(runes[i+1 : i+1+end])
@@ -630,6 +667,11 @@ func parseInline(text string) []markdownInline {
 			}
 			closeIdx := findClosingDelimiter(runes, i+run, r, run)
 			if closeIdx == -1 {
+				buf = append(buf, r)
+				i++
+				continue
+			}
+			if isAlnum(runes, i-1) && isAlnum(runes, closeIdx+run) {
 				buf = append(buf, r)
 				i++
 				continue
@@ -682,8 +724,8 @@ func parseLinkOrImage(runes []rune, isImage bool) (markdownInline, int, bool) {
 		return markdownInline{}, 0, false
 	}
 
-	closeParen := findMatchingParen(runes[offset+1+endText+2:])
-	if closeParen == -1 {
+	closeParen, ok := findMatchingParen(runes[offset+1+endText+2:])
+	if !ok {
 		return markdownInline{}, 0, false
 	}
 
@@ -729,7 +771,7 @@ func findMatchingBracket(runes []rune) int {
 	return -1
 }
 
-func findMatchingParen(runes []rune) int {
+func findMatchingParen(runes []rune) (int, bool) {
 	depth := 0
 	for i := 0; i < len(runes); {
 		switch r := runes[i]; r {
@@ -740,13 +782,13 @@ func findMatchingParen(runes []rune) int {
 			depth++
 		case ')':
 			if depth == 0 {
-				return i
+				return i, true
 			}
 			depth--
 		}
 		i++
 	}
-	return -1
+	return -1, false
 }
 
 func findClosingBackticks(runes []rune, count int) int {
@@ -775,6 +817,13 @@ func findClosingDelimiter(runes []rune, start int, delim rune, count int) int {
 		return i
 	}
 	return -1
+}
+
+func isAlnum(runes []rune, idx int) bool {
+	if idx < 0 || idx >= len(runes) {
+		return false
+	}
+	return unicode.IsLetter(runes[idx]) || unicode.IsDigit(runes[idx])
 }
 
 func countRepeat(runes []rune, target rune) int {
@@ -857,6 +906,20 @@ func isAutolink(s string) bool {
 	return false
 }
 
+func detectBreakTag(runes []rune) int {
+	lower := strings.ToLower(string(runes))
+	switch {
+	case strings.HasPrefix(lower, "<br>"):
+		return len("<br>")
+	case strings.HasPrefix(lower, "<br/>"):
+		return len("<br/>")
+	case strings.HasPrefix(lower, "<br />"):
+		return len("<br />")
+	default:
+		return 0
+	}
+}
+
 func renderMarkdown(doc markdownDocument) []string {
 	var lines []string
 	for idx, block := range doc.blocks {
@@ -879,7 +942,7 @@ func renderBlock(block markdownBlock, depth int) []string {
 		}
 		return []string{strings.TrimSpace(prefix + " " + text)}
 	case markdownParagraph:
-		return []string{renderInlines(b.text)}
+		return renderParagraphLines(b.text)
 	case markdownCodeBlock:
 		return renderCodeBlock(b)
 	case markdownList:
@@ -893,6 +956,51 @@ func renderBlock(block markdownBlock, depth int) []string {
 	default:
 		return nil
 	}
+}
+
+func renderParagraphLines(inlines []markdownInline) []string {
+	var lines []string
+	var b strings.Builder
+
+	flush := func(force bool) {
+		line := strings.TrimSpace(b.String())
+		if force || line != "" || len(lines) == 0 {
+			lines = append(lines, line)
+		}
+		b.Reset()
+	}
+
+	for _, inline := range inlines {
+		switch inline.kind {
+		case inlineLineBreak:
+			flush(true)
+		case inlineText:
+			b.WriteString(inline.literal)
+		case inlineEmphasis, inlineStrong, inlineStrike:
+			b.WriteString(renderInlines(inline.children))
+		case inlineCode:
+			b.WriteString(inline.literal)
+		case inlineLink:
+			text := renderInlines(inline.children)
+			if inline.destination != "" {
+				b.WriteString(text)
+				b.WriteString(" (")
+				b.WriteString(inline.destination)
+				b.WriteString(")")
+			} else {
+				b.WriteString(text)
+			}
+		case inlineImage:
+			b.WriteString(inline.literal)
+			if inline.destination != "" {
+				b.WriteString(" (")
+				b.WriteString(inline.destination)
+				b.WriteString(")")
+			}
+		}
+	}
+	flush(true)
+	return lines
 }
 
 func renderCodeBlock(block markdownCodeBlock) []string {
@@ -960,6 +1068,8 @@ func renderInlines(inlines []markdownInline) string {
 		switch inline.kind {
 		case inlineText:
 			builder.WriteString(inline.literal)
+		case inlineLineBreak:
+			builder.WriteRune('\n')
 		case inlineEmphasis, inlineStrong, inlineStrike:
 			builder.WriteString(renderInlines(inline.children))
 		case inlineCode:
@@ -1095,6 +1205,54 @@ func renderInlineSegments(inlines []markdownInline, defaultStyle TextStyleKind) 
 	return segments
 }
 
+func renderParagraphSegments(inlines []markdownInline) [][]StyledTextSegment {
+	var lines [][]StyledTextSegment
+	var current []StyledTextSegment
+
+	flush := func(force bool) {
+		if len(current) == 0 && force {
+			lines = append(lines, []StyledTextSegment{})
+		} else if len(current) > 0 {
+			lines = append(lines, current)
+		}
+		current = nil
+	}
+
+	for _, inline := range inlines {
+		switch inline.kind {
+		case inlineLineBreak:
+			flush(true)
+		case inlineText:
+			current = append(current, StyledTextSegment{Text: inline.literal, Style: TextStylePlain})
+		case inlineEmphasis:
+			current = append(current, renderInlineSegments(inline.children, TextStyleEmphasis)...)
+		case inlineStrong:
+			current = append(current, renderInlineSegments(inline.children, TextStyleStrong)...)
+		case inlineStrike:
+			current = append(current, renderInlineSegments(inline.children, TextStyleStrike)...)
+		case inlineCode:
+			current = append(current, StyledTextSegment{Text: inline.literal, Style: TextStyleCode})
+		case inlineLink:
+			child := renderInlineSegments(inline.children, TextStyleLink)
+			current = append(current, child...)
+			if inline.destination != "" {
+				current = append(current, StyledTextSegment{Text: " (", Style: TextStylePlain})
+				current = append(current, StyledTextSegment{Text: inline.destination, Style: TextStyleLink})
+				current = append(current, StyledTextSegment{Text: ")", Style: TextStylePlain})
+			}
+		case inlineImage:
+			current = append(current, StyledTextSegment{Text: inline.literal, Style: TextStylePlain})
+			if inline.destination != "" {
+				current = append(current, StyledTextSegment{Text: " (", Style: TextStylePlain})
+				current = append(current, StyledTextSegment{Text: inline.destination, Style: TextStyleLink})
+				current = append(current, StyledTextSegment{Text: ")", Style: TextStylePlain})
+			}
+		}
+	}
+	flush(true)
+	return lines
+}
+
 func renderMarkdownSegments(doc markdownDocument) [][]StyledTextSegment {
 	var lines [][]StyledTextSegment
 	for idx, block := range doc.blocks {
@@ -1119,7 +1277,7 @@ func renderBlockSegments(block markdownBlock, depth int) [][]StyledTextSegment {
 		line = append(line, textSegments...)
 		return [][]StyledTextSegment{line}
 	case markdownParagraph:
-		return [][]StyledTextSegment{renderInlineSegments(b.text, TextStylePlain)}
+		return renderParagraphSegments(b.text)
 	case markdownCodeBlock:
 		return renderCodeBlockSegments(b)
 	case markdownList:
@@ -1220,11 +1378,103 @@ func parseTableAlignment(parts []string) []tableAlignment {
 
 func splitTableRow(line string) []string {
 	line = strings.Trim(line, "|")
-	parts := strings.Split(line, "|")
+	parts := splitPipes(line)
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
 	return parts
+}
+
+func splitPipes(line string) []string {
+	var parts []string
+	var buf []rune
+	inCode := false
+	backticks := 0
+	runes := []rune(line)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch r {
+		case '\\':
+			if i+1 < len(runes) {
+				buf = append(buf, runes[i+1])
+				i++
+				continue
+			}
+		case '`':
+			if !inCode {
+				backticks = countRepeat(runes[i:], '`')
+				inCode = true
+				buf = append(buf, runes[i:i+backticks]...)
+				i += backticks - 1
+				continue
+			}
+			if countRepeat(runes[i:], '`') == backticks {
+				buf = append(buf, runes[i:i+backticks]...)
+				i += backticks - 1
+				inCode = false
+				backticks = 0
+				continue
+			}
+		case '|':
+			if !inCode {
+				parts = append(parts, string(buf))
+				buf = buf[:0]
+				continue
+			}
+		}
+		buf = append(buf, r)
+	}
+	parts = append(parts, string(buf))
+	return parts
+}
+
+func joinParagraphLines(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	hardPrev := false
+	for idx, line := range lines {
+		content, hard := normalizeParagraphLine(line)
+		if idx > 0 {
+			if hardPrev {
+				b.WriteRune('\n')
+			} else {
+				b.WriteRune(' ')
+			}
+		}
+		b.WriteString(content)
+		hardPrev = hard
+	}
+	return b.String()
+}
+
+func normalizeParagraphLine(line string) (string, bool) {
+	raw := strings.TrimRight(line, "\t")
+	trimmed := strings.TrimRight(raw, " ")
+	trailingSpaces := len(raw) - len(trimmed)
+	hardBreak := trailingSpaces >= 2
+	content := trimmed
+
+	if strings.HasSuffix(content, "\\") {
+		backslashes := trailingBackslashes(content)
+		if backslashes%2 == 1 {
+			hardBreak = true
+			content = content[:len(content)-1]
+		}
+	}
+	if hardBreak {
+		content = strings.TrimRight(content, " ")
+	}
+	return content, hardBreak
+}
+
+func trailingBackslashes(s string) int {
+	count := 0
+	for i := len(s) - 1; i >= 0 && s[i] == '\\'; i-- {
+		count++
+	}
+	return count
 }
 
 func renderTable(tbl markdownTable) []string {
