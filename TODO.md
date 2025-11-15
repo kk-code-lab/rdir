@@ -32,6 +32,11 @@
 - [ ] **Window resize on Windows pager**  
   Unix pagers now redraw immediately when the terminal resizes (SIGWINCH + `select`). Windows still requires a keypress because we never consume `WINDOW_BUFFER_SIZE_EVENT`. Implement a Windows-specific key reader that uses `ReadConsoleInput`/`golang.org/x/sys/windows` to listen for both `KEY_EVENT` and `WINDOW_BUFFER_SIZE_EVENT`, toggles raw mode via `SetConsoleMode`, and pushes synthetic resize events into the pager loop so `p.updateSize()`/`render()` fire without waiting for input.
 
+## Preview Formatters
+
+- [ ] **Markdown parser without new deps**  
+  Replace regex-based Markdown prettifier with a small internal parser: block-level tokenizer (headings, lists, code fences, blockquotes, HR), inline tokenizer (emphasis, strong, code, links/images, escapes), AST, and a plaintext renderer for TUI (no HTML, neutralize inline HTML). Keep limits (32 KiB default) and bail to raw view for oversized/truncated files. Aim for CommonMark subset (no tables/footnotes initially) and add table-driven tests for edge cases (nested emphasis, backticks inside text, escaped markers).
+
 ## Performance & Search
 
 - [ ] **Token heuristics & order**  

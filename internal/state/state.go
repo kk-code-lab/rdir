@@ -32,21 +32,24 @@ const (
 
 // PreviewData contains preview information for selected file
 type PreviewData struct {
-	IsDir         bool
-	Name          string
-	Size          int64
-	Modified      time.Time
-	Mode          os.FileMode
-	LineCount     int
-	TextLines     []string
-	TextLineMeta  []TextLineMetadata
-	TextCharCount int
-	TextTruncated bool
-	TextBytesRead int64
-	TextRemainder []byte
-	TextEncoding  fsutil.UnicodeEncoding
-	BinaryInfo    BinaryPreview
-	DirEntries    []FileEntry
+	IsDir                      bool
+	Name                       string
+	Size                       int64
+	Modified                   time.Time
+	Mode                       os.FileMode
+	LineCount                  int
+	TextLines                  []string
+	TextLineMeta               []TextLineMetadata
+	FormattedTextLines         []string
+	FormattedTextLineMeta      []TextLineMetadata
+	FormattedUnavailableReason string
+	TextCharCount              int
+	TextTruncated              bool
+	TextBytesRead              int64
+	TextRemainder              []byte
+	TextEncoding               fsutil.UnicodeEncoding
+	BinaryInfo                 BinaryPreview
+	DirEntries                 []FileEntry
 }
 
 // BinaryPreview contains lightweight information about a binary file.
@@ -119,6 +122,7 @@ type AppState struct {
 	PreviewWrap          bool
 	PreviewScrollOffset  int
 	PreviewWrapOffset    int
+	PreviewPreferRaw     bool
 	previewCache         map[string]previewCacheEntry
 	previewScrollHistory map[string]previewScrollPosition
 

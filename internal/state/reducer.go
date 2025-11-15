@@ -17,9 +17,10 @@ import (
 )
 
 const (
-	previewByteLimit       int64 = 64 * 1024
-	binaryPreviewMaxBytes        = 1024
-	binaryPreviewLineWidth       = 16
+	previewByteLimit         int64 = 64 * 1024
+	formattedPreviewMaxBytes       = 32 * 1024
+	binaryPreviewMaxBytes          = 1024
+	binaryPreviewLineWidth         = 16
 )
 
 func min(a, b int) int {
@@ -1652,37 +1653,16 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 		// File preview: show text snippet or binary hex dump depending on detection
 		content, err := fsutil.ReadFileHead(filePath, previewByteLimit)
 		if err == nil {
-			if fsutil.IsTextFile(filePath, content) {
-				encoding := fsutil.DetectUnicodeEncoding(content)
-				preview.TextEncoding = encoding
-				truncated := info.Size() > int64(len(content))
-				if encoding == fsutil.EncodingUTF16LE || encoding == fsutil.EncodingUTF16BE {
-					textContent := fsutil.NormalizeTextContent(content)
-					lines := strings.Split(textContent, "\n")
-					expanded, charCount := expandPreviewTextLines(lines)
-					preview.TextLines = expanded
-					preview.TextLineMeta = textLineMetadataFromLines(expanded)
-					preview.LineCount = len(expanded)
-					preview.TextCharCount = charCount
-					preview.TextTruncated = truncated
-					preview.TextBytesRead = int64(len(content))
-				} else {
-					lines, meta, charCount, remainder := buildTextPreview(content, truncated, encoding)
-					preview.TextLines = lines
-					preview.TextLineMeta = meta
-					preview.LineCount = len(lines)
-					preview.TextCharCount = charCount
-					preview.TextTruncated = truncated
-					preview.TextBytesRead = int64(len(content))
-					if len(remainder) > 0 {
-						preview.TextRemainder = remainder
-					} else {
-						preview.TextRemainder = nil
-					}
+			ctx := previewFormatContext{
+				path:    filePath,
+				info:    info,
+				content: content,
+			}
+			for _, formatter := range previewFormatters {
+				if formatter.CanHandle(ctx) {
+					formatter.Format(ctx, preview)
+					break
 				}
-			} else {
-				preview.BinaryInfo = formatBinaryPreviewLines(content, info.Size())
-				preview.LineCount = int((info.Size()+binaryPreviewLineWidth-1)/binaryPreviewLineWidth) + 1
 			}
 		}
 		state.storeFilePreview(filePath, info, preview)

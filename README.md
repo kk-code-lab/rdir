@@ -19,6 +19,7 @@ rdir
 - **↑/↓**: Navigate files
 - **Enter**: Enter directory
 - **→**: Open file in pager
+- **f (pager)**: Toggle formatted/raw preview (pretty JSON/Markdown when available; falls back to raw for truncated/large files)
 - **←/Backspace**: Go to parent
 - **/**: Fuzzy search
 - **r**: Refresh current directory listing

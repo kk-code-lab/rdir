@@ -201,6 +201,57 @@ func TestCleanupTerminalRestoresCursorAndWrap(t *testing.T) {
 	}
 }
 
+func TestPreviewPagerToggleFormatSwitchesViews(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name: "data.json",
+		TextLines: []string{
+			`{"name":"demo","count":1}`,
+		},
+		FormattedTextLines: []string{
+			"{",
+			`  "name": "demo",`,
+			`  "count": 1`,
+			"}",
+		},
+	}
+	state := &statepkg.AppState{
+		PreviewData: preview,
+		CurrentPath: ".",
+	}
+	pager, err := NewPreviewPager(state)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	if !pager.showFormatted {
+		t.Fatalf("expected pager to default to formatted view")
+	}
+
+	state.PreviewScrollOffset = 2
+	state.PreviewWrapOffset = 1
+	pager.handleKey(keyEvent{kind: keyToggleFormat})
+
+	if pager.showFormatted {
+		t.Fatalf("expected pager to switch to raw view after toggle")
+	}
+	if !state.PreviewPreferRaw {
+		t.Fatalf("state should persist raw preference")
+	}
+	if state.PreviewScrollOffset != 0 || state.PreviewWrapOffset != 0 {
+		t.Fatalf("expected scroll offsets reset after format toggle")
+	}
+	if len(pager.lines) == 0 || pager.lines[0] != preview.TextLines[0] {
+		t.Fatalf("raw lines should be displayed after toggle")
+	}
+
+	pager.handleKey(keyEvent{kind: keyToggleFormat})
+	if !pager.showFormatted {
+		t.Fatalf("expected pager to return to formatted view on second toggle")
+	}
+	if state.PreviewPreferRaw {
+		t.Fatalf("state should record formatted preference")
+	}
+}
+
 func TestReadKeyEventShiftArrows(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
