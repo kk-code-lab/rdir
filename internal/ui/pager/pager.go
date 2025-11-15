@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -25,6 +26,7 @@ const (
 	binaryPagerMaxChunks   = 8
 	headerBarStyle         = "\x1b[48;5;238m\x1b[97m"
 	statusBarStyle         = "\x1b[48;5;236m\x1b[97m"
+	shiftScrollLines       = 10
 )
 
 var termGetSize = term.GetSize
@@ -563,11 +565,23 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		} else {
 			p.state.PreviewScrollOffset--
 		}
+	case keyShiftUp:
+		if p.wrapEnabled {
+			p.scrollRows(totalLines, -shiftScrollLines)
+		} else {
+			p.state.PreviewScrollOffset -= shiftScrollLines
+		}
 	case keyDown:
 		if p.wrapEnabled {
 			p.scrollRows(totalLines, 1)
 		} else {
 			p.state.PreviewScrollOffset++
+		}
+	case keyShiftDown:
+		if p.wrapEnabled {
+			p.scrollRows(totalLines, shiftScrollLines)
+		} else {
+			p.state.PreviewScrollOffset += shiftScrollLines
 		}
 	case keyPageUp:
 		if p.wrapEnabled {
@@ -651,7 +665,7 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		end = totalLines
 	}
 	percent := p.progressPercent(start, totalLines)
-	return fmt.Sprintf("%d-%d/%d lines (%d%%)  %d chars  wrap:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  i info",
+	return fmt.Sprintf("%d-%d/%d lines (%d%%)  %d chars  wrap:%s info:%s  ↑↓/PgUp/PgDn scroll  Shift+↑/↓ ±10  ←/Esc/q exit  w/→ wrap  i info",
 		start, end, totalLines, percent, charCount, wrap, info)
 }
 
@@ -1107,6 +1121,8 @@ const (
 	keySpace
 	keyCtrlC
 	keyToggleInfo
+	keyShiftUp
+	keyShiftDown
 )
 
 type keyEvent struct {
@@ -1206,18 +1222,31 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 			return keyEvent{kind: keyEscape}, nil
 		}
 		seq = append(seq, b)
-		if (b >= 'A' && b <= 'Z') || b == '~' {
+		if isCSIFinalByte(b) {
 			break
 		}
-		if len(seq) > 5 {
-			break
+		if len(seq) >= 16 {
+			return keyEvent{kind: keyUnknown}, nil
 		}
 	}
 
-	switch seq[len(seq)-1] {
+	if len(seq) == 0 {
+		return keyEvent{kind: keyUnknown}, nil
+	}
+
+	final := seq[len(seq)-1]
+	params, modifier := parseCSIParameters(string(seq[:len(seq)-1]))
+
+	switch final {
 	case 'A':
+		if hasShiftModifier(modifier) {
+			return keyEvent{kind: keyShiftUp}, nil
+		}
 		return keyEvent{kind: keyUp}, nil
 	case 'B':
+		if hasShiftModifier(modifier) {
+			return keyEvent{kind: keyShiftDown}, nil
+		}
 		return keyEvent{kind: keyDown}, nil
 	case 'C':
 		return keyEvent{kind: keyRight}, nil
@@ -1228,8 +1257,7 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 	case 'F':
 		return keyEvent{kind: keyEnd}, nil
 	case '~':
-		str := string(seq[:len(seq)-1])
-		switch str {
+		switch params {
 		case "3":
 			return keyEvent{kind: keyUnknown}, nil
 		case "5":
@@ -1243,6 +1271,44 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 		}
 	}
 	return keyEvent{kind: keyUnknown}, nil
+}
+
+func isCSIFinalByte(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || b == '~'
+}
+
+func parseCSIParameters(param string) (string, int) {
+	if param == "" {
+		return "", 1
+	}
+
+	parts := strings.Split(param, ";")
+	if len(parts) == 0 {
+		return "", 1
+	}
+
+	modifier := 1
+	baseParts := parts
+	if len(parts) > 1 {
+		if val, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
+			modifier = val
+			baseParts = parts[:len(parts)-1]
+			if len(baseParts) == 0 {
+				baseParts = []string{"1"}
+			}
+		}
+	}
+	base := strings.Join(baseParts, ";")
+	return base, modifier
+}
+
+func hasShiftModifier(mod int) bool {
+	switch mod {
+	case 2, 4, 6, 8:
+		return true
+	default:
+		return false
+	}
 }
 
 func formatDirectoryPreview(preview *statepkg.PreviewData) []string {
