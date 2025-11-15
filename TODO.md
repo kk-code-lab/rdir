@@ -50,5 +50,5 @@
 
 - [x] **Terminal injection audit**  
   Walk every surface that prints user-controlled text (status bar, directory list, error banners, etc.) and ensure the same sanitization used in the pager header/dir entries is applied everywhere so ANSI escapes can’t leak to the terminal.
-- [ ] **External command safety review**  
+- [x] **External command safety review**  
   Inventory all `exec.Command` usages (editor, pager, clipboard, future hooks) to confirm no shell invocation paths exist, arguments remain separated, and non-zero exits propagate back to the UI/logs. Add regression tests for the most common flows while at it.
