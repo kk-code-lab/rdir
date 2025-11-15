@@ -14,16 +14,21 @@ import (
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 )
 
+var commandBuilder = exec.Command
+
 func (app *Application) handleClipboard() bool {
 	if app.clipboardAvail && len(app.clipboardCmd) > 0 {
 		path := normalizeClipboardPath(app.state.CurrentFilePath(), runtime.GOOS)
-		cmd := exec.Command(app.clipboardCmd[0], app.clipboardCmd[1:]...)
-		cmd.Stdin = strings.NewReader(path)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err == nil {
-			app.state.LastYankTime = time.Now()
+		err := runExternalCommand(app.clipboardCmd, func(cmd *exec.Cmd) {
+			cmd.Stdin = strings.NewReader(path)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}, "clipboard")
+		if err != nil {
+			app.state.LastError = err
+			return true
 		}
+		app.state.LastYankTime = time.Now()
 	}
 	return true
 }
@@ -138,11 +143,11 @@ func (app *Application) openFileInPager(filePath string) error {
 		return fmt.Errorf("failed to suspend screen: %w", err)
 	}
 
-	cmd := exec.Command(pagerArgs[0], pagerArgs[1:]...)
-	cmd.Stdin = tty
-	cmd.Stdout = tty
-	cmd.Stderr = tty
-	runErr := cmd.Run()
+	runErr := runExternalCommand(pagerArgs, func(cmd *exec.Cmd) {
+		cmd.Stdin = tty
+		cmd.Stdout = tty
+		cmd.Stderr = tty
+	}, "pager")
 
 	if err := app.screen.Resume(); err != nil {
 		return fmt.Errorf("failed to resume screen: %w", err)
@@ -162,11 +167,11 @@ func (app *Application) openFileInPagerFallback(args []string) error {
 		_ = app.screen.Resume()
 	}()
 
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return runExternalCommand(args, func(cmd *exec.Cmd) {
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}, "pager")
 }
 
 func (app *Application) openFileInEditor(filePath string) error {
@@ -193,18 +198,17 @@ func (app *Application) openFileInEditor(filePath string) error {
 		return fmt.Errorf("failed to suspend screen: %w", err)
 	}
 
-	cmd := exec.Command(editorArgs[0], editorArgs[1:]...)
-	if useTTY {
-		cmd.Stdin = tty
-		cmd.Stdout = tty
-		cmd.Stderr = tty
-	} else {
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
-
-	runErr := cmd.Run()
+	runErr := runExternalCommand(editorArgs, func(cmd *exec.Cmd) {
+		if useTTY {
+			cmd.Stdin = tty
+			cmd.Stdout = tty
+			cmd.Stderr = tty
+		} else {
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+	}, "editor")
 
 	if err := app.screen.Resume(); err != nil {
 		return fmt.Errorf("failed to resume screen: %w", err)
@@ -222,11 +226,11 @@ func (app *Application) openFileInEditorFallback(args []string) error {
 		app.screen.Sync()
 	}()
 
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return runExternalCommand(args, func(cmd *exec.Cmd) {
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}, "editor")
 }
 
 func (app *Application) editorArgsWithFile(filePath string) []string {
@@ -234,4 +238,18 @@ func (app *Application) editorArgsWithFile(filePath string) []string {
 	copy(args, app.editorCmd)
 	args[len(app.editorCmd)] = filePath
 	return args
+}
+
+func runExternalCommand(args []string, configure func(*exec.Cmd), label string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("no %s command provided", label)
+	}
+	cmd := commandBuilder(args[0], args[1:]...)
+	if configure != nil {
+		configure(cmd)
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s command %q failed: %w", label, args[0], err)
+	}
+	return nil
 }
