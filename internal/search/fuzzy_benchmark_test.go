@@ -94,7 +94,7 @@ func BenchmarkMatchRunesDPAscii(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		score, matched, start, end, _, _, _ := fm.matchRunesDP(patternRunes, textRunes, boundary, textASCII, patternASCII)
+		score, matched, start, end, _, _, _, _ := fm.matchRunesDP(patternRunes, textRunes, boundary, textASCII, patternASCII)
 		if !matched {
 			b.Fatalf("expected match, start=%d end=%d score=%f", start, end, score)
 		}

@@ -44,12 +44,12 @@ func TestASCII32EqualsScalarWhenForced(t *testing.T) {
 		asciiText, asciiTextBuf := runeSliceToASCIIBytes(trunes)
 		asciiPattern, asciiPatternBuf := runeSliceToASCIIBytes(prunes)
 		boundary := acquireBoundaryBuffer(len(trunes))
-		sScore, sMatched, sStart, sEnd, sLen, sCount, sHits := fm.matchRunesDPScalar(prunes, trunes, boundary, asciiText, asciiPattern)
+		sScore, sMatched, sStart, sEnd, sLen, sCount, sHits, sSpans := fm.matchRunesDPScalar(prunes, trunes, boundary, asciiText, asciiPattern)
 		releaseBoundaryBuffer(boundary)
 
 		// ASCII32 path via matchRunesDP (SIMD gate disabled, ASCII32 forced)
 		boundary2 := acquireBoundaryBuffer(len(trunes))
-		aScore, aMatched, aStart, aEnd, aLen, aCount, aHits := fm.matchRunesDP(prunes, trunes, boundary2, asciiText, asciiPattern)
+		aScore, aMatched, aStart, aEnd, aLen, aCount, aHits, aSpans := fm.matchRunesDP(prunes, trunes, boundary2, asciiText, asciiPattern)
 		releaseBoundaryBuffer(boundary2)
 
 		releaseByteBuffer(asciiPatternBuf)
@@ -63,12 +63,24 @@ func TestASCII32EqualsScalarWhenForced(t *testing.T) {
 		if !sMatched {
 			continue
 		}
-		if math.Abs(sScore-aScore) > 1e-6 || sStart != aStart || sEnd != aEnd || sLen != aLen || sCount != aCount || sHits != aHits {
-			t.Fatalf("case %q/%q: metadata mismatch\n scalar: score=%f start=%d end=%d len=%d count=%d hits=%d\n ascii32: score=%f start=%d end=%d len=%d count=%d hits=%d",
+		if math.Abs(sScore-aScore) > 1e-6 || sStart != aStart || sEnd != aEnd || sLen != aLen || sCount != aCount || sHits != aHits || !equalMatchSpans(sSpans, aSpans) {
+			t.Fatalf("case %q/%q: metadata mismatch\n scalar: score=%f start=%d end=%d len=%d count=%d hits=%d spans=%v\n ascii32: score=%f start=%d end=%d len=%d count=%d hits=%d spans=%v",
 				tc.pattern, tc.text,
-				sScore, sStart, sEnd, sLen, sCount, sHits,
-				aScore, aStart, aEnd, aLen, aCount, aHits,
+				sScore, sStart, sEnd, sLen, sCount, sHits, sSpans,
+				aScore, aStart, aEnd, aLen, aCount, aHits, aSpans,
 			)
 		}
 	}
+}
+
+func equalMatchSpans(a, b []MatchSpan) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
