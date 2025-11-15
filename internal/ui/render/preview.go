@@ -6,6 +6,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 )
 
 func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetrics, w, h int) {
@@ -83,7 +84,7 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 			}
 			prefix := fmt.Sprintf(" %s ", icon)
 			nameWidth := panelWidth - r.measureTextWidth(prefix)
-			displayName := entry.Name
+			displayName := textutil.SanitizeTerminalText(entry.Name)
 			if nameWidth > 0 {
 				displayName = r.truncateTextToWidth(displayName, nameWidth)
 			} else {
@@ -101,13 +102,14 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		}
 		for i := startIdx; i < len(preview.TextLines); i++ {
 			line := preview.TextLines[i]
-			lineWidth := r.previewLineWidth(preview, i, line)
+			safeLine := textutil.SanitizeTerminalText(line)
+			lineWidth := r.previewLineWidth(preview, i, safeLine)
 			if wrapEnabled {
-				if !r.drawWrappedPreviewText(line, startX, panelWidth, textStyle, &y, bottomLimit, w) {
+				if !r.drawWrappedPreviewText(safeLine, startX, panelWidth, textStyle, &y, bottomLimit, w) {
 					break
 				}
 			} else {
-				if !r.drawPreviewTextLineClipped(line, lineWidth, startX, panelWidth, textStyle, y, bottomLimit, w) {
+				if !r.drawPreviewTextLineClipped(safeLine, lineWidth, startX, panelWidth, textStyle, y, bottomLimit, w) {
 					break
 				}
 				y++
@@ -120,6 +122,7 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		}
 		for i := startIdx; i < len(preview.BinaryInfo.Lines); i++ {
 			line := preview.BinaryInfo.Lines[i]
+			line = textutil.SanitizeTerminalText(line)
 			if !strings.Contains(line, "|") {
 				if !drawLine(line, textStyle) {
 					break

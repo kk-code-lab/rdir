@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
@@ -655,42 +656,12 @@ func (p *PreviewPager) headerLines() []string {
 	mod := preview.Modified.Format("2006-01-02 15:04:05")
 	mode := preview.Mode.String()
 
-	lines := []string{sanitizeTerminalText(fullPath)}
+	lines := []string{textutil.SanitizeTerminalText(fullPath)}
 	if p.showInfo {
 		meta := fmt.Sprintf("%s  %s  %s", mode, size, mod)
-		lines = append(lines, sanitizeTerminalText(meta))
+		lines = append(lines, textutil.SanitizeTerminalText(meta))
 	}
 	return lines
-}
-
-func sanitizeTerminalText(text string) string {
-	clean := true
-	for _, r := range text {
-		if (r < 0x20 && r != '\t') || r == 0x7f {
-			clean = false
-			break
-		}
-		if r == '\n' || r == '\r' {
-			clean = false
-			break
-		}
-	}
-	if clean {
-		return text
-	}
-
-	var b strings.Builder
-	for _, r := range text {
-		switch {
-		case r == '\t', r == '\n', r == '\r':
-			b.WriteByte(' ')
-		case r < 0x20 || r == 0x7f:
-			b.WriteByte('?')
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 func (p *PreviewPager) applyWrapSetting() {
@@ -1227,7 +1198,7 @@ func dirEntryLine(entry statepkg.FileEntry) string {
 	case entry.IsDir:
 		icon = "/"
 	}
-	name := sanitizeTerminalText(entry.Name)
+	name := textutil.SanitizeTerminalText(entry.Name)
 	size := formatSize(entry.Size)
 	mod := entry.Modified.Format("2006-01-02 15:04:05")
 	return fmt.Sprintf(" %s %-20s %12s  %s  %s", icon, name, size, entry.Mode.String(), mod)
