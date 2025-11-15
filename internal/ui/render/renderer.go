@@ -13,6 +13,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	searchpkg "github.com/kk-code-lab/rdir/internal/search"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 )
 
 // Renderer handles all UI rendering
@@ -98,15 +99,18 @@ func (r *Renderer) drawHeader(state *statepkg.AppState, w, h int) {
 			if lastIdx > 0 {
 				prefix := strings.Join(segments[:lastIdx], " › ")
 				prefix = r.fitBreadcrumb(prefix, available)
+				prefix = textutil.SanitizeTerminalText(prefix)
 				endX = r.drawTextLine(endX, 0, available, prefix, headerStyle)
 				if endX < w {
 					sep := r.fitBreadcrumb(" › ", w-endX)
+					sep = textutil.SanitizeTerminalText(sep)
 					endX = r.drawTextLine(endX, 0, w-endX, sep, headerStyle)
 				}
 			}
 
 			if endX < w {
 				lastSegment := r.fitBreadcrumb(segments[lastIdx], w-endX)
+				lastSegment = textutil.SanitizeTerminalText(lastSegment)
 				highlightStyle := headerStyle.Bold(true)
 				endX = r.drawTextLine(endX, 0, w-endX, lastSegment, highlightStyle)
 			}
@@ -235,6 +239,7 @@ func (r *Renderer) drawStatusLine(state *statepkg.AppState, w, h int) {
 		pathText = pathText + " → " + symlinkTarget
 	}
 
+	pathText = textutil.SanitizeTerminalText(pathText)
 	pathRunes := []rune(pathText)
 
 	// Calculate how many lines we need for the path (accounting for wide characters)
@@ -297,6 +302,7 @@ func (r *Renderer) drawStatusLine(state *statepkg.AppState, w, h int) {
 	if indexLine := formatIndexStatusLine(state.CurrentIndexStatus()); indexLine != "" {
 		helpText = fmt.Sprintf("%s | %s", helpText, indexLine)
 	}
+	helpText = textutil.SanitizeTerminalText(helpText)
 
 	helpY := h - 1
 	x = 0
@@ -413,7 +419,7 @@ func (r *Renderer) drawSidebar(state *statepkg.AppState, sidebarWidth, h int) {
 
 			prefix := fmt.Sprintf(" %s ", icon)
 			nameWidth := sidebarWidth - r.measureTextWidth(prefix)
-			displayName := entry.Name
+			displayName := textutil.SanitizeTerminalText(entry.Name)
 			if nameWidth > 0 {
 				displayName = r.truncateTextToWidth(displayName, nameWidth)
 			} else {
@@ -452,7 +458,7 @@ func (r *Renderer) drawMainPanel(state *statepkg.AppState, startX, panelWidth, h
 		hasHeader = true
 
 		cursor := state.GlobalSearchCursorPos
-		queryRunes := []rune(state.GlobalSearchQuery)
+		queryRunes := []rune(textutil.SanitizeTerminalText(state.GlobalSearchQuery))
 		if cursor < 0 {
 			cursor = 0
 		}
@@ -506,7 +512,7 @@ func (r *Renderer) drawMainPanel(state *statepkg.AppState, startX, panelWidth, h
 			}
 		}
 
-		status := formatSearchHeaderStatus(state, state.CurrentIndexStatus())
+		status := textutil.SanitizeTerminalText(formatSearchHeaderStatus(state, state.CurrentIndexStatus()))
 		if status != "" && x < maxX {
 			for _, ru := range "  — " + status {
 				if x >= maxX {
@@ -520,7 +526,7 @@ func (r *Renderer) drawMainPanel(state *statepkg.AppState, startX, panelWidth, h
 			x = r.drawStyledRune(x, y, maxX, ' ', headerStyle)
 		}
 	} else if state.FilterActive {
-		headerText := "/" + state.FilterQuery
+		headerText := "/" + textutil.SanitizeTerminalText(state.FilterQuery)
 		endX := r.drawTextLine(startX, 1, panelWidth, headerText, headerStyle)
 
 		cursorStyle := headerStyle.Background(r.theme.SelectionBg).Foreground(r.theme.SelectionFg)
@@ -602,7 +608,7 @@ func (r *Renderer) drawFileList(state *statepkg.AppState, startX, panelWidth, h 
 
 		prefix := fmt.Sprintf(" %s ", icon)
 		nameWidth := panelWidth - r.measureTextWidth(prefix)
-		displayName := f.Name
+		displayName := textutil.SanitizeTerminalText(f.Name)
 		if nameWidth > 0 {
 			displayName = r.truncateTextToWidth(displayName, nameWidth)
 		} else {
@@ -717,9 +723,12 @@ func (r *Renderer) drawGlobalSearchResults(state *statepkg.AppState, startX, pan
 		}
 		fileName := filepath.Base(relPath)
 
-		pathText := fileName
-		if dirPart != "" {
-			pathText = dirPart + string(filepath.Separator) + fileName
+		displayDir := textutil.SanitizeTerminalText(dirPart)
+		displayFile := textutil.SanitizeTerminalText(fileName)
+
+		pathText := displayFile
+		if displayDir != "" {
+			pathText = displayDir + string(filepath.Separator) + displayFile
 		}
 
 		highlightSpans := convertMatchSpansToHighlights(result.MatchSpans, pathText)
@@ -757,7 +766,7 @@ func (r *Renderer) drawGlobalSearchResults(state *statepkg.AppState, startX, pan
 			x = r.drawStyledRune(x, displayY, pathLimit, ' ', rowStyle)
 		}
 
-		segments := buildPathSegments(dirPart, fileName, dirStyle, dirMatchStyle, fileStyle, fileMatchStyle)
+		segments := buildPathSegments(displayDir, displayFile, dirStyle, dirMatchStyle, fileStyle, fileMatchStyle)
 		offset := 0
 		for _, segment := range segments {
 			x, offset = r.drawSegmentWithHighlights(x, displayY, pathLimit, segment, highlightSpans, offset)

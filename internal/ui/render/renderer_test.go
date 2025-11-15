@@ -1,8 +1,10 @@
 package render
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 )
 
@@ -287,4 +289,86 @@ func TestConvertMatchSpansToHighlightsClampsAndMerges(t *testing.T) {
 	if out[1].start != 2 || out[1].end != 6 {
 		t.Fatalf("unexpected second span %+v", out[1])
 	}
+}
+
+func TestDrawStatusLineSanitizesPath(t *testing.T) {
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("failed to init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(40, 5)
+
+	r := NewRenderer(screen)
+	state := &statepkg.AppState{
+		CurrentPath: "/tmp",
+		Files: []statepkg.FileEntry{
+			{Name: "bad\x1b[31m\nfile"},
+		},
+		SelectedIndex: 0,
+	}
+
+	r.drawStatusLine(state, 40, 5)
+	screen.Show()
+
+	row := readScreenRow(t, screen, 3, 40)
+	if strings.Contains(row, "\x1b") || strings.Contains(row, "\n") {
+		t.Fatalf("status line should not contain control characters: %q", row)
+	}
+	want := "/tmp/bad?[31m file"
+	if !strings.Contains(row, want) {
+		t.Fatalf("expected sanitized path %q in status line, got %q", want, row)
+	}
+}
+
+func TestDrawFileListSanitizesNames(t *testing.T) {
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("failed to init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(40, 8)
+
+	r := NewRenderer(screen)
+	state := &statepkg.AppState{
+		CurrentPath: "/tmp",
+		Files: []statepkg.FileEntry{
+			{Name: "bad\x1b[31m\nfile"},
+		},
+		SelectedIndex: 0,
+	}
+
+	baseStyle := tcell.StyleDefault.Background(r.theme.SidebarBg)
+	r.drawFileList(state, 0, 30, 8, 1, baseStyle)
+	screen.Show()
+
+	row := readScreenRow(t, screen, 1, 30)
+	if strings.Contains(row, "\x1b") || strings.Contains(row, "\n") {
+		t.Fatalf("file list row should not contain control characters: %q", row)
+	}
+	if !strings.Contains(row, "bad?[31m file") {
+		t.Fatalf("expected sanitized filename in file list row, got %q", row)
+	}
+}
+
+func readScreenRow(t *testing.T, screen tcell.SimulationScreen, y, width int) string {
+	t.Helper()
+	cells, w, h := screen.GetContents()
+	if y < 0 || y >= h {
+		t.Fatalf("row %d out of bounds (height=%d)", y, h)
+	}
+	if width <= 0 || width > w {
+		width = w
+	}
+	start := y * w
+	var b strings.Builder
+	for x := 0; x < width; x++ {
+		cell := cells[start+x]
+		if len(cell.Runes) == 0 {
+			b.WriteRune(' ')
+			continue
+		}
+		b.WriteString(string(cell.Runes))
+	}
+	return strings.TrimRight(b.String(), " ")
 }
