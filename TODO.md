@@ -13,7 +13,7 @@
 - [ ] **Token heuristics & order**  
   During AND queries we currently sort tokens only by length. Explore heuristics based on selectivity (rareness, occurrence counts) to run the most discriminating token first and avoid extra DP passes.
 
-- [ ] **Lower-case name cache**  
+- [x] **Lower-case name cache**  
   Case-insensitive filtering/search constantly calls `strings.ToLower` per filename/path. Cache folded names in `AppState` (and refresh when directories reload) to reduce CPU/allocs on large trees.
 
 - [x] **Result pooling**  

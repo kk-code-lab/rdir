@@ -35,10 +35,16 @@ func (s *AppState) recomputeFilter() {
 		s.filterMatcher = search.NewFuzzyMatcher()
 	}
 
+	s.ensureLowerNames()
+
 	matches := s.FilterMatches[:0]
 	indices := s.FilteredIndices[:0]
 	for idx, file := range s.Files {
-		score, matched := matchFilterTokens(file.Name, tokens, s.FilterCaseSensitive, s.filterMatcher)
+		lowerName := ""
+		if idx < len(s.fileLowerNames) {
+			lowerName = s.fileLowerNames[idx]
+		}
+		score, matched := matchFilterTokens(file.Name, lowerName, tokens, s.FilterCaseSensitive, s.filterMatcher)
 		if matched {
 			matches = append(matches, FuzzyMatch{FileIndex: idx, Score: score})
 			indices = append(indices, idx)
@@ -160,7 +166,7 @@ func prepareFilterTokens(query string, caseSensitive bool) []filterToken {
 	return tokens
 }
 
-func matchFilterTokens(name string, tokens []filterToken, caseSensitive bool, matcher *search.FuzzyMatcher) (float64, bool) {
+func matchFilterTokens(name, lowerName string, tokens []filterToken, caseSensitive bool, matcher *search.FuzzyMatcher) (float64, bool) {
 	if len(tokens) == 0 {
 		return 0, false
 	}
@@ -169,7 +175,11 @@ func matchFilterTokens(name string, tokens []filterToken, caseSensitive bool, ma
 	if caseSensitive {
 		target = name
 	} else {
-		target = strings.ToLower(name)
+		if lowerName != "" {
+			target = lowerName
+		} else {
+			target = strings.ToLower(name)
+		}
 	}
 
 	totalScore := 0.0

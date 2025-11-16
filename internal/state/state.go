@@ -2,6 +2,7 @@ package state
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
@@ -91,6 +92,7 @@ type AppState struct {
 	FilterSavedIndex    int          // Saved selection index before entering filter mode
 	FilterCaseSensitive bool
 	filterMatcher       *FuzzyMatcher
+	fileLowerNames      []string
 
 	// Global search
 	GlobalSearchActive               bool
@@ -179,6 +181,27 @@ func (s *AppState) getDispatch() func(Action) {
 // SetDispatch exposes the reducer dispatch hook to other packages.
 func (s *AppState) SetDispatch(fn func(Action)) {
 	s.setDispatch(fn)
+}
+
+func (s *AppState) refreshLowerNames() {
+	if len(s.Files) == 0 {
+		s.fileLowerNames = s.fileLowerNames[:0]
+		return
+	}
+	if cap(s.fileLowerNames) < len(s.Files) {
+		s.fileLowerNames = make([]string, len(s.Files))
+	} else {
+		s.fileLowerNames = s.fileLowerNames[:len(s.Files)]
+	}
+	for i, f := range s.Files {
+		s.fileLowerNames[i] = strings.ToLower(f.Name)
+	}
+}
+
+func (s *AppState) ensureLowerNames() {
+	if len(s.fileLowerNames) != len(s.Files) {
+		s.refreshLowerNames()
+	}
 }
 
 // recomputeFilter rebuilds FilteredIndices based on FilterQuery using fuzzy matching

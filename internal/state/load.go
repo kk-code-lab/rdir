@@ -65,6 +65,7 @@ func LoadDirectory(state *AppState, path ...string) error {
 	state.Files = visibleEntries
 
 	state.sortFiles()
+	state.refreshLowerNames()
 	state.resetViewport()
 	state.updateParentEntries()
 	state.PreviewData = nil
