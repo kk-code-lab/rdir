@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 )
 
 func TestMarkdownPreviewFormatterFormatsContent(t *testing.T) {
@@ -229,16 +231,96 @@ func TestTableSplittingRespectsEscapedPipes(t *testing.T) {
 
 	got := formatMarkdownLines(lines)
 	want := []string{
-		"┌─────────────────────┬───────┐",
-		"│ A                   │ B     │",
-		"├─────────────────────┼───────┤",
-		"│ `code | span` | raw │ value │",
-		"│ x | y               │ z     │",
-		"└─────────────────────┴───────┘",
+		"┌───────────────────┬───────┐",
+		"│ A                 │ B     │",
+		"├───────────────────┼───────┤",
+		"│ code | span | raw │ value │",
+		"│ x | y             │ z     │",
+		"└───────────────────┴───────┘",
 	}
 
 	if diff := diffLines(want, got); diff != "" {
 		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestTableRendersInlineContentAndLineBreaks(t *testing.T) {
+	lines := []string{
+		"| H1 | H2 |",
+		"| --- | --- |",
+		"| *em* and [l](url) | `code`<br>next |",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"┌────────────────┬──────┐",
+		"│ H1             │ H2   │",
+		"├────────────────┼──────┤",
+		"│ em and l (url) │ code │",
+		"│                │ next │",
+		"└────────────────┴──────┘",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestTableKeepsEscapedPipeRow(t *testing.T) {
+	lines := []string{
+		"| Left align | Center align | Right align |",
+		"| :--- | :---: | ---: |",
+		"| left value | centered `code` | 42 |",
+		"| link: [docs](https://example.com) | multi<br>line | 123456 |",
+		"| \\| literal pipe | **bold** and _em_ | -7 |",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"┌──────────────────────────────────┬───────────────┬─────────────┐",
+		"│ Left align                       │ Center align  │ Right align │",
+		"├──────────────────────────────────┼───────────────┼─────────────┤",
+		"│ left value                       │ centered code │          42 │",
+		"│ link: docs (https://example.com) │     multi     │      123456 │",
+		"│                                  │     line      │             │",
+		"│ | literal pipe                   │  bold and em  │          -7 │",
+		"└──────────────────────────────────┴───────────────┴─────────────┘",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestTableRespectsWidthAndWrapToggle(t *testing.T) {
+	lines := []string{
+		"| A | B |",
+		"| --- | --- |",
+		"| verylongvalue | anotherlongvalue |",
+	}
+
+	segs, _ := FormatMarkdownPreview(lines, 24, 1, false)
+	var truncated string
+	for _, line := range segs {
+		text := joinSegmentsText(line)
+		if strings.Contains(text, "very") {
+			truncated = text
+			break
+		}
+	}
+	if truncated == "" {
+		t.Fatalf("expected to find truncated row")
+	}
+	if !strings.Contains(truncated, "…") {
+		t.Fatalf("expected ellipsis in truncated row, got %q", truncated)
+	}
+	if width := textutil.DisplayWidth(truncated); width > 24 {
+		t.Fatalf("truncated row exceeds width: %d", width)
+	}
+
+	wrapped, _ := FormatMarkdownPreview(lines, 24, 0, true)
+	if len(wrapped) <= len(segs) {
+		t.Fatalf("expected wrapped output to have more lines, got %d vs %d", len(wrapped), len(segs))
 	}
 }
 

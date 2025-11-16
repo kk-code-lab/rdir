@@ -85,8 +85,8 @@ type markdownHorizontalRule struct{}
 func (markdownHorizontalRule) blockType() markdownBlockType { return blockHorizontalRule }
 
 type markdownTable struct {
-	headers []string
-	rows    [][]string
+	headers [][]markdownInline
+	rows    [][][]markdownInline
 	align   []tableAlignment
 }
 

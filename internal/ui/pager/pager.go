@@ -393,6 +393,8 @@ func (p *PreviewPager) render() error {
 		p.height = 1
 	}
 
+	p.reflowMarkdownFormatted()
+
 	p.ensureRowMetrics()
 
 	header := p.headerLines()
@@ -504,6 +506,52 @@ func (p *PreviewPager) drawRow(row int, text string, bold bool) {
 
 	if bold {
 		p.writeString("\x1b[22m")
+	}
+}
+
+func (p *PreviewPager) reflowMarkdownFormatted() {
+	if p.state == nil || p.state.PreviewData == nil {
+		return
+	}
+	preview := p.state.PreviewData
+	if preview.FormattedKind != "markdown" || len(preview.TextLines) == 0 || p.width <= 0 {
+		return
+	}
+	maxLines := 3
+	if p.wrapEnabled {
+		maxLines = 0
+	}
+	segments, meta := statepkg.FormatMarkdownPreview(preview.TextLines, p.width, maxLines, p.wrapEnabled)
+	if len(segments) == 0 || len(meta) != len(segments) {
+		return
+	}
+
+	formatted := make([]string, len(segments))
+	widths := make([]int, len(segments))
+	rules := make([]bool, len(segments))
+	styles := make([]string, len(segments))
+	for i, line := range segments {
+		txt, isRule, style := ansiFromSegments(line)
+		formatted[i] = txt
+		rules[i] = isRule
+		styles[i] = style
+		if i < len(meta) && meta[i].DisplayWidth > 0 {
+			widths[i] = meta[i].DisplayWidth
+		} else {
+			widths[i] = segmentDisplayWidth(line)
+		}
+	}
+
+	p.formattedLines = formatted
+	p.formattedWidths = widths
+	p.formattedRules = rules
+	p.formattedStyles = styles
+
+	if p.showFormatted {
+		p.lines = p.formattedLines
+		p.lineWidths = p.formattedWidths
+		p.rowSpans = nil
+		p.rowPrefix = nil
 	}
 }
 

@@ -2,10 +2,10 @@ package state
 
 import "strings"
 
-func renderMarkdown(doc markdownDocument) []string {
+func renderMarkdown(doc markdownDocument, opts markdownRenderOptions) []string {
 	var lines []string
 	for idx, block := range doc.blocks {
-		rendered := renderBlock(block, 0)
+		rendered := renderBlock(block, 0, opts)
 		if idx > 0 && len(rendered) > 0 && len(lines) > 0 && lines[len(lines)-1] != "" {
 			lines = append(lines, "")
 		}
@@ -14,7 +14,7 @@ func renderMarkdown(doc markdownDocument) []string {
 	return lines
 }
 
-func renderBlock(block markdownBlock, depth int) []string {
+func renderBlock(block markdownBlock, depth int, opts markdownRenderOptions) []string {
 	switch b := block.(type) {
 	case markdownHeading:
 		text := renderInlines(b.text)
@@ -28,13 +28,13 @@ func renderBlock(block markdownBlock, depth int) []string {
 	case markdownCodeBlock:
 		return renderCodeBlock(b)
 	case markdownList:
-		return renderList(b, depth)
+		return renderList(b, depth, opts)
 	case markdownBlockquote:
-		return renderBlockquote(b, depth)
+		return renderBlockquote(b, depth, opts)
 	case markdownHorizontalRule:
 		return []string{"─"}
 	case markdownTable:
-		return renderTable(b)
+		return renderTable(b, opts.tableOpts)
 	default:
 		return nil
 	}
@@ -100,12 +100,12 @@ func renderCodeBlock(block markdownCodeBlock) []string {
 	return lines
 }
 
-func renderList(list markdownList, depth int) []string {
+func renderList(list markdownList, depth int, opts markdownRenderOptions) []string {
 	var lines []string
 	pad := strings.Repeat("  ", depth)
 	for idx, item := range list.items {
 		bullet := bulletSymbol(depth, list.ordered, idx, list.start)
-		blocks := renderBlocks(item.blocks, depth+1)
+		blocks := renderBlocks(item.blocks, depth+1, opts)
 		if len(blocks) == 0 {
 			lines = append(lines, pad+bullet)
 			continue
@@ -120,8 +120,8 @@ func renderList(list markdownList, depth int) []string {
 	return lines
 }
 
-func renderBlockquote(b markdownBlockquote, depth int) []string {
-	content := renderBlocks(b.blocks, depth)
+func renderBlockquote(b markdownBlockquote, depth int, opts markdownRenderOptions) []string {
+	content := renderBlocks(b.blocks, depth, opts)
 	if len(content) == 0 {
 		return nil
 	}
@@ -132,10 +132,10 @@ func renderBlockquote(b markdownBlockquote, depth int) []string {
 	return withPrefix
 }
 
-func renderBlocks(blocks []markdownBlock, depth int) []string {
+func renderBlocks(blocks []markdownBlock, depth int, opts markdownRenderOptions) []string {
 	var lines []string
 	for idx, block := range blocks {
-		rendered := renderBlock(block, depth)
+		rendered := renderBlock(block, depth, opts)
 		if idx > 0 && len(rendered) > 0 && len(lines) > 0 && lines[len(lines)-1] != "" {
 			lines = append(lines, "")
 		}
@@ -178,10 +178,10 @@ func renderInlines(inlines []markdownInline) string {
 	return strings.TrimSpace(builder.String())
 }
 
-func renderTable(tbl markdownTable) []string {
+func renderTable(tbl markdownTable, opts tableRenderOptions) []string {
 	if len(tbl.headers) == 0 {
 		return nil
 	}
-	fancy := buildFormattedTable(tbl.headers, tbl.rows, tbl.align)
+	fancy := buildFormattedTable(tbl.headers, tbl.rows, tbl.align, opts)
 	return fancy.rows
 }

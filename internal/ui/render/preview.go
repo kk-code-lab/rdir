@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
@@ -106,6 +107,17 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		if len(preview.FormattedSegments) > 0 {
 			lines := preview.FormattedSegments
 			meta := preview.FormattedSegmentLineMeta
+			if preview.FormattedKind == "markdown" && preview.FormattedUnavailableReason == "" && len(preview.TextLines) > 0 && panelWidth > 0 {
+				maxLinesPerCell := 3
+				if wrapEnabled {
+					maxLinesPerCell = 0
+				}
+				mdSegments, mdMeta := statepkg.FormatMarkdownPreview(preview.TextLines, panelWidth, maxLinesPerCell, wrapEnabled)
+				if len(mdSegments) > 0 {
+					lines = mdSegments
+					meta = mdMeta
+				}
+			}
 			if startIdx > len(lines) {
 				startIdx = len(lines)
 			}
@@ -340,7 +352,7 @@ func (r *Renderer) drawWrappedSegmentLine(segments []statepkg.StyledTextSegment,
 	if panelWidth <= 0 || y == nil {
 		return false
 	}
-	if isRuleLine(segments) {
+	if isRuleLine(segments) || isTableLine(segments) {
 		return r.drawSegmentLineClipped(segments, 0, startX, panelWidth, baseStyle, *y, bottomLimit, screenWidth)
 	}
 	wrapped := wrapSegments(segments, panelWidth)
@@ -481,7 +493,7 @@ func wrapSegments(segments []statepkg.StyledTextSegment, maxWidth int) [][]state
 	if maxWidth <= 0 {
 		return [][]statepkg.StyledTextSegment{segments}
 	}
-	if isRuleLine(segments) {
+	if isRuleLine(segments) || isTableLine(segments) {
 		return [][]statepkg.StyledTextSegment{segments}
 	}
 	var lines [][]statepkg.StyledTextSegment
@@ -561,4 +573,30 @@ func isRuleLine(segments []statepkg.StyledTextSegment) bool {
 		}
 	}
 	return true
+}
+
+func isTableLine(segments []statepkg.StyledTextSegment) bool {
+	text := joinSegmentsPlain(segments)
+	text = strings.TrimLeft(text, " ")
+	if text == "" {
+		return false
+	}
+	first, _ := utf8.DecodeRuneInString(text)
+	switch first {
+	case '┌', '┬', '┐', '├', '┼', '┤', '└', '┴', '┘', '│':
+		return true
+	default:
+		return false
+	}
+}
+
+func joinSegmentsPlain(segments []statepkg.StyledTextSegment) string {
+	if len(segments) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, seg := range segments {
+		b.WriteString(seg.Text)
+	}
+	return b.String()
 }
