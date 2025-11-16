@@ -12,13 +12,14 @@ import (
 
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 )
 
 var commandBuilder = exec.Command
 
 func (app *Application) handleClipboard() bool {
 	if app.clipboardAvail && len(app.clipboardCmd) > 0 {
-		path := normalizeClipboardPath(app.state.CurrentFilePath(), runtime.GOOS)
+		path := clipboardPayload(app.state.CurrentFilePath(), runtime.GOOS)
 		err := runExternalCommand(app.clipboardCmd, func(cmd *exec.Cmd) {
 			cmd.Stdin = strings.NewReader(path)
 			cmd.Stdout = os.Stdout
@@ -39,6 +40,11 @@ func normalizeClipboardPath(inputPath string, goos string) string {
 		return strings.ReplaceAll(cleaned, "/", `\`)
 	}
 	return path.Clean(filepath.ToSlash(inputPath))
+}
+
+func clipboardPayload(inputPath string, goos string) string {
+	normalized := normalizeClipboardPath(inputPath, goos)
+	return textutil.SanitizeTerminalText(normalized)
 }
 
 func (app *Application) handleRightArrow() bool {

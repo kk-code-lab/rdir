@@ -71,6 +71,17 @@ func TestHandleClipboardUpdatesYankTimeOnSuccess(t *testing.T) {
 	assertCommandRecorded(t, recorded, []string{"fake-clip"})
 }
 
+func TestClipboardPayloadSanitizesPath(t *testing.T) {
+	raw := "/tmp/obfus\u202Ecat\nion/file.txt"
+	got := clipboardPayload(raw, "linux")
+	if strings.ContainsRune(got, '\n') || strings.Contains(got, "\u202E") {
+		t.Fatalf("clipboardPayload should sanitize control/formatting runes, got %q", got)
+	}
+	if !strings.Contains(got, "⟪RLO⟫") {
+		t.Fatalf("expected bidi marker to be labeled, got %q", got)
+	}
+}
+
 func TestOpenFileInPagerFallbackPropagatesError(t *testing.T) {
 	app := &Application{
 		screen: newTestScreen(t),
