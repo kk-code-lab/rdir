@@ -366,7 +366,7 @@ func (gs *GlobalSearcher) makeIndexedResult(entry *indexedEntry, score float64, 
 		PathSegments: pathSegments,
 		InputOrder:   entry.order,
 		HasMatch:     hasMatch,
-		MatchSpans:   cloneMatchSpans(spans),
+		MatchSpans:   spans,
 		FileEntry: fsutil.Entry{
 			Name:      fileName,
 			IsDir:     false,
@@ -412,15 +412,6 @@ func (gs *GlobalSearcher) appendIndexedEntry(entry indexedEntry, force bool) {
 		gs.broadcastSnapshotLocked()
 	}
 	gs.indexMu.Unlock()
-}
-
-func cloneMatchSpans(spans []MatchSpan) []MatchSpan {
-	if len(spans) == 0 {
-		return nil
-	}
-	dup := make([]MatchSpan, len(spans))
-	copy(dup, spans)
-	return dup
 }
 
 func (gs *GlobalSearcher) indexSnapshot() (ready bool, count int, useIndex bool) {
