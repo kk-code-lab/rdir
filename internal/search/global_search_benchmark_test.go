@@ -214,6 +214,72 @@ func BenchmarkGlobalSearcherIndexQuery(b *testing.B) {
 	})
 }
 
+func BenchmarkIndexCandidatesAND(b *testing.B) {
+	b.ReportAllocs()
+
+	root := b.TempDir()
+	onlyFoo := 100000
+	onlyBar := 100000
+	withBoth := 5000
+
+	for i := 0; i < onlyFoo; i++ {
+		writeBenchFile(b, root, fmt.Sprintf("foo_%d.txt", i))
+	}
+	for i := 0; i < onlyBar; i++ {
+		writeBenchFile(b, root, fmt.Sprintf("bar_%d.txt", i))
+	}
+	for i := 0; i < withBoth; i++ {
+		writeBenchFile(b, root, fmt.Sprintf("foo_bar_%d.txt", i))
+	}
+
+	b.Setenv(envMaxIndexResults, strconv.Itoa(1_000_000))
+	b.Setenv(envIndexMaxWorkers, "2") // keep indexing predictable for benchmarks
+
+	searcher := NewGlobalSearcher(root, false, nil)
+	_ = searcher.SearchRecursive("warmup", false)
+	waitForIndexReadyTB(b, searcher)
+
+	entries := searcher.snapshotEntries(0, -1)
+	tokens, _ := prepareQueryTokens("foo bar", false)
+	searcher.orderTokens(tokens)
+
+	requiredBits := runeBitset{}
+	for _, token := range tokens {
+		for _, r := range token.runes {
+			if idx := runeBitIndex(r); idx >= 0 {
+				requiredBits.set(idx)
+			}
+		}
+	}
+
+	b.Run("BitsetBuckets", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			candidates := searcher.indexCandidates(tokens, entries)
+			if len(candidates) == 0 {
+				b.Fatalf("expected candidates")
+			}
+		}
+	})
+
+	b.Run("SequentialFallback", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			count := 0
+			for idx := range entries {
+				if entries[idx].runeBits.contains(requiredBits) {
+					count++
+				}
+			}
+			if count == 0 {
+				b.Fatalf("expected sequential filtering to find matches")
+			}
+		}
+	})
+}
+
 func BenchmarkGlobalSearcherAsyncWalk(b *testing.B) {
 	b.ReportAllocs()
 	layout := benchRepoLayout{
@@ -443,5 +509,13 @@ func waitForIndexReadyTB(tb testing.TB, searcher *GlobalSearcher) {
 			tb.Fatalf("index not ready in time: ready=%v useIndex=%v count=%d", ready, useIndex, count)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func writeBenchFile(tb testing.TB, root, name string) {
+	tb.Helper()
+	full := filepath.Join(root, name)
+	if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+		tb.Fatalf("write bench file %s: %v", name, err)
 	}
 }

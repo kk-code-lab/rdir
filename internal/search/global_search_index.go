@@ -161,8 +161,7 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 				if bucket, ok := gs.indexRuneBuckets[r]; ok && len(bucket) > 0 {
 					if bestBucketSize == -1 || len(bucket) < bestBucketSize {
 						bestBucketSize = len(bucket)
-						bestBucket = make([]int, len(bucket))
-						copy(bestBucket, bucket)
+						bestBucket = bucket
 					}
 				}
 			}
