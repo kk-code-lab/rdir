@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 )
 
 type textPreviewFormatter struct{}
@@ -25,6 +26,7 @@ func (textPreviewFormatter) Format(ctx previewFormatContext, preview *PreviewDat
 		expanded, charCount := expandPreviewTextLines(lines)
 		preview.TextLines = expanded
 		preview.TextLineMeta = textLineMetadataFromLines(expanded)
+		preview.HiddenFormattingDetected = containsFormattingRunes(expanded)
 		preview.LineCount = len(expanded)
 		preview.TextCharCount = charCount
 		preview.TextTruncated = truncated
@@ -37,6 +39,7 @@ func (textPreviewFormatter) Format(ctx previewFormatContext, preview *PreviewDat
 	lines, meta, charCount, remainder := buildTextPreview(ctx.content, truncated, encoding)
 	preview.TextLines = lines
 	preview.TextLineMeta = meta
+	preview.HiddenFormattingDetected = containsFormattingRunes(lines)
 	preview.LineCount = len(lines)
 	preview.TextCharCount = charCount
 	preview.TextTruncated = truncated
@@ -47,4 +50,13 @@ func (textPreviewFormatter) Format(ctx previewFormatContext, preview *PreviewDat
 		preview.TextRemainder = nil
 	}
 	preview.BinaryInfo = BinaryPreview{}
+}
+
+func containsFormattingRunes(lines []string) bool {
+	for _, line := range lines {
+		if textutil.HasFormattingRunes(line) {
+			return true
+		}
+	}
+	return false
 }

@@ -96,6 +96,12 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 			}
 		}
 	} else if !preview.IsDir && (len(preview.TextLines) > 0 || len(preview.FormattedTextLines) > 0 || len(preview.FormattedSegments) > 0) {
+		if preview.HiddenFormattingDetected {
+			warnStyle := baseStyle.Bold(true).Foreground(r.theme.SymlinkFg)
+			if !drawLine("⚠ hidden formatting characters replaced with ⟪…⟫", warnStyle) {
+				return
+			}
+		}
 		textStyle := baseStyle.Foreground(r.theme.FileFg)
 		if len(preview.FormattedSegments) > 0 {
 			lines := preview.FormattedSegments

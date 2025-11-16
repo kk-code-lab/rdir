@@ -52,6 +52,7 @@ type PreviewData struct {
 	TextEncoding               fsutil.UnicodeEncoding
 	BinaryInfo                 BinaryPreview
 	DirEntries                 []FileEntry
+	HiddenFormattingDetected   bool
 }
 
 // BinaryPreview contains lightweight information about a binary file.

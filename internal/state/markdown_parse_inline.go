@@ -1,11 +1,23 @@
 package state
 
 import (
+	"net/url"
 	"strings"
 	"unicode"
+
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 )
 
+const inlineRecursionLimit = 128
+
 func parseInline(text string) []markdownInline {
+	return parseInlineDepth(text, 0)
+}
+
+func parseInlineDepth(text string, depth int) []markdownInline {
+	if depth >= inlineRecursionLimit {
+		return []markdownInline{{kind: inlineText, literal: text}}
+	}
 	runes := []rune(text)
 	var nodes []markdownInline
 	var buf []rune
@@ -48,7 +60,7 @@ func parseInline(text string) []markdownInline {
 			i += count + end + count
 		case '!':
 			if i+1 < len(runes) && runes[i+1] == '[' {
-				node, consumed, ok := parseLinkOrImage(runes[i:], true)
+				node, consumed, ok := parseLinkOrImage(runes[i:], true, depth)
 				if ok {
 					flushText()
 					nodes = append(nodes, node)
@@ -59,7 +71,7 @@ func parseInline(text string) []markdownInline {
 			buf = append(buf, r)
 			i++
 		case '[':
-			node, consumed, ok := parseLinkOrImage(runes[i:], false)
+			node, consumed, ok := parseLinkOrImage(runes[i:], false, depth)
 			if ok {
 				flushText()
 				nodes = append(nodes, node)
@@ -79,18 +91,20 @@ func parseInline(text string) []markdownInline {
 			if end >= 0 {
 				candidate := string(runes[i+1 : i+1+end])
 				if isAutolink(candidate) {
-					flushText()
-					display := candidate
-					if strings.HasPrefix(candidate, "mailto:") {
-						display = strings.TrimPrefix(candidate, "mailto:")
+					if dest, ok := sanitizeLinkDestination(candidate); ok {
+						flushText()
+						display := dest
+						if strings.HasPrefix(dest, "mailto:") {
+							display = strings.TrimPrefix(dest, "mailto:")
+						}
+						nodes = append(nodes, markdownInline{
+							kind:        inlineLink,
+							children:    []markdownInline{{kind: inlineText, literal: display}},
+							destination: dest,
+						})
+						i += end + 2
+						continue
 					}
-					nodes = append(nodes, markdownInline{
-						kind:        inlineLink,
-						children:    []markdownInline{{kind: inlineText, literal: display}},
-						destination: candidate,
-					})
-					i += end + 2
-					continue
 				}
 			}
 			buf = append(buf, r)
@@ -114,7 +128,7 @@ func parseInline(text string) []markdownInline {
 				continue
 			}
 			flushText()
-			content := parseInline(string(runes[i+run : closeIdx]))
+			content := parseInlineDepth(string(runes[i+run:closeIdx]), depth+1)
 			kind := inlineEmphasis
 			if run == 2 {
 				kind = inlineStrong
@@ -135,7 +149,7 @@ func parseInline(text string) []markdownInline {
 				continue
 			}
 			flushText()
-			content := parseInline(string(runes[i+run : closeIdx]))
+			content := parseInlineDepth(string(runes[i+run:closeIdx]), depth+1)
 			nodes = append(nodes, markdownInline{kind: inlineStrike, children: content})
 			i = closeIdx + run
 		default:
@@ -150,7 +164,7 @@ func parseInline(text string) []markdownInline {
 	return nodes
 }
 
-func parseLinkOrImage(runes []rune, isImage bool) (markdownInline, int, bool) {
+func parseLinkOrImage(runes []rune, isImage bool, depth int) (markdownInline, int, bool) {
 	offset := 0
 	if isImage {
 		offset = 1
@@ -170,7 +184,10 @@ func parseLinkOrImage(runes []rune, isImage bool) (markdownInline, int, bool) {
 	textRunes := runes[offset+1 : textEnd]
 	destStart := textEnd + 2
 	destRunes := runes[destStart : destStart+closeParen]
-	dest := strings.TrimSpace(string(destRunes))
+	dest, ok := sanitizeLinkDestination(string(destRunes))
+	if !ok {
+		return markdownInline{}, 0, false
+	}
 
 	if isImage {
 		return markdownInline{
@@ -180,7 +197,7 @@ func parseLinkOrImage(runes []rune, isImage bool) (markdownInline, int, bool) {
 		}, destStart + closeParen + 1, true
 	}
 
-	children := parseInline(string(textRunes))
+	children := parseInlineDepth(string(textRunes), depth+1)
 	return markdownInline{
 		kind:        inlineLink,
 		children:    children,
@@ -289,6 +306,9 @@ func isAutolink(s string) bool {
 	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
 		return true
 	}
+	if strings.HasPrefix(s, "mailto:") {
+		return true
+	}
 	if strings.Contains(s, "@") && strings.Contains(s, ".") {
 		return true
 	}
@@ -307,4 +327,49 @@ func detectBreakTag(runes []rune) int {
 	default:
 		return 0
 	}
+}
+
+var safeLinkSchemes = map[string]struct{}{
+	"http":   {},
+	"https":  {},
+	"mailto": {},
+}
+
+func sanitizeLinkDestination(dest string) (string, bool) {
+	dest = strings.TrimSpace(dest)
+	if dest == "" {
+		return "", true
+	}
+	if textutil.HasFormattingRunes(dest) {
+		return "", false
+	}
+	for _, r := range dest {
+		if r < 0x20 || r == 0x7f {
+			return "", false
+		}
+		if isUnsafeRune(r) {
+			return "", false
+		}
+	}
+
+	parsed, err := url.Parse(dest)
+	if err != nil {
+		return "", false
+	}
+
+	if parsed.Scheme == "" {
+		if strings.HasPrefix(dest, "//") {
+			return "", false
+		}
+		return dest, true
+	}
+
+	if _, ok := safeLinkSchemes[strings.ToLower(parsed.Scheme)]; ok {
+		return dest, true
+	}
+	return "", false
+}
+
+func isUnsafeRune(r rune) bool {
+	return r == '\n' || r == '\r'
 }
