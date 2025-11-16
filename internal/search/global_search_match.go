@@ -166,9 +166,23 @@ func (gs *GlobalSearcher) orderTokens(tokens []queryToken) {
 	}
 
 	type tokenOrderScore struct {
-		selectivity float64
-		bestRatio   float64
-		length      int
+		selectivity  float64
+		bestToMedian float64
+		bestRatio    float64
+		length       int
+	}
+
+	median := func(vals []float64) float64 {
+		n := len(vals)
+		if n == 0 {
+			return 0
+		}
+		sort.Float64s(vals)
+		mid := n / 2
+		if n%2 == 1 {
+			return vals[mid]
+		}
+		return (vals[mid-1] + vals[mid]) / 2
 	}
 
 	totalEntriesFloat := float64(totalEntries)
@@ -178,6 +192,7 @@ func (gs *GlobalSearcher) orderTokens(tokens []queryToken) {
 		best := totalEntries
 		second := totalEntries
 		seen := make(map[rune]struct{})
+		ratios := make([]float64, 0, len(token.runes))
 		source := token.folded
 		if source == "" {
 			source = token.pattern
@@ -191,6 +206,8 @@ func (gs *GlobalSearcher) orderTokens(tokens []queryToken) {
 			}
 			seen[r] = struct{}{}
 			if size, ok := bucketSizes[r]; ok {
+				ratio := float64(size) / totalEntriesFloat
+				ratios = append(ratios, ratio)
 				if size < best {
 					second = best
 					best = size
@@ -198,6 +215,7 @@ func (gs *GlobalSearcher) orderTokens(tokens []queryToken) {
 					second = size
 				}
 			} else if best > 0 {
+				ratios = append(ratios, 0)
 				second = best
 				best = 0
 			}
@@ -210,16 +228,29 @@ func (gs *GlobalSearcher) orderTokens(tokens []queryToken) {
 				selectivity = pairRatio
 			}
 		}
+		bestToMedian := bestRatio
+		if len(ratios) > 0 {
+			med := median(ratios)
+			if med > 0 {
+				bestToMedian = bestRatio / med
+			} else {
+				bestToMedian = 0
+			}
+		}
 		scores[i] = tokenOrderScore{
-			selectivity: selectivity,
-			bestRatio:   bestRatio,
-			length:      length,
+			selectivity:  selectivity,
+			bestToMedian: bestToMedian,
+			bestRatio:    bestRatio,
+			length:       length,
 		}
 	}
 
 	sort.SliceStable(tokens, func(i, j int) bool {
 		if scores[i].selectivity != scores[j].selectivity {
 			return scores[i].selectivity < scores[j].selectivity
+		}
+		if scores[i].bestToMedian != scores[j].bestToMedian {
+			return scores[i].bestToMedian < scores[j].bestToMedian
 		}
 		if scores[i].bestRatio != scores[j].bestRatio {
 			return scores[i].bestRatio < scores[j].bestRatio
