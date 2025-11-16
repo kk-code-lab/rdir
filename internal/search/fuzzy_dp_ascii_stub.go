@@ -2,9 +2,9 @@
 
 package search
 
-func (fm *FuzzyMatcher) matchRunesDPASCII(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte, wantSpans bool) (float64, bool, int, int, int, int, int, []MatchSpan, bool) {
-	score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern, wantSpans)
-	return score, matched, start, end, targetLen, matchCount, wordHits, spans, true
+func (fm *FuzzyMatcher) matchRunesDPASCII(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte, spanMode spanRequest) (float64, bool, int, int, int, int, int, []MatchSpan, []int, bool) {
+	score, matched, start, end, targetLen, matchCount, wordHits, spans, positions := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern, spanMode)
+	return score, matched, start, end, targetLen, matchCount, wordHits, spans, positions, true
 }
 
 func runPrefixASCII(prefix []float32, prefixIdx []int32, dpPrev []float32, start, end int, gap float32) {

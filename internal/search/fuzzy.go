@@ -34,12 +34,21 @@ type MatchDetails struct {
 	TargetLength int
 	MatchCount   int
 	WordHits     int
+	Positions    []int
 	Spans        []MatchSpan
 }
 
 const (
 	boundaryWord = 1 << iota
 	boundaryStrong
+)
+
+type spanRequest int
+
+const (
+	spanNone spanRequest = iota
+	spanPositions
+	spanFull
 )
 
 // FuzzyMatcher performs fuzzy pattern matching
@@ -125,12 +134,22 @@ func (fm *FuzzyMatcher) MatchDetailedWithMode(pattern, text string, caseSensitiv
 // MatchDetailedFromRunes lets callers reuse precomputed rune slices for both the pattern and target text.
 // Callers are responsible for providing runes that already reflect any desired case folding.
 func (fm *FuzzyMatcher) MatchDetailedFromRunes(pattern string, patternRunes []rune, text string, textRunes []rune) (float64, bool, MatchDetails) {
-	return fm.MatchDetailedFromRunesWithSpans(pattern, patternRunes, text, textRunes, true)
+	return fm.MatchDetailedFromRunesWithSpanRequest(pattern, patternRunes, text, textRunes, spanFull)
 }
 
-// MatchDetailedFromRunesWithSpans lets callers control whether match spans are populated.
+// MatchDetailedFromRunesWithSpans is a compatibility shim that maps the older boolean API
+// to the newer spanRequest contract. Prefer MatchDetailedFromRunesWithSpanRequest.
 // When wantSpans is false, the matcher skips span construction to reduce allocations.
 func (fm *FuzzyMatcher) MatchDetailedFromRunesWithSpans(pattern string, patternRunes []rune, text string, textRunes []rune, wantSpans bool) (float64, bool, MatchDetails) {
+	req := spanFull
+	if !wantSpans {
+		req = spanNone
+	}
+	return fm.MatchDetailedFromRunesWithSpanRequest(pattern, patternRunes, text, textRunes, req)
+}
+
+// MatchDetailedFromRunesWithSpanRequest lets callers control the span construction strategy.
+func (fm *FuzzyMatcher) MatchDetailedFromRunesWithSpanRequest(pattern string, patternRunes []rune, text string, textRunes []rune, spans spanRequest) (float64, bool, MatchDetails) {
 	if len(patternRunes) == 0 {
 		return 1.0, true, MatchDetails{
 			Start:        0,
@@ -138,10 +157,11 @@ func (fm *FuzzyMatcher) MatchDetailedFromRunesWithSpans(pattern string, patternR
 			TargetLength: len(textRunes),
 			MatchCount:   0,
 			WordHits:     0,
+			Positions:    nil,
 			Spans:        nil,
 		}
 	}
-	score, matched, details, _ := fm.matchWithRunes(pattern, text, patternRunes, textRunes, wantSpans)
+	score, matched, details, _ := fm.matchWithRunes(pattern, text, patternRunes, textRunes, spans)
 	return score, matched, details
 }
 
@@ -153,6 +173,7 @@ func (fm *FuzzyMatcher) matchDetailedWithMode(pattern, text string, caseSensitiv
 			TargetLength: utf8.RuneCountInString(text),
 			MatchCount:   0,
 			WordHits:     0,
+			Positions:    nil,
 			Spans:        nil,
 		}
 	}
@@ -163,7 +184,7 @@ func (fm *FuzzyMatcher) matchDetailedWithMode(pattern, text string, caseSensitiv
 	textRunes, textBuf := acquireRunes(text, fold)
 	defer releaseRunes(textBuf)
 
-	score, matched, details, substringIdx := fm.matchWithRunes(pattern, text, patternRunes, textRunes, true)
+	score, matched, details, substringIdx := fm.matchWithRunes(pattern, text, patternRunes, textRunes, spanFull)
 	if matched && fuzzyDebugEnabled() {
 		fuzzyLogf("pattern=%q text=%q score=%.6f start=%d end=%d len=%d matches=%d wordHits=%d substrIdx=%d caseSensitive=%v",
 			pattern, text, score, details.Start, details.End, details.TargetLength, details.MatchCount, details.WordHits, substringIdx, caseSensitive)
@@ -171,7 +192,7 @@ func (fm *FuzzyMatcher) matchDetailedWithMode(pattern, text string, caseSensitiv
 	return score, matched, details
 }
 
-func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textRunes []rune, wantSpans bool) (float64, bool, MatchDetails, int) {
+func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textRunes []rune, spanMode spanRequest) (float64, bool, MatchDetails, int) {
 	asciiCandidate := runesAreASCII(textRunes) && runesAreASCII(patternRunes)
 	var asciiText []byte
 	var asciiPattern []byte
@@ -196,7 +217,10 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 	targetLen := len(textRunes)
 	matchCount := len(patternRunes)
 	wordHits := 0
+	var positions []int
 	var spans []MatchSpan
+	buildSpans := spanMode == spanFull
+	requestPositions := spanMode == spanPositions
 	var boundaryBuf *boundaryBuffer
 	defer func() {
 		if boundaryBuf != nil {
@@ -212,8 +236,13 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 			baseScore = contiguousScore
 			wordHits = contiguousWordHits
 			matched = true
-			if wantSpans {
+			if buildSpans {
 				spans = []MatchSpan{{Start: start, End: end}}
+			} else if requestPositions {
+				positions = acquirePositions(len(patternRunes))
+				for i := range positions {
+					positions[i] = start + i
+				}
 			}
 		}
 	}
@@ -225,11 +254,15 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 		var dpScore float64
 		var dpMatched bool
 		var dpSpans []MatchSpan
-		dpScore, dpMatched, start, end, targetLen, matchCount, wordHits, dpSpans = fm.matchRunesDP(patternRunes, textRunes, boundaryBuf, asciiText, asciiPattern, wantSpans)
+		var dpPositions []int
+		dpScore, dpMatched, start, end, targetLen, matchCount, wordHits, dpSpans, dpPositions = fm.matchRunesDP(patternRunes, textRunes, boundaryBuf, asciiText, asciiPattern, spanMode)
 		if dpMatched {
 			baseScore = dpScore
 			matched = true
 			spans = dpSpans
+			if requestPositions {
+				positions = dpPositions
+			}
 		}
 	}
 
@@ -240,6 +273,7 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 			TargetLength: targetLen,
 			MatchCount:   0,
 			WordHits:     0,
+			Positions:    nil,
 			Spans:        nil,
 		}, substringIdx
 	}
@@ -294,7 +328,7 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 
 	score += fm.wordHitBonus * float64(wordHits)
 
-	if len(spans) == 0 && start <= end {
+	if buildSpans && len(spans) == 0 && start <= end {
 		spans = []MatchSpan{{Start: start, End: end}}
 	}
 
@@ -304,31 +338,32 @@ func (fm *FuzzyMatcher) matchWithRunes(pattern, text string, patternRunes, textR
 		TargetLength: targetLen,
 		MatchCount:   matchCount,
 		WordHits:     wordHits,
+		Positions:    positions,
 		Spans:        spans,
 	}, substringIdx
 }
 
-func (fm *FuzzyMatcher) matchRunesDP(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte, wantSpans bool) (float64, bool, int, int, int, int, int, []MatchSpan) {
+func (fm *FuzzyMatcher) matchRunesDP(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte, spanMode spanRequest) (float64, bool, int, int, int, int, int, []MatchSpan, []int) {
 	useASCII := asciiText != nil && asciiPattern != nil && len(asciiText) == len(text) && len(asciiPattern) == len(pattern)
 	if useASCII && fuzzySIMDDPEnabled() {
-		if score, matched, start, end, targetLen, matchCount, wordHits, spans, ok := fm.matchRunesDPASCII(pattern, text, boundaryBuf, asciiText, asciiPattern, wantSpans); ok {
-			return score, matched, start, end, targetLen, matchCount, wordHits, spans
+		if score, matched, start, end, targetLen, matchCount, wordHits, spans, positions, ok := fm.matchRunesDPASCII(pattern, text, boundaryBuf, asciiText, asciiPattern, spanMode); ok {
+			return score, matched, start, end, targetLen, matchCount, wordHits, spans, positions
 		}
 	}
 	// Experimental: float32 ASCII DP (NEON primitives). Guarded by env flag.
 	if useASCII && fuzzyASCII32Enabled() {
-		if score, matched, start, end, targetLen, matchCount, wordHits, spans, ok := fm.matchRunesDPASCII32(pattern, text, boundaryBuf, asciiText, asciiPattern, wantSpans); ok {
-			return score, matched, start, end, targetLen, matchCount, wordHits, spans
+		if score, matched, start, end, targetLen, matchCount, wordHits, spans, positions, ok := fm.matchRunesDPASCII32(pattern, text, boundaryBuf, asciiText, asciiPattern, spanMode); ok {
+			return score, matched, start, end, targetLen, matchCount, wordHits, spans, positions
 		}
 	}
-	return fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern, wantSpans)
+	return fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern, spanMode)
 }
 
-func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte, wantSpans bool) (float64, bool, int, int, int, int, int, []MatchSpan) {
+func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte, spanMode spanRequest) (float64, bool, int, int, int, int, int, []MatchSpan, []int) {
 	m := len(pattern)
 	n := len(text)
 	if n == 0 || m > n {
-		return 0.0, false, -1, -1, n, 0, 0, nil
+		return 0.0, false, -1, -1, n, 0, 0, nil, nil
 	}
 
 	const dpBeamWidth = 96
@@ -337,6 +372,8 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 	negInf := math.Inf(-1)
 	scratch := acquireDPScratch(m, n)
 	defer releaseDPScratch(scratch)
+	buildSpans := spanMode == spanFull
+	requestPositions := spanMode == spanPositions
 	dpPrev := scratch.dpPrev
 	dpCurr := scratch.dpCurr
 	for j := range dpPrev {
@@ -372,7 +409,7 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 	}
 
 	if maxActive == -1 {
-		return 0.0, false, -1, -1, n, 0, 0, nil
+		return 0.0, false, -1, -1, n, 0, 0, nil, nil
 	}
 
 	for i := 1; i < m; i++ {
@@ -451,7 +488,7 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 
 		dpPrev, dpCurr = dpCurr, dpPrev
 		if nextMaxActive == -1 {
-			return 0.0, false, -1, -1, n, 0, 0, nil
+			return 0.0, false, -1, -1, n, 0, 0, nil, nil
 		}
 		minActive = nextMinActive - dpBeamMargin
 		if minActive < 0 {
@@ -465,7 +502,7 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 
 	bestEnd := maxIndex(dpPrev)
 	if bestEnd == -1 {
-		return 0.0, false, -1, -1, n, 0, 0, nil
+		return 0.0, false, -1, -1, n, 0, 0, nil, nil
 	}
 
 	positions := scratch.positions[:m]
@@ -475,11 +512,11 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 		if i > 0 {
 			cell := i*cols + k
 			if backtrackGen[cell] != scratch.generation {
-				return 0.0, false, -1, -1, n, 0, 0, nil
+				return 0.0, false, -1, -1, n, 0, 0, nil, nil
 			}
 			k = backtrack[cell]
 			if k == -1 {
-				return 0.0, false, -1, -1, n, 0, 0, nil
+				return 0.0, false, -1, -1, n, 0, 0, nil, nil
 			}
 		}
 	}
@@ -498,11 +535,17 @@ func (fm *FuzzyMatcher) matchRunesDPScalar(pattern, text []rune, boundaryBuf *bo
 	}
 
 	var spans []MatchSpan
-	if wantSpans {
+	if buildSpans {
 		spans = makeMatchSpansFromPositions(positions)
 	}
 
-	return bestScore, true, positions[0], positions[m-1], n, m, wordHits, spans
+	var positionsCopy []int
+	if requestPositions {
+		positionsCopy = acquirePositions(len(positions))
+		copy(positionsCopy, positions)
+	}
+
+	return bestScore, true, positions[0], positions[m-1], n, m, wordHits, spans, positionsCopy
 }
 
 func makeMatchSpansFromPositions(positions []int) []MatchSpan {
@@ -702,7 +745,8 @@ func (fm *FuzzyMatcher) MatchMultipleIntoWithMode(pattern string, caseSensitive 
 
 	for idx, text := range texts {
 		textRunes, textBuf := acquireRunes(text, fold)
-		score, matched, details, substringIdx := fm.matchWithRunes(pattern, text, patternRunes, textRunes, true)
+		score, matched, details, substringIdx := fm.matchWithRunes(pattern, text, patternRunes, textRunes, spanFull)
+		releasePositions(details.Positions)
 		releaseRunes(textBuf)
 		if matched && score > fm.minScore {
 			if fuzzyDebugEnabled() {
@@ -783,6 +827,33 @@ func asciiBytesToString(b []byte) string {
 		return ""
 	}
 	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
+var positionsPool = sync.Pool{
+	New: func() any {
+		s := make([]int, 0, 16)
+		return &s
+	},
+}
+
+func acquirePositions(length int) []int {
+	bufPtr := positionsPool.Get().(*[]int)
+	buf := *bufPtr
+	if cap(buf) < length {
+		buf = make([]int, length)
+	} else {
+		buf = buf[:length]
+	}
+	*bufPtr = buf
+	return buf
+}
+
+func releasePositions(buf []int) {
+	if buf == nil {
+		return
+	}
+	buf = buf[:0]
+	positionsPool.Put(&buf)
 }
 
 type runeBuffer struct {

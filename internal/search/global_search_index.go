@@ -33,7 +33,22 @@ type indexFileRecord struct {
 	mode        uint32
 }
 
-var lazyIndexSpans = os.Getenv("RDIR_INDEX_LAZY_SPANS") == "1"
+var indexSpanMode = parseIndexSpanMode()
+
+func parseIndexSpanMode() spanRequest {
+	switch strings.ToLower(os.Getenv("RDIR_INDEX_LAZY_SPANS")) {
+	case "full", "0", "false":
+		return spanFull
+	case "positions":
+		return spanPositions
+	case "none":
+		return spanNone
+	case "1", "true":
+		return spanPositions
+	default:
+		return spanNone
+	}
+}
 
 func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []GlobalSearchResult {
 	tokens, matchAll := prepareQueryTokens(query, caseSensitive)
@@ -58,8 +73,9 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 		}
 		entry := &entries[idx]
 		relPath := entry.relPath
-		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, !lazyIndexSpans)
+		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, indexSpanMode)
 		if !matched {
+			releasePositions(details.Positions)
 			continue
 		}
 
@@ -72,14 +88,11 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 		pathSegments := countPathSegments(relPath)
 
 		if !collector.Needs(score, pathLength, details.Start, details.End, details.MatchCount, details.WordHits, pathSegments, entry.order, true) {
+			releasePositions(details.Positions)
 			continue
 		}
 
-		finalDetails := details
-		if lazyIndexSpans {
-			_, _, spanDetails := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, true)
-			finalDetails = spanDetails
-		}
+		finalDetails := gs.materializeIndexDetails(indexSpanMode, tokens, relPath, caseSensitive, matchAll, details)
 		result := gs.makeIndexedResult(entry, score, pathLength, finalDetails.Start, finalDetails.End, finalDetails.MatchCount, finalDetails.WordHits, pathSegments, true, finalDetails.Spans)
 		collector.Store(result)
 	}
@@ -382,6 +395,27 @@ func (gs *GlobalSearcher) makeIndexedResult(entry *indexedEntry, score float64, 
 			Modified:  time.Unix(0, entry.modUnixNano),
 			Mode:      mode,
 		},
+	}
+}
+
+func (gs *GlobalSearcher) materializeIndexDetails(spanMode spanRequest, tokens []queryToken, relPath string, caseSensitive bool, matchAll bool, details MatchDetails) MatchDetails {
+	switch spanMode {
+	case spanPositions:
+		if len(details.Spans) == 0 && len(details.Positions) > 0 {
+			details.Spans = MergeMatchSpans(makeMatchSpansFromPositions(details.Positions))
+		}
+		releasePositions(details.Positions)
+		details.Positions = nil
+		return details
+	case spanNone:
+		releasePositions(details.Positions)
+		_, _, spanDetails := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, spanFull)
+		releasePositions(spanDetails.Positions)
+		spanDetails.Positions = nil
+		return spanDetails
+	default:
+		releasePositions(details.Positions)
+		return details
 	}
 }
 

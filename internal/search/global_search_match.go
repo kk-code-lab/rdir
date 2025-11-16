@@ -16,7 +16,7 @@ type queryToken struct {
 	runes   []rune
 }
 
-func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseSensitive bool, matchAll bool, wantSpans bool) (float64, bool, MatchDetails) {
+func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseSensitive bool, matchAll bool, spanMode spanRequest) (float64, bool, MatchDetails) {
 	if matchAll {
 		return 1.0, true, MatchDetails{
 			Start:        -1,
@@ -33,8 +33,9 @@ func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseS
 	pathRunes, pathBuf := acquireRunes(relPath, fold)
 	defer releaseRunes(pathBuf)
 
-	pathScore, pathDetails, ok := gs.aggregateTokenMatches(tokens, relPath, pathRunes, wantSpans)
+	pathScore, pathDetails, ok := gs.aggregateTokenMatches(tokens, relPath, pathRunes, spanMode)
 	if !ok {
+		releasePositions(pathDetails.Positions)
 		return 0, false, MatchDetails{}
 	}
 
@@ -51,10 +52,11 @@ func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseS
 		if fileOffset < 0 {
 			fileOffset = 0
 		}
-		fileScore, fileDetails, fileOK := gs.aggregateTokenMatches(tokens, filename, fileRunes, wantSpans)
+		fileScore, fileDetails, fileOK := gs.aggregateTokenMatches(tokens, filename, fileRunes, spanMode)
 		releaseRunes(fileBuf)
 
 		if fileOK && fileScore > bestScore {
+			releasePositions(bestDetails.Positions)
 			bestScore = fileScore
 			if fileDetails.Start >= 0 {
 				fileDetails.Start += fileOffset
@@ -66,7 +68,14 @@ func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseS
 				fileDetails.Spans[i].Start += fileOffset
 				fileDetails.Spans[i].End += fileOffset
 			}
+			if len(fileDetails.Positions) > 0 {
+				for i := range fileDetails.Positions {
+					fileDetails.Positions[i] += fileOffset
+				}
+			}
 			bestDetails = fileDetails
+		} else {
+			releasePositions(fileDetails.Positions)
 		}
 	}
 
@@ -283,7 +292,7 @@ func splitQueryTokens(query string) []string {
 	return tokens
 }
 
-func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string, textRunes []rune, wantSpans bool) (float64, MatchDetails, bool) {
+func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string, textRunes []rune, spanMode spanRequest) (float64, MatchDetails, bool) {
 	totalScore := 0.0
 	agg := MatchDetails{
 		Start:        math.MaxInt32,
@@ -291,20 +300,27 @@ func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string
 		TargetLength: len(textRunes),
 	}
 
+	buildSpans := spanMode == spanFull
+	requestPositions := spanMode == spanPositions
+	var positions []int
+	if requestPositions {
+		positions = acquirePositions(0)
+	}
+
 	for _, token := range tokens {
-		score, matched, details := gs.matcher.MatchDetailedFromRunesWithSpans(token.pattern, token.runes, text, textRunes, wantSpans)
+		score, matched, details := gs.matcher.MatchDetailedFromRunesWithSpanRequest(token.pattern, token.runes, text, textRunes, spanMode)
 		if !matched {
+			releasePositions(details.Positions)
+			if requestPositions {
+				releasePositions(positions)
+			}
 			return 0, MatchDetails{}, false
 		}
 		totalScore += score
 
-		if details.MatchCount > 0 {
-			agg.MatchCount += details.MatchCount
-		}
-		if details.WordHits > 0 {
-			agg.WordHits += details.WordHits
-		}
-		if len(details.Spans) > 0 {
+		agg.MatchCount += details.MatchCount
+		agg.WordHits += details.WordHits
+		if buildSpans && len(details.Spans) > 0 {
 			agg.Spans = append(agg.Spans, details.Spans...)
 		}
 		if details.Start >= 0 && details.Start < agg.Start {
@@ -313,19 +329,36 @@ func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string
 		if details.End > agg.End {
 			agg.End = details.End
 		}
+		if requestPositions && len(details.Positions) > 0 {
+			positions = append(positions, details.Positions...)
+		}
+		releasePositions(details.Positions)
 	}
 
 	if agg.Start == math.MaxInt32 {
 		agg.Start = -1
 	}
-	if len(agg.Spans) > 1 {
-		sort.Slice(agg.Spans, func(i, j int) bool {
-			if agg.Spans[i].Start == agg.Spans[j].Start {
-				return agg.Spans[i].End < agg.Spans[j].End
-			}
-			return agg.Spans[i].Start < agg.Spans[j].Start
-		})
-		agg.Spans = MergeMatchSpans(agg.Spans)
+	if buildSpans {
+		if len(agg.Spans) > 1 {
+			sort.Slice(agg.Spans, func(i, j int) bool {
+				if agg.Spans[i].Start == agg.Spans[j].Start {
+					return agg.Spans[i].End < agg.Spans[j].End
+				}
+				return agg.Spans[i].Start < agg.Spans[j].Start
+			})
+			agg.Spans = MergeMatchSpans(agg.Spans)
+		}
+	} else {
+		agg.Spans = nil
+	}
+	if requestPositions {
+		if len(positions) == 0 {
+			releasePositions(positions)
+			positions = nil
+		} else {
+			sort.Ints(positions)
+		}
+		agg.Positions = positions
 	}
 	if agg.TargetLength == 0 {
 		agg.TargetLength = utf8.RuneCountInString(text)
