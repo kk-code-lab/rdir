@@ -390,6 +390,68 @@ func TestMarkdownListWithFencedCodeBlock(t *testing.T) {
 	}
 }
 
+func TestMarkdownPreviewFromDataUsesCachedDocument(t *testing.T) {
+	content := "# Header\n\n| H1 | H2 |\n| --- | --- |\n| left | right |\n"
+	info := fakeFileInfo{name: "cache.md", size: int64(len(content))}
+	ctx := previewFormatContext{
+		path:    info.Name(),
+		info:    info,
+		content: []byte(content),
+	}
+
+	preview := &PreviewData{}
+	markdownPreviewFormatter{}.Format(ctx, preview)
+
+	if preview.markdownDoc == nil {
+		t.Fatalf("expected cached markdown document")
+	}
+
+	preview.TextLines = nil
+
+	segments, meta := FormatMarkdownPreviewFromData(preview, 40, 1, false)
+	if len(segments) == 0 {
+		t.Fatalf("expected segments when rendering from cached document")
+	}
+	if len(meta) != len(segments) {
+		t.Fatalf("expected metadata for each line, got %d vs %d", len(meta), len(segments))
+	}
+
+	lines := segmentsToTextLines(segments)
+	if len(lines) == 0 || lines[0] != "# Header" {
+		t.Fatalf("unexpected rendered output: %#v", lines)
+	}
+}
+
+func TestMarkdownSegmentsMatchFormattedLines(t *testing.T) {
+	lines := []string{
+		"## Title",
+		"",
+		"Text with [link](https://example.com) and `code`.",
+	}
+	want := formatMarkdownLines(lines)
+
+	segs, _ := FormatMarkdownPreview(lines, 120, 3, false)
+	got := segmentsToTextLines(segs)
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("segments text mismatch:\n%s", diff)
+	}
+
+	var foundHeading, foundLink bool
+	for _, line := range segs {
+		for _, seg := range line {
+			if seg.Style == TextStyleHeading {
+				foundHeading = true
+			}
+			if seg.Style == TextStyleLink {
+				foundLink = true
+			}
+		}
+	}
+	if !foundHeading || !foundLink {
+		t.Fatalf("expected heading and link styles, got heading=%v link=%v", foundHeading, foundLink)
+	}
+}
+
 func diffLines(want, got []string) string {
 	if len(want) == len(got) {
 		match := true

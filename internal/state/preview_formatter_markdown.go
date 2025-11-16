@@ -46,9 +46,12 @@ func (markdownPreviewFormatter) Format(ctx previewFormatContext, preview *Previe
 		return
 	}
 
-	segments := formatMarkdownSegments(preview.TextLines)
-	formatted := formatMarkdownLines(preview.TextLines)
+	opts := defaultMarkdownRenderOptions()
+	doc := parseMarkdown(preview.TextLines)
+	segments := renderMarkdownSegmentsWithDoc(doc, opts)
+	formatted := renderMarkdownLinesWithDoc(doc, opts)
 
+	preview.markdownDoc = &doc
 	preview.FormattedSegments = segments
 	preview.FormattedSegmentLineMeta = textLineMetadataFromSegments(segments)
 	preview.FormattedTextLines = formatted
