@@ -98,12 +98,14 @@ func (gs *GlobalSearcher) collectIndexRange(acc *asyncAccumulator, start, end in
 	}
 
 	hasMatch := !matchAll
+	spanMode := indexSpanMode
 	added := 0
 	for i := range entries {
 		entry := &entries[i]
 		relPath := entry.relPath
-		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, true)
+		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, spanMode)
 		if !matched {
+			releasePositions(details.Positions)
 			continue
 		}
 
@@ -115,7 +117,8 @@ func (gs *GlobalSearcher) collectIndexRange(acc *asyncAccumulator, start, end in
 		}
 		pathSegments := countPathSegments(relPath)
 
-		result := gs.makeIndexedResult(entry, score, pathLength, details.Start, details.End, details.MatchCount, details.WordHits, pathSegments, hasMatch, details.Spans)
+		finalDetails := gs.materializeIndexDetails(spanMode, tokens, relPath, caseSensitive, matchAll, details)
+		result := gs.makeIndexedResult(entry, score, pathLength, finalDetails.Start, finalDetails.End, finalDetails.MatchCount, finalDetails.WordHits, pathSegments, hasMatch, finalDetails.Spans)
 		acc.Add(result)
 		added++
 	}

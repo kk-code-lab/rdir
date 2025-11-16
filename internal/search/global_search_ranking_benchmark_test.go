@@ -137,7 +137,7 @@ func TestGlobalSearchRankingScenariosSnapshot(t *testing.T) {
 func runRankingScenario(gs *GlobalSearcher, sc rankingScenario, tokens []queryToken) []GlobalSearchResult {
 	results := make([]GlobalSearchResult, 0, len(sc.candidates))
 	for idx, path := range sc.candidates {
-		score, matched, details := gs.matchTokens(tokens, path, sc.caseSensitive, false, true)
+		score, matched, details := gs.matchTokens(tokens, path, sc.caseSensitive, false, spanFull)
 		if !matched {
 			continue
 		}
