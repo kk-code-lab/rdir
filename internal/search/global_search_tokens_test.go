@@ -65,6 +65,30 @@ func TestGlobalSearchTokensApplyToIndexResults(t *testing.T) {
 	}
 }
 
+func TestTokenOrderingUsesRuneBucketSelectivity(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "common_one.txt"))
+	writeTestFile(t, filepath.Join(root, "common_two.txt"))
+	writeTestFile(t, filepath.Join(root, "zeta_unique.txt"))
+
+	searcher := NewGlobalSearcher(root, false, nil)
+	searcher.buildIndex(time.Now())
+
+	tokens, matchAll := prepareQueryTokens("common zeta", false)
+	if matchAll {
+		t.Fatalf("expected tokens for query")
+	}
+
+	searcher.orderTokens(tokens)
+
+	if len(tokens) != 2 {
+		t.Fatalf("expected 2 tokens, got %d", len(tokens))
+	}
+	if tokens[0].raw != "zeta" {
+		t.Fatalf("expected rare token to be ordered first, got %q", tokens[0].raw)
+	}
+}
+
 func collectResultFiles(results []GlobalSearchResult) []string {
 	var names []string
 	seen := map[string]bool{}

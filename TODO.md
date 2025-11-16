@@ -10,7 +10,7 @@
 
 ## Performance & Search
 
-- [ ] **Token heuristics & order**  
+- [x] **Token heuristics & order**  
   During AND queries we currently sort tokens only by length. Explore heuristics based on selectivity (rareness, occurrence counts) to run the most discriminating token first and avoid extra DP passes.
 
 - [x] **Lower-case name cache**  
