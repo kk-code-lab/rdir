@@ -112,7 +112,7 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 				if wrapEnabled {
 					maxLinesPerCell = 0
 				}
-				mdSegments, mdMeta := statepkg.FormatMarkdownPreview(preview.TextLines, panelWidth, maxLinesPerCell, wrapEnabled)
+				mdSegments, mdMeta := statepkg.FormatMarkdownPreviewFromData(preview, panelWidth, maxLinesPerCell, wrapEnabled)
 				if len(mdSegments) > 0 {
 					lines = mdSegments
 					meta = mdMeta

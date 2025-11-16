@@ -55,6 +55,8 @@ type PreviewData struct {
 	BinaryInfo                 BinaryPreview
 	DirEntries                 []FileEntry
 	HiddenFormattingDetected   bool
+
+	markdownDoc *markdownDocument
 }
 
 // BinaryPreview contains lightweight information about a binary file.

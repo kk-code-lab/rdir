@@ -14,6 +14,32 @@ type formattedTable struct {
 	meta        []TextLineMetadata
 }
 
+type tableLayout struct {
+	widths []int
+	header []tableCell
+	rows   [][]tableCell
+}
+
+type tableBorders struct {
+	topLeft, topSep, topRight          string
+	midLeft, midSep, midRight          string
+	bottomLeft, bottomSep, bottomRight string
+}
+
+func defaultTableBorders() tableBorders {
+	return tableBorders{
+		topLeft:     "┌",
+		topSep:      "┬",
+		topRight:    "┐",
+		midLeft:     "├",
+		midSep:      "┼",
+		midRight:    "┤",
+		bottomLeft:  "└",
+		bottomSep:   "┴",
+		bottomRight: "┘",
+	}
+}
+
 type tableRenderOptions struct {
 	// MaxWidth clamps the total rendered width (in columns). Zero means unlimited.
 	MaxWidth int
@@ -38,6 +64,27 @@ func buildFormattedTable(headers [][]markdownInline, rows [][][]markdownInline, 
 		return formattedTable{}
 	}
 
+	layout := buildTableLayout(headers, rows, opts)
+	return renderFormattedTable(layout, align, defaultTableBorders())
+}
+
+func buildTableLayout(headers [][]markdownInline, rows [][][]markdownInline, opts tableRenderOptions) tableLayout {
+	headerRaw, rowRaw := prepareTableCells(headers, rows)
+
+	widths := computeColumnWidths(headerRaw, rowRaw)
+	widths = clampColumnWidths(widths, opts.MaxWidth)
+
+	headerCells := wrapCellsToWidth(headerRaw, widths, opts)
+	rowCells := wrapRowCells(rowRaw, widths, opts)
+
+	return tableLayout{
+		widths: widths,
+		header: headerCells,
+		rows:   rowCells,
+	}
+}
+
+func prepareTableCells(headers [][]markdownInline, rows [][][]markdownInline) ([]tableCell, [][]tableCell) {
 	headerRaw := make([]tableCell, len(headers))
 	for i, h := range headers {
 		headerRaw[i] = makeTableCell(h, TextStyleStrong)
@@ -55,19 +102,17 @@ func buildFormattedTable(headers [][]markdownInline, rows [][][]markdownInline, 
 		}
 	}
 
-	widths := computeColumnWidths(headerRaw, rowRaw)
-	widths = clampColumnWidths(widths, opts.MaxWidth)
+	return headerRaw, rowRaw
+}
 
-	headerCells := wrapCellsToWidth(headerRaw, widths, opts)
-	rowCells := wrapRowCells(rowRaw, widths, opts)
+func renderFormattedTable(layout tableLayout, align []tableAlignment, borders tableBorders) formattedTable {
+	if len(layout.header) == 0 {
+		return formattedTable{}
+	}
 
-	borderTopLeft, borderTopSep, borderTopRight := "┌", "┬", "┐"
-	borderMidLeft, borderMidSep, borderMidRight := "├", "┼", "┤"
-	borderBottomLeft, borderBottomSep, borderBottomRight := "└", "┴", "┘"
-
-	hCells := make([]string, len(headers))
-	for i := range headers {
-		hCells[i] = strings.Repeat("─", widths[i]+2)
+	hCells := make([]string, len(layout.widths))
+	for i := range layout.widths {
+		hCells[i] = strings.Repeat("─", layout.widths[i]+2)
 	}
 
 	var lines []string
@@ -75,31 +120,31 @@ func buildFormattedTable(headers [][]markdownInline, rows [][][]markdownInline, 
 	var meta []TextLineMetadata
 	offset := int64(0)
 
-	top := borderTopLeft + strings.Join(hCells, borderTopSep) + borderTopRight
+	top := buildBorderLine(hCells, borders.topLeft, borders.topSep, borders.topRight)
 	lines = append(lines, top)
 	segmentRows = append(segmentRows, []StyledTextSegment{{Text: top, Style: TextStylePlain}})
 	meta = append(meta, makeMeta(top, offset))
 	offset += int64(len(top))
 
-	headerHeight := cellBlockHeight(headerCells)
+	headerHeight := cellBlockHeight(layout.header)
 	for i := 0; i < headerHeight; i++ {
-		headerLine, headerSegs := renderTableRow(headerCells, i, widths, align)
+		headerLine, headerSegs := renderTableRow(layout.header, i, layout.widths, align)
 		lines = append(lines, headerLine)
 		segmentRows = append(segmentRows, headerSegs)
 		meta = append(meta, makeMeta(headerLine, offset))
 		offset += int64(len(headerLine))
 	}
 
-	separator := borderMidLeft + strings.Join(hCells, borderMidSep) + borderMidRight
+	separator := buildBorderLine(hCells, borders.midLeft, borders.midSep, borders.midRight)
 	lines = append(lines, separator)
 	segmentRows = append(segmentRows, []StyledTextSegment{{Text: separator, Style: TextStylePlain}})
 	meta = append(meta, makeMeta(separator, offset))
 	offset += int64(len(separator))
 
-	for _, row := range rowCells {
+	for _, row := range layout.rows {
 		rowHeight := cellBlockHeight(row)
 		for i := 0; i < rowHeight; i++ {
-			line, segs := renderTableRow(row, i, widths, align)
+			line, segs := renderTableRow(row, i, layout.widths, align)
 			lines = append(lines, line)
 			segmentRows = append(segmentRows, segs)
 			meta = append(meta, makeMeta(line, offset))
@@ -107,12 +152,16 @@ func buildFormattedTable(headers [][]markdownInline, rows [][][]markdownInline, 
 		}
 	}
 
-	bottom := borderBottomLeft + strings.Join(hCells, borderBottomSep) + borderBottomRight
+	bottom := buildBorderLine(hCells, borders.bottomLeft, borders.bottomSep, borders.bottomRight)
 	lines = append(lines, bottom)
 	segmentRows = append(segmentRows, []StyledTextSegment{{Text: bottom, Style: TextStylePlain}})
 	meta = append(meta, makeMeta(bottom, offset))
 
 	return formattedTable{rows: lines, segmentRows: segmentRows, meta: meta}
+}
+
+func buildBorderLine(columns []string, left, sep, right string) string {
+	return left + strings.Join(columns, sep) + right
 }
 
 func computeColumnWidths(headers []tableCell, rows [][]tableCell) []int {

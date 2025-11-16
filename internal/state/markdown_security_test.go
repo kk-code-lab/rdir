@@ -39,7 +39,8 @@ func TestParseBlocksDepthLimit(t *testing.T) {
 		t.Fatalf("expected parser to advance to end, got %d", next)
 	}
 	if para, ok := blocks[0].(markdownParagraph); ok {
-		if got := renderInlines(para.text); got != "content" {
+		rendered := renderInlineSegments(para.text, TextStylePlain)
+		if got := joinSegmentsText(rendered); got != "content" {
 			t.Fatalf("unexpected paragraph content %q", got)
 		}
 	} else {

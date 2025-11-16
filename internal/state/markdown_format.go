@@ -10,27 +10,43 @@ func defaultMarkdownRenderOptions() markdownRenderOptions {
 	}
 }
 
+func renderMarkdownSegmentsWithDoc(doc markdownDocument, opts markdownRenderOptions) [][]StyledTextSegment {
+	return renderMarkdownSegments(doc, opts)
+}
+
+func renderMarkdownLinesWithDoc(doc markdownDocument, opts markdownRenderOptions) []string {
+	segments := renderMarkdownSegmentsWithDoc(doc, opts)
+	return segmentsToTextLines(segments)
+}
+
 func formatMarkdownLines(lines []string) []string {
 	return formatMarkdownLinesWithOptions(lines, defaultMarkdownRenderOptions())
 }
 
 func formatMarkdownLinesWithOptions(lines []string, opts markdownRenderOptions) []string {
 	doc := parseMarkdown(lines)
-	return renderMarkdown(doc, opts)
-}
-
-func formatMarkdownSegments(lines []string) [][]StyledTextSegment {
-	return formatMarkdownSegmentsWithOptions(lines, defaultMarkdownRenderOptions())
-}
-
-func formatMarkdownSegmentsWithOptions(lines []string, opts markdownRenderOptions) [][]StyledTextSegment {
-	doc := parseMarkdown(lines)
-	return renderMarkdownSegments(doc, opts)
+	return renderMarkdownLinesWithDoc(doc, opts)
 }
 
 // FormatMarkdownPreview builds styled segments and metadata for a markdown document,
 // applying table rendering options such as width limits and line truncation.
 func FormatMarkdownPreview(lines []string, tableWidth int, maxLinesPerCell int, wrap bool) ([][]StyledTextSegment, []TextLineMetadata) {
+	doc := parseMarkdown(lines)
+	return formatMarkdownPreviewWithDoc(doc, tableWidth, maxLinesPerCell, wrap)
+}
+
+// FormatMarkdownPreviewFromData re-renders markdown preview content using a cached document when available.
+func FormatMarkdownPreviewFromData(preview *PreviewData, tableWidth int, maxLinesPerCell int, wrap bool) ([][]StyledTextSegment, []TextLineMetadata) {
+	if preview == nil {
+		return nil, nil
+	}
+	if preview.markdownDoc != nil {
+		return formatMarkdownPreviewWithDoc(*preview.markdownDoc, tableWidth, maxLinesPerCell, wrap)
+	}
+	return FormatMarkdownPreview(preview.TextLines, tableWidth, maxLinesPerCell, wrap)
+}
+
+func formatMarkdownPreviewWithDoc(doc markdownDocument, tableWidth int, maxLinesPerCell int, wrap bool) ([][]StyledTextSegment, []TextLineMetadata) {
 	opts := defaultMarkdownRenderOptions()
 	if tableWidth > 1 {
 		opts.tableOpts.MaxWidth = tableWidth - 1
@@ -43,7 +59,18 @@ func FormatMarkdownPreview(lines []string, tableWidth int, maxLinesPerCell int, 
 		opts.tableOpts.MaxLinesPerCell = maxLinesPerCell
 	}
 	opts.tableOpts.Ellipsis = "…"
-	segments := formatMarkdownSegmentsWithOptions(lines, opts)
+	segments := renderMarkdownSegmentsWithDoc(doc, opts)
 	meta := textLineMetadataFromSegments(segments)
 	return segments, meta
+}
+
+func segmentsToTextLines(lines [][]StyledTextSegment) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = joinSegmentsText(line)
+	}
+	return out
 }
