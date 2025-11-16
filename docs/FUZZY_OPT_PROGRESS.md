@@ -32,3 +32,11 @@ These runs include the token selectivity heuristic (smallest index rune bucket f
   - `SpanFull`: **2.83ms/op**, 1.41MB/op, 39,053 allocs/op
   - `SpanPositions`: **2.59ms/op**, 0.90MB/op, 18,829 allocs/op
   - `SpanNoneRerun`: **2.27ms/op**, 0.64MB/op, 8,329 allocs/op
+
+## Plan (2025-11-16, prioritised steps for >1M entries)
+
+1. Expand index candidate filtering: bitset/bigrams over the full path, intersect buckets for all tokens to slash N before hitting the matcher.
+2. Add cheap pre-checks before DP: `strings.Contains` on `lowerPath` for each token and an upper-bound score guard vs the heap minimum to skip costly matches.
+3. Cache pre-folded []rune + boundary bits in the index and reuse them in `matchTokens`, avoiding per-hit `acquireRunes`/`boundaryBuffer`.
+4. Parallelise candidate scoring (shards + worker pool + final top-K heap), with per-worker matchers/buffers to scale across cores.
+5. After validation, turn SIMD DP on by default (NEON DP32) and add AVX2 for amd64 so ASCII-heavy paths run through faster DP.

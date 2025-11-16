@@ -19,6 +19,7 @@ type indexedEntry struct {
 	fullPath    string
 	relPath     string
 	lowerPath   string
+	runeBits    runeBitset
 	size        int64
 	modUnixNano int64
 	mode        uint32
@@ -59,7 +60,7 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 	}
 
 	collector := newTopCollector(maxDisplayResults)
-	candidates := gs.indexCandidates(tokens)
+	candidates := gs.indexCandidates(tokens, entries)
 	if len(candidates) == 0 {
 		candidates = make([]int, len(entries))
 		for i := range entries {
@@ -120,25 +121,76 @@ func (gs *GlobalSearcher) collectAllIndexFrom(entries []indexedEntry) []GlobalSe
 	return results
 }
 
-func (gs *GlobalSearcher) indexCandidates(tokens []queryToken) []int {
+func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexedEntry) []int {
+	total := len(entries)
+	if total == 0 || len(tokens) == 0 {
+		return makeSequentialIndexes(total)
+	}
+
+	requiredBits := runeBitset{}
+	tokenRunes := make([][]rune, 0, len(tokens))
+
+	for _, token := range tokens {
+		source := token.folded
+		if source == "" {
+			source = strings.ToLower(token.pattern)
+		}
+		tokenRunes = append(tokenRunes, []rune(source))
+		for _, r := range source {
+			if idx := runeBitIndex(r); idx >= 0 {
+				requiredBits.set(idx)
+			}
+		}
+	}
+
+	var bestBucket []int
+	bestBucketSize := -1
+
 	gs.indexMu.Lock()
-	defer gs.indexMu.Unlock()
+	if gs.indexRuneBuckets != nil {
+		for _, runes := range tokenRunes {
+			seen := make(map[rune]struct{}, len(runes))
+			for _, r := range runes {
+				if !isRuneIndexable(r) {
+					continue
+				}
+				if _, ok := seen[r]; ok {
+					continue
+				}
+				seen[r] = struct{}{}
+				if bucket, ok := gs.indexRuneBuckets[r]; ok && len(bucket) > 0 {
+					if bestBucketSize == -1 || len(bucket) < bestBucketSize {
+						bestBucketSize = len(bucket)
+						bestBucket = make([]int, len(bucket))
+						copy(bestBucket, bucket)
+					}
+				}
+			}
+		}
+	}
+	gs.indexMu.Unlock()
 
-	total := len(gs.indexEntries)
-	if total == 0 || len(tokens) == 0 || gs.indexRuneBuckets == nil {
-		return makeSequentialIndexes(total)
+	filtered := make([]int, 0, len(bestBucket))
+	if len(bestBucket) > 0 {
+		for _, idx := range bestBucket {
+			if idx < 0 || idx >= total {
+				continue
+			}
+			if entries[idx].runeBits.contains(requiredBits) {
+				filtered = append(filtered, idx)
+			}
+		}
+		return filtered
 	}
 
-	fRune := firstRune(strings.ToLower(tokens[0].pattern))
-	if fRune == 0 {
-		return makeSequentialIndexes(total)
+	// Fall back to scanning all entries when no bucket data exists.
+	filtered = make([]int, 0, total)
+	for idx := range entries {
+		if entries[idx].runeBits.contains(requiredBits) {
+			filtered = append(filtered, idx)
+		}
 	}
-	if bucket, ok := gs.indexRuneBuckets[fRune]; ok && len(bucket) > 0 {
-		out := make([]int, len(bucket))
-		copy(out, bucket)
-		return out
-	}
-	return makeSequentialIndexes(total)
+	return filtered
 }
 
 func (gs *GlobalSearcher) buildIndex(start time.Time) {
@@ -322,6 +374,7 @@ func (gs *GlobalSearcher) buildIndex(start time.Time) {
 			fullPath:    record.fullPath,
 			relPath:     record.relPath,
 			lowerPath:   lower,
+			runeBits:    makeRuneBitset(lower),
 			size:        record.size,
 			modUnixNano: record.modUnixNano,
 			mode:        record.mode,
@@ -470,6 +523,57 @@ func makeSequentialIndexes(total int) []int {
 		indexes[i] = i
 	}
 	return indexes
+}
+
+type runeBitset [4]uint64
+
+func (b *runeBitset) set(idx int) {
+	if idx < 0 {
+		return
+	}
+	word := idx / 64
+	if word < 0 || word >= len(b) {
+		return
+	}
+	bit := uint(idx % 64)
+	b[word] |= 1 << bit
+}
+
+func (b runeBitset) contains(needed runeBitset) bool {
+	for i := 0; i < len(b); i++ {
+		if b[i]&needed[i] != needed[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func runeBitIndex(r rune) int {
+	switch {
+	case r >= '0' && r <= '9':
+		return int(r - '0')
+	case r >= 'a' && r <= 'z':
+		return 10 + int(r-'a')
+	case r >= 'à' && r <= 'ž':
+		offset := int(r - 'à')
+		idx := 36 + offset
+		if idx >= 0 && idx < 256 {
+			return idx
+		}
+		return -1
+	default:
+		return -1
+	}
+}
+
+func makeRuneBitset(lower string) runeBitset {
+	var bits runeBitset
+	for _, r := range lower {
+		if idx := runeBitIndex(r); idx >= 0 {
+			bits.set(idx)
+		}
+	}
+	return bits
 }
 
 func runeKeysForPath(lower string) []rune {

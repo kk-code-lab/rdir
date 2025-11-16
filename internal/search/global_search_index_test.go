@@ -209,3 +209,38 @@ func TestGlobalSearcherPrefixIndexNarrowsCandidates(t *testing.T) {
 		t.Fatalf("expected alpha/alpine in results, got %#v", names)
 	}
 }
+
+func TestIndexCandidatesRequireAllTokenRunes(t *testing.T) {
+	root := t.TempDir()
+	files := []string{
+		"foo.txt",
+		"bar.txt",
+		"foo-bar.txt",
+	}
+	for _, name := range files {
+		full := filepath.Join(root, name)
+		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	searcher := NewGlobalSearcher(root, false, nil)
+	searcher.buildIndex(time.Now())
+	entries := searcher.snapshotEntries(0, -1)
+
+	tokens, _ := prepareQueryTokens("foo bar", false)
+	searcher.orderTokens(tokens)
+
+	candidates := searcher.indexCandidates(tokens, entries)
+
+	got := make([]string, 0, len(candidates))
+	for _, idx := range candidates {
+		if idx >= 0 && idx < len(entries) {
+			got = append(got, entries[idx].relPath)
+		}
+	}
+
+	if len(got) != 1 || got[0] != "foo-bar.txt" {
+		t.Fatalf("expected foo-bar only, got %#v", got)
+	}
+}
