@@ -40,6 +40,12 @@ These runs include the token selectivity heuristic (smallest index rune bucket f
   - `SequentialFallback`: **0.42ms/op**, 0B/op, 0 allocs/op
   - Reports `candidates` to show index filtering impact.
 
+### Lessons from candidate filtering experiments
+- Single smallest bucket + bitset is fastest on this dataset; intersecting multiple buckets added overhead without shrinking candidates further.
+- Keeping candidate slices pooled matters: dropping the pool regressed allocs to ~0.84MB/op.
+- Overly strict substring pre-checks break fuzzy subsequence matching; avoid them unless they mirror matcher semantics exactly.
+- Sequential bitset scan remains a good fallback when the smallest bucket is large; consider a dynamic switch (e.g., if bucket > X% of entries).
+
 ## Plan (2025-11-16, prioritised steps for >1M entries)
 
 1. ~~Expand index candidate filtering: bitset/bigrams over the full path, intersect buckets for all tokens to slash N before hitting the matcher.~~
