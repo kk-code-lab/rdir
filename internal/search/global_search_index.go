@@ -33,6 +33,8 @@ type indexFileRecord struct {
 	mode        uint32
 }
 
+var lazyIndexSpans = os.Getenv("RDIR_INDEX_LAZY_SPANS") == "1"
+
 func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []GlobalSearchResult {
 	tokens, matchAll := prepareQueryTokens(query, caseSensitive)
 	gs.orderTokens(tokens)
@@ -56,7 +58,7 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 		}
 		entry := &entries[idx]
 		relPath := entry.relPath
-		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, true)
+		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, !lazyIndexSpans)
 		if !matched {
 			continue
 		}
@@ -73,7 +75,12 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 			continue
 		}
 
-		result := gs.makeIndexedResult(entry, score, pathLength, details.Start, details.End, details.MatchCount, details.WordHits, pathSegments, true, details.Spans)
+		finalDetails := details
+		if lazyIndexSpans {
+			_, _, spanDetails := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, true)
+			finalDetails = spanDetails
+		}
+		result := gs.makeIndexedResult(entry, score, pathLength, finalDetails.Start, finalDetails.End, finalDetails.MatchCount, finalDetails.WordHits, pathSegments, true, finalDetails.Spans)
 		collector.Store(result)
 	}
 
