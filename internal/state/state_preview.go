@@ -26,6 +26,7 @@ func clonePreviewData(src *PreviewData) *PreviewData {
 	if len(src.FormattedSegmentLineMeta) > 0 {
 		copyData.FormattedSegmentLineMeta = append([]TextLineMetadata(nil), src.FormattedSegmentLineMeta...)
 	}
+	copyData.FormattedKind = src.FormattedKind
 	copyData.FormattedUnavailableReason = src.FormattedUnavailableReason
 	if len(src.TextRemainder) > 0 {
 		copyData.TextRemainder = append([]byte(nil), src.TextRemainder...)

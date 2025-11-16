@@ -2,10 +2,10 @@ package state
 
 import "strings"
 
-func renderMarkdownSegments(doc markdownDocument) [][]StyledTextSegment {
+func renderMarkdownSegments(doc markdownDocument, opts markdownRenderOptions) [][]StyledTextSegment {
 	var lines [][]StyledTextSegment
 	for idx, block := range doc.blocks {
-		rendered := renderBlockSegments(block, 0)
+		rendered := renderBlockSegments(block, 0, opts)
 		if idx > 0 && len(rendered) > 0 && len(lines) > 0 && len(lines[len(lines)-1]) != 0 {
 			lines = append(lines, nil)
 		}
@@ -14,7 +14,7 @@ func renderMarkdownSegments(doc markdownDocument) [][]StyledTextSegment {
 	return lines
 }
 
-func renderBlockSegments(block markdownBlock, depth int) [][]StyledTextSegment {
+func renderBlockSegments(block markdownBlock, depth int, opts markdownRenderOptions) [][]StyledTextSegment {
 	switch b := block.(type) {
 	case markdownHeading:
 		textSegments := renderInlineSegments(b.text, TextStyleHeading)
@@ -30,13 +30,13 @@ func renderBlockSegments(block markdownBlock, depth int) [][]StyledTextSegment {
 	case markdownCodeBlock:
 		return renderCodeBlockSegments(b)
 	case markdownList:
-		return renderListSegments(b, depth)
+		return renderListSegments(b, depth, opts)
 	case markdownBlockquote:
-		return renderBlockquoteSegments(b, depth)
+		return renderBlockquoteSegments(b, depth, opts)
 	case markdownHorizontalRule:
 		return [][]StyledTextSegment{{{Text: "─", Style: TextStyleRule}}}
 	case markdownTable:
-		return renderTableSegments(b)
+		return renderTableSegments(b, opts.tableOpts)
 	default:
 		return nil
 	}
@@ -105,12 +105,12 @@ func renderCodeBlockSegments(block markdownCodeBlock) [][]StyledTextSegment {
 	return lines
 }
 
-func renderListSegments(list markdownList, depth int) [][]StyledTextSegment {
+func renderListSegments(list markdownList, depth int, opts markdownRenderOptions) [][]StyledTextSegment {
 	var lines [][]StyledTextSegment
 	pad := strings.Repeat("  ", depth)
 	for idx, item := range list.items {
 		bullet := bulletSymbol(depth, list.ordered, idx, list.start)
-		blocks := renderBlocksSegments(item.blocks, depth+1)
+		blocks := renderBlocksSegments(item.blocks, depth+1, opts)
 		if len(blocks) == 0 {
 			lines = append(lines, []StyledTextSegment{{Text: pad + bullet, Style: TextStylePlain}})
 			continue
@@ -125,8 +125,8 @@ func renderListSegments(list markdownList, depth int) [][]StyledTextSegment {
 	return lines
 }
 
-func renderBlockquoteSegments(b markdownBlockquote, depth int) [][]StyledTextSegment {
-	content := renderBlocksSegments(b.blocks, depth)
+func renderBlockquoteSegments(b markdownBlockquote, depth int, opts markdownRenderOptions) [][]StyledTextSegment {
+	content := renderBlocksSegments(b.blocks, depth, opts)
 	if len(content) == 0 {
 		return nil
 	}
@@ -137,10 +137,10 @@ func renderBlockquoteSegments(b markdownBlockquote, depth int) [][]StyledTextSeg
 	return withPrefix
 }
 
-func renderBlocksSegments(blocks []markdownBlock, depth int) [][]StyledTextSegment {
+func renderBlocksSegments(blocks []markdownBlock, depth int, opts markdownRenderOptions) [][]StyledTextSegment {
 	var lines [][]StyledTextSegment
 	for idx, block := range blocks {
-		rendered := renderBlockSegments(block, depth)
+		rendered := renderBlockSegments(block, depth, opts)
 		if idx > 0 && len(rendered) > 0 && len(lines) > 0 && len(lines[len(lines)-1]) != 0 {
 			lines = append(lines, nil)
 		}
@@ -149,11 +149,14 @@ func renderBlocksSegments(blocks []markdownBlock, depth int) [][]StyledTextSegme
 	return lines
 }
 
-func renderTableSegments(tbl markdownTable) [][]StyledTextSegment {
+func renderTableSegments(tbl markdownTable, opts tableRenderOptions) [][]StyledTextSegment {
 	if len(tbl.headers) == 0 {
 		return nil
 	}
-	fancy := buildFormattedTable(tbl.headers, tbl.rows, tbl.align)
+	fancy := buildFormattedTable(tbl.headers, tbl.rows, tbl.align, opts)
+	if len(fancy.segmentRows) > 0 {
+		return fancy.segmentRows
+	}
 	segments := make([][]StyledTextSegment, len(fancy.rows))
 	for i, row := range fancy.rows {
 		segments[i] = []StyledTextSegment{{Text: row, Style: TextStylePlain}}

@@ -478,14 +478,19 @@ func parseTable(lines []string, start int) (markdownTable, int, bool) {
 		return markdownTable{}, start, false
 	}
 
-	headers := splitTableRow(header)
+	headerCells := splitTableRow(header)
 	separators := splitTableRow(separator)
-	if len(headers) == 0 || len(headers) != len(separators) {
+	if len(headerCells) == 0 || len(headerCells) != len(separators) {
 		return markdownTable{}, start, false
 	}
 	align := parseTableAlignment(separators)
 
-	var rows [][]string
+	headers := make([][]markdownInline, len(headerCells))
+	for i, cell := range headerCells {
+		headers[i] = parseInline(cell)
+	}
+
+	var rows [][][]markdownInline
 	i := start + 2
 	for i < len(lines) {
 		line := lines[i]
@@ -499,7 +504,11 @@ func parseTable(lines []string, start int) (markdownTable, int, bool) {
 		if len(cells) != len(headers) {
 			break
 		}
-		rows = append(rows, cells)
+		row := make([][]markdownInline, len(cells))
+		for j, cell := range cells {
+			row[j] = parseInline(cell)
+		}
+		rows = append(rows, row)
 		i++
 	}
 

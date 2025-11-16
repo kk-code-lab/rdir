@@ -32,6 +32,7 @@ func (markdownPreviewFormatter) Format(ctx previewFormatContext, preview *Previe
 	if preview == nil {
 		return
 	}
+	preview.FormattedKind = "markdown"
 	if preview.TextTruncated {
 		preview.FormattedUnavailableReason = "formatted preview unavailable: truncated content"
 		return
