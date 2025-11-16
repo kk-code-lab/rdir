@@ -36,8 +36,8 @@ These runs include the token selectivity heuristic (smallest index rune bucket f
 ## Update (2025-11-16, Apple M1, `go test ./internal/search -bench IndexCandidates -run '^$' -count=1`)
 
 - Added `BenchmarkIndexCandidatesAND` to contrast bitset-bucket filtering vs a sequential fallback on ~205K indexed files.
-  - `BitsetBuckets`: **0.71ms/op**, 1.19KB/op, 11 allocs/op, ~5k candidates after bucket intersect
-  - `SequentialFallback`: **0.44ms/op**, 0B/op, 0 allocs/op
+  - `BitsetBuckets`: **0.22ms/op**, 0.85KB/op, 11 allocs/op, ~5k candidates after bucket filter
+  - `SequentialFallback`: **0.42ms/op**, 0B/op, 0 allocs/op
   - Reports `candidates` to show index filtering impact.
 
 ## Plan (2025-11-16, prioritised steps for >1M entries)
