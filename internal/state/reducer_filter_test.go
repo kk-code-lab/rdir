@@ -1,6 +1,7 @@
 package state
 
 import (
+	"strings"
 	"testing"
 
 	search "github.com/kk-code-lab/rdir/internal/search"
@@ -96,7 +97,7 @@ func TestMatchFilterTokensNonContiguousMultiTokens(t *testing.T) {
 	}
 
 	name := "root/project/docs/DSP/html/ftv2cl.png"
-	score, matched := matchFilterTokens(name, tokens, false, matcher)
+	score, matched := matchFilterTokens(name, strings.ToLower(name), tokens, false, matcher)
 	if !matched {
 		t.Fatalf("expected tokens to match %q, score=%.4f", name, score)
 	}
