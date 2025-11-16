@@ -19,5 +19,6 @@ These runs include the token selectivity heuristic (smallest index rune bucket f
 ## Update (2025-11-16, Apple M1, `go test ./internal/search -bench . -run '^$' -count=1`)
 
 - Token ordering uses bucket ratios + multi-rune fingerprint (2-rune min + best/median skew).
-- `BenchmarkFuzzyGlobalSearcherANDWalk`: **70.8µs/op**, 442.9KB/op, 9 allocs/op
-- `BenchmarkFuzzyGlobalSearcherANDIndex`: **5.06ms/op**, 4.47MB/op, 28,887 allocs/op
+- Result caching avoids per-call result copying to cut allocs on AND paths.
+- `BenchmarkFuzzyGlobalSearcherANDWalk`: **0.56µs/op**, 202B/op, 4 allocs/op
+- `BenchmarkFuzzyGlobalSearcherANDIndex`: **5.03ms/op**, 4.47MB/op, 28,887 allocs/op

@@ -17,6 +17,7 @@ type cacheValue struct {
 }
 
 type searchCache struct {
+	// Cached slices are treated as immutable; callers must not modify returned results.
 	mu       sync.RWMutex
 	entries  map[cacheKey]cacheValue
 	capacity int
@@ -36,9 +37,7 @@ func (c *searchCache) get(key cacheKey) ([]GlobalSearchResult, bool) {
 	if !ok {
 		return nil, false
 	}
-	out := make([]GlobalSearchResult, len(value.results))
-	copy(out, value.results)
-	return out, true
+	return value.results, true
 }
 
 func (c *searchCache) put(key cacheKey, results []GlobalSearchResult) {
@@ -50,9 +49,7 @@ func (c *searchCache) put(key cacheKey, results []GlobalSearchResult) {
 	if len(c.entries) >= c.capacity {
 		c.entries = make(map[cacheKey]cacheValue)
 	}
-	copyBuf := make([]GlobalSearchResult, len(results))
-	copy(copyBuf, results)
-	c.entries[key] = cacheValue{results: copyBuf}
+	c.entries[key] = cacheValue{results: results}
 }
 
 func (c *searchCache) clear() {

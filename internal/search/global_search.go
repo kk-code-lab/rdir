@@ -103,7 +103,7 @@ func (gs *GlobalSearcher) SearchRecursive(query string, caseSensitive bool) []Gl
 			return
 		}
 		select {
-		case done <- append([]GlobalSearchResult(nil), results...):
+		case done <- results:
 		default:
 		}
 	})
