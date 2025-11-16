@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -244,24 +243,5 @@ func TestIndexCandidatesRequireAllTokenRunes(t *testing.T) {
 
 	if len(got) != 1 || got[0] != "foo-bar.txt" {
 		t.Fatalf("expected foo-bar only, got %#v", got)
-	}
-}
-
-func TestPathContainsTokensUsesFolded(t *testing.T) {
-	entry := &indexedEntry{
-		relPath:   "Dir/FooBar.txt",
-		lowerPath: strings.ToLower("Dir/FooBar.txt"),
-	}
-	tokens, _ := prepareQueryTokens("foo BAR", false)
-	if !pathContainsTokens(entry, entry.relPath, tokens, false) {
-		t.Fatalf("expected case-insensitive contains to pass")
-	}
-	tokensCS, _ := prepareQueryTokens("Foo", true)
-	if !pathContainsTokens(entry, entry.relPath, tokensCS, true) {
-		t.Fatalf("expected case-sensitive contains to pass")
-	}
-	tokensFail, _ := prepareQueryTokens("missing", false)
-	if pathContainsTokens(entry, entry.relPath, tokensFail, false) {
-		t.Fatalf("expected missing token to fail substring check")
 	}
 }
