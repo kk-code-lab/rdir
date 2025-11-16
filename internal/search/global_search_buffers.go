@@ -57,3 +57,36 @@ func growResultBuffer(buf []GlobalSearchResult, minCap int) []GlobalSearchResult
 	releaseResultBuffer(buf)
 	return newBuf
 }
+
+var candidateIndexPool = sync.Pool{
+	New: func() any {
+		buf := make([]int, 0, 1024)
+		return &buf
+	},
+}
+
+func borrowCandidateBuffer(sizeHint int) []int {
+	if sizeHint <= 0 {
+		sizeHint = 1024
+	}
+	if v := candidateIndexPool.Get(); v != nil {
+		bufPtr := v.(*[]int)
+		buf := *bufPtr
+		if cap(buf) < sizeHint {
+			return make([]int, 0, sizeHint)
+		}
+		return buf[:0]
+	}
+	return make([]int, 0, sizeHint)
+}
+
+func releaseCandidateBuffer(buf []int) {
+	if buf == nil {
+		return
+	}
+	if cap(buf) > 1<<17 { // avoid holding very large buffers (~131k)
+		return
+	}
+	buf = buf[:0]
+	candidateIndexPool.Put(&buf)
+}

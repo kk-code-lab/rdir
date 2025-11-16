@@ -232,6 +232,7 @@ func TestIndexCandidatesRequireAllTokenRunes(t *testing.T) {
 	searcher.orderTokens(tokens)
 
 	candidates := searcher.indexCandidates(tokens, entries)
+	defer releaseCandidateBuffer(candidates)
 
 	got := make([]string, 0, len(candidates))
 	for _, idx := range candidates {

@@ -67,6 +67,7 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 			candidates[i] = i
 		}
 	}
+	defer releaseCandidateBuffer(candidates)
 
 	for _, idx := range candidates {
 		if idx < 0 || idx >= len(entries) {
@@ -169,7 +170,7 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 	}
 	gs.indexMu.Unlock()
 
-	filtered := make([]int, 0, len(bestBucket))
+	filtered := borrowCandidateBuffer(len(bestBucket))
 	if len(bestBucket) > 0 {
 		for _, idx := range bestBucket {
 			if idx < 0 || idx >= total {
@@ -183,7 +184,7 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 	}
 
 	// Fall back to scanning all entries when no bucket data exists.
-	filtered = make([]int, 0, total)
+	filtered = borrowCandidateBuffer(total)
 	for idx := range entries {
 		if entries[idx].runeBits.contains(requiredBits) {
 			filtered = append(filtered, idx)
