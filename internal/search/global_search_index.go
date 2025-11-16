@@ -81,9 +81,6 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 		}
 		entry := &entries[idx]
 		relPath := entry.relPath
-		if !pathContainsTokens(entry, relPath, tokens, caseSensitive) {
-			continue
-		}
 		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, indexSpanMode)
 		if !matched {
 			releasePositions(details.Positions)
@@ -661,31 +658,6 @@ func bucketContainsIndex(bucket []int, idx int) bool {
 	}
 	pos := sort.SearchInts(bucket, idx)
 	return pos < len(bucket) && bucket[pos] == idx
-}
-
-func pathContainsTokens(entry *indexedEntry, relPath string, tokens []queryToken, caseSensitive bool) bool {
-	if len(tokens) == 0 {
-		return true
-	}
-	if caseSensitive {
-		for _, t := range tokens {
-			if !strings.Contains(relPath, t.raw) {
-				return false
-			}
-		}
-		return true
-	}
-	lower := entry.lowerPath
-	for _, t := range tokens {
-		token := t.folded
-		if token == "" {
-			token = strings.ToLower(t.pattern)
-		}
-		if !strings.Contains(lower, token) {
-			return false
-		}
-	}
-	return true
 }
 
 func (gs *GlobalSearcher) emitProgress(mutator func(*IndexTelemetry)) {
