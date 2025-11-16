@@ -37,6 +37,11 @@ type indexFileRecord struct {
 
 var indexSpanMode = parseIndexSpanMode()
 
+const (
+	maxIntersectBuckets       = 4
+	bucketIntersectSizeFactor = 4
+)
+
 func parseIndexSpanMode() spanRequest {
 	switch strings.ToLower(os.Getenv("RDIR_INDEX_LAZY_SPANS")) {
 	case "full", "0", "false":
@@ -180,7 +185,6 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 		})
 	}
 
-	const maxIntersectBuckets = 3
 	bestBucketSize := len(entries)
 	if len(bucketInfos) > 0 && len(bucketInfos[0].bucket) < bestBucketSize {
 		bestBucketSize = len(bucketInfos[0].bucket)
@@ -188,11 +192,17 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 	filtered := borrowCandidateBuffer(bestBucketSize)
 
 	if len(bucketInfos) > 0 {
-		limit := len(bucketInfos)
-		if limit > maxIntersectBuckets {
-			limit = maxIntersectBuckets
-		}
 		base := bucketInfos[0].bucket
+		limit := 1
+		sizeThreshold := len(base) * bucketIntersectSizeFactor
+
+		for i := 1; i < len(bucketInfos) && limit < maxIntersectBuckets; i++ {
+			if sizeThreshold > 0 && len(bucketInfos[i].bucket) > sizeThreshold {
+				break
+			}
+			limit++
+		}
+
 		for _, idx := range base {
 			if idx < 0 || idx >= total {
 				continue
