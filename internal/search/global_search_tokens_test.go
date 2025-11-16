@@ -1,6 +1,7 @@
 package search
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -115,6 +116,33 @@ func TestTokenOrderingUsesFingerprintWhenBucketsTie(t *testing.T) {
 	}
 	if tokens[0].raw != "ge" {
 		t.Fatalf("expected token with rarer multi-rune fingerprint first, got %q", tokens[0].raw)
+	}
+}
+
+func TestTokenOrderingUsesDistributionSkew(t *testing.T) {
+	root := t.TempDir()
+	// x appears in 1 file, y and z in 5 each; xyz should outrank xy due to lower best/median skew.
+	writeTestFile(t, filepath.Join(root, "x_only.txt"))
+	for i := 0; i < 5; i++ {
+		writeTestFile(t, filepath.Join(root, fmt.Sprintf("y-%d.txt", i)))
+		writeTestFile(t, filepath.Join(root, fmt.Sprintf("z-%d.txt", i)))
+	}
+
+	searcher := NewGlobalSearcher(root, false, nil)
+	searcher.buildIndex(time.Now())
+
+	tokens, matchAll := prepareQueryTokens("xy xyz", false)
+	if matchAll {
+		t.Fatalf("expected tokens for query")
+	}
+
+	searcher.orderTokens(tokens)
+
+	if len(tokens) != 2 {
+		t.Fatalf("expected 2 tokens, got %d", len(tokens))
+	}
+	if tokens[0].raw != "xyz" {
+		t.Fatalf("expected token with better distribution skew first, got %q", tokens[0].raw)
 	}
 }
 
