@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,6 +76,9 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 		}
 		entry := &entries[idx]
 		relPath := entry.relPath
+		if !pathContainsTokens(entry, relPath, tokens, caseSensitive) {
+			continue
+		}
 		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, indexSpanMode)
 		if !matched {
 			releasePositions(details.Positions)
@@ -170,27 +174,40 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 	}
 	gs.indexMu.Unlock()
 
-	var bestBucket []int
-	bestSize := -1
-	for _, info := range bucketInfos {
-		if l := len(info.bucket); l > 0 && (bestSize == -1 || l < bestSize) {
-			bestBucket = info.bucket
-			bestSize = l
+	if len(bucketInfos) > 1 {
+		sort.Slice(bucketInfos, func(i, j int) bool {
+			return len(bucketInfos[i].bucket) < len(bucketInfos[j].bucket)
+		})
+	}
+
+	const maxIntersectBuckets = 3
+	bestBucketSize := len(entries)
+	if len(bucketInfos) > 0 && len(bucketInfos[0].bucket) < bestBucketSize {
+		bestBucketSize = len(bucketInfos[0].bucket)
+	}
+	filtered := borrowCandidateBuffer(bestBucketSize)
+
+	if len(bucketInfos) > 0 {
+		limit := len(bucketInfos)
+		if limit > maxIntersectBuckets {
+			limit = maxIntersectBuckets
 		}
-	}
-
-	sizeHint := len(entries)
-	if bestSize > 0 {
-		sizeHint = bestSize
-	}
-	filtered := borrowCandidateBuffer(sizeHint)
-
-	if len(bestBucket) > 0 {
-		for _, idx := range bestBucket {
+		base := bucketInfos[0].bucket
+		for _, idx := range base {
 			if idx < 0 || idx >= total {
 				continue
 			}
-			if entries[idx].runeBits.contains(requiredBits) {
+			if !entries[idx].runeBits.contains(requiredBits) {
+				continue
+			}
+			ok := true
+			for i := 1; i < limit; i++ {
+				if !bucketContainsIndex(bucketInfos[i].bucket, idx) {
+					ok = false
+					break
+				}
+			}
+			if ok {
 				filtered = append(filtered, idx)
 			}
 		}
@@ -626,6 +643,39 @@ func firstRune(s string) rune {
 		}
 	}
 	return 0
+}
+
+func bucketContainsIndex(bucket []int, idx int) bool {
+	if len(bucket) == 0 {
+		return false
+	}
+	pos := sort.SearchInts(bucket, idx)
+	return pos < len(bucket) && bucket[pos] == idx
+}
+
+func pathContainsTokens(entry *indexedEntry, relPath string, tokens []queryToken, caseSensitive bool) bool {
+	if len(tokens) == 0 {
+		return true
+	}
+	if caseSensitive {
+		for _, t := range tokens {
+			if !strings.Contains(relPath, t.raw) {
+				return false
+			}
+		}
+		return true
+	}
+	lower := entry.lowerPath
+	for _, t := range tokens {
+		token := t.folded
+		if token == "" {
+			token = strings.ToLower(t.pattern)
+		}
+		if !strings.Contains(lower, token) {
+			return false
+		}
+	}
+	return true
 }
 
 func (gs *GlobalSearcher) emitProgress(mutator func(*IndexTelemetry)) {
