@@ -260,6 +260,7 @@ func BenchmarkIndexCandidatesAND(b *testing.B) {
 			if len(candidates) == 0 {
 				b.Fatalf("expected candidates")
 			}
+			releaseCandidateBuffer(candidates)
 		}
 	})
 
