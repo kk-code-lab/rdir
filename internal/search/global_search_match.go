@@ -16,7 +16,7 @@ type queryToken struct {
 	runes   []rune
 }
 
-func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseSensitive bool, matchAll bool) (float64, bool, MatchDetails) {
+func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseSensitive bool, matchAll bool, wantSpans bool) (float64, bool, MatchDetails) {
 	if matchAll {
 		return 1.0, true, MatchDetails{
 			Start:        -1,
@@ -33,7 +33,7 @@ func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseS
 	pathRunes, pathBuf := acquireRunes(relPath, fold)
 	defer releaseRunes(pathBuf)
 
-	pathScore, pathDetails, ok := gs.aggregateTokenMatches(tokens, relPath, pathRunes)
+	pathScore, pathDetails, ok := gs.aggregateTokenMatches(tokens, relPath, pathRunes, wantSpans)
 	if !ok {
 		return 0, false, MatchDetails{}
 	}
@@ -51,7 +51,7 @@ func (gs *GlobalSearcher) matchTokens(tokens []queryToken, relPath string, caseS
 		if fileOffset < 0 {
 			fileOffset = 0
 		}
-		fileScore, fileDetails, fileOK := gs.aggregateTokenMatches(tokens, filename, fileRunes)
+		fileScore, fileDetails, fileOK := gs.aggregateTokenMatches(tokens, filename, fileRunes, wantSpans)
 		releaseRunes(fileBuf)
 
 		if fileOK && fileScore > bestScore {
@@ -283,7 +283,7 @@ func splitQueryTokens(query string) []string {
 	return tokens
 }
 
-func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string, textRunes []rune) (float64, MatchDetails, bool) {
+func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string, textRunes []rune, wantSpans bool) (float64, MatchDetails, bool) {
 	totalScore := 0.0
 	agg := MatchDetails{
 		Start:        math.MaxInt32,
@@ -292,7 +292,7 @@ func (gs *GlobalSearcher) aggregateTokenMatches(tokens []queryToken, text string
 	}
 
 	for _, token := range tokens {
-		score, matched, details := gs.matcher.MatchDetailedFromRunes(token.pattern, token.runes, text, textRunes)
+		score, matched, details := gs.matcher.MatchDetailedFromRunesWithSpans(token.pattern, token.runes, text, textRunes, wantSpans)
 		if !matched {
 			return 0, MatchDetails{}, false
 		}

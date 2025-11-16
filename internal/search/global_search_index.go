@@ -56,7 +56,7 @@ func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []Global
 		}
 		entry := &entries[idx]
 		relPath := entry.relPath
-		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll)
+		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, true)
 		if !matched {
 			continue
 		}

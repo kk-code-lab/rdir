@@ -181,11 +181,11 @@ func TestMatchRunesDPASCIIEqualsScalar(t *testing.T) {
 		asciiPattern, asciiPatternBuf := runeSliceToASCIIBytes(patternRunes)
 
 		scalarBoundary := acquireBoundaryBuffer(len(textRunes))
-		scoreScalar, matchedScalar, startScalar, endScalar, targetScalar, matchCountScalar, wordHitsScalar, spansScalar := fm.matchRunesDPScalar(patternRunes, textRunes, scalarBoundary, asciiText, asciiPattern)
+		scoreScalar, matchedScalar, startScalar, endScalar, targetScalar, matchCountScalar, wordHitsScalar, spansScalar := fm.matchRunesDPScalar(patternRunes, textRunes, scalarBoundary, asciiText, asciiPattern, true)
 		releaseBoundaryBuffer(scalarBoundary)
 
 		asciiBoundary := acquireBoundaryBuffer(len(textRunes))
-		scoreASCII, matchedASCII, startASCII, endASCII, targetASCII, matchCountASCII, wordHitsASCII, spansASCII, _ := fm.matchRunesDPASCII(patternRunes, textRunes, asciiBoundary, asciiText, asciiPattern)
+		scoreASCII, matchedASCII, startASCII, endASCII, targetASCII, matchCountASCII, wordHitsASCII, spansASCII, _ := fm.matchRunesDPASCII(patternRunes, textRunes, asciiBoundary, asciiText, asciiPattern, true)
 		releaseBoundaryBuffer(asciiBoundary)
 
 		releaseByteBuffer(asciiPatternBuf)
