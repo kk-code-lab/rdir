@@ -46,6 +46,8 @@ type PreviewPager struct {
 	lineWidths      []int
 	rawLines        []string
 	rawLineWidths   []int
+	rawSanitized    []string
+	rawSanitizedWid []int
 	formattedLines  []string
 	formattedWidths []int
 	formattedRules  []bool
@@ -95,19 +97,28 @@ func (p *PreviewPager) prepareContent() {
 		p.lineWidths = nil
 		p.rawLines = nil
 		p.rawLineWidths = nil
+		p.rawSanitized = nil
+		p.rawSanitizedWid = nil
 		p.charCount = textSource.CharCount()
 	} else {
 		if len(lines) == 0 {
 			lines = []string{""}
 		}
 		widths := make([]int, len(lines))
+		sanitized := make([]string, len(lines))
+		sanitizedWidths := make([]int, len(lines))
 		for i, line := range lines {
 			widths[i] = displayWidth(line)
+			safe := textutil.SanitizeTerminalText(line)
+			sanitized[i] = safe
+			sanitizedWidths[i] = displayWidth(safe)
 		}
 		p.lines = lines
 		p.lineWidths = widths
 		p.rawLines = lines
 		p.rawLineWidths = widths
+		p.rawSanitized = sanitized
+		p.rawSanitizedWid = sanitizedWidths
 		p.charCount = charCount
 	}
 
@@ -163,8 +174,13 @@ func (p *PreviewPager) updateDisplayLines() {
 		p.lines = p.formattedLines
 		p.lineWidths = p.formattedWidths
 	} else {
-		p.lines = p.rawLines
-		p.lineWidths = p.rawLineWidths
+		if len(p.rawSanitized) > 0 {
+			p.lines = p.rawSanitized
+			p.lineWidths = p.rawSanitizedWid
+		} else {
+			p.lines = p.rawLines
+			p.lineWidths = p.rawLineWidths
+		}
 	}
 }
 
@@ -726,6 +742,10 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 	if p.state != nil && p.state.PreviewData != nil && p.state.PreviewData.FormattedUnavailableReason != "" {
 		formatMode = "raw*"
 	}
+	hidden := "no"
+	if p.state != nil && p.state.PreviewData != nil && p.state.PreviewData.HiddenFormattingDetected {
+		hidden = "yes"
+	}
 
 	if p.wrapEnabled {
 		totalRows := p.totalRowCount()
@@ -741,8 +761,8 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 			endRow = totalRows
 		}
 		percent := p.progressPercent(startRow, totalRows)
-		return fmt.Sprintf("%d-%d/%d rows (%d lines, %d%%)  %d chars  wrap:%s fmt:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  f format  i info",
-			startRow, endRow, totalRows, totalLines, percent, charCount, wrap, formatMode, info)
+		return fmt.Sprintf("%d-%d/%d rows (%d lines, %d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  f format  i info",
+			startRow, endRow, totalRows, totalLines, percent, charCount, wrap, formatMode, hidden, info)
 	}
 
 	start := 0
@@ -757,8 +777,8 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		end = totalLines
 	}
 	percent := p.progressPercent(start, totalLines)
-	return fmt.Sprintf("%d-%d/%d lines (%d%%)  %d chars  wrap:%s fmt:%s info:%s  ↑↓/PgUp/PgDn scroll  Shift+↑/↓ ±10  ←/Esc/q exit  w/→ wrap  f format  i info",
-		start, end, totalLines, percent, charCount, wrap, formatMode, info)
+	return fmt.Sprintf("%d-%d/%d lines (%d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  Shift+↑/↓ ±10  ←/Esc/q exit  w/→ wrap  f format  i info",
+		start, end, totalLines, percent, charCount, wrap, formatMode, hidden, info)
 }
 
 func (p *PreviewPager) lineCount() int {
@@ -792,7 +812,7 @@ func (p *PreviewPager) totalCharCount() int {
 
 func (p *PreviewPager) lineAt(idx int) string {
 	if !p.showFormatted && p.rawTextSource != nil {
-		return p.rawTextSource.Line(idx)
+		return textutil.SanitizeTerminalText(p.rawTextSource.Line(idx))
 	}
 	if p.binaryMode {
 		if p.binarySource == nil {

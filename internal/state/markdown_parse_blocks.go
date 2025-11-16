@@ -7,14 +7,26 @@ import (
 	"unicode/utf8"
 )
 
+const markdownNestingLimit = 64
+
 func parseMarkdown(lines []string) markdownDocument {
 	blocks, _ := parseBlocks(lines, 0)
 	return markdownDocument{blocks: blocks}
 }
 
 func parseBlocks(lines []string, start int) ([]markdownBlock, int) {
+	return parseBlocksWithDepth(lines, start, 0)
+}
+
+func parseBlocksWithDepth(lines []string, start int, depth int) ([]markdownBlock, int) {
 	var blocks []markdownBlock
 	i := start
+	if depth >= markdownNestingLimit {
+		text := joinParagraphLines(lines[start:])
+		return []markdownBlock{
+			markdownParagraph{text: parseInline(text)},
+		}, len(lines)
+	}
 	for i < len(lines) {
 		line := lines[i]
 		if isBlankLine(line) {
@@ -46,7 +58,7 @@ func parseBlocks(lines []string, start int) ([]markdownBlock, int) {
 		}
 
 		if strings.HasPrefix(trimmed, ">") {
-			blockquote, next := parseBlockquote(lines, i)
+			blockquote, next := parseBlockquote(lines, i, depth)
 			blocks = append(blocks, blockquote)
 			i = next
 			continue
@@ -77,7 +89,7 @@ func parseBlocks(lines []string, start int) ([]markdownBlock, int) {
 			continue
 		}
 
-		if list, next, ok := parseList(lines, i); ok {
+		if list, next, ok := parseList(lines, i, depth); ok {
 			blocks = append(blocks, list)
 			i = next
 			continue
@@ -111,7 +123,7 @@ func parseParagraph(lines []string, start int) (markdownParagraph, int) {
 	return markdownParagraph{text: parseInline(text)}, i
 }
 
-func parseBlockquote(lines []string, start int) (markdownBlockquote, int) {
+func parseBlockquote(lines []string, start int, depth int) (markdownBlockquote, int) {
 	var quoteLines []string
 	i := start
 	for i < len(lines) {
@@ -131,7 +143,7 @@ func parseBlockquote(lines []string, start int) (markdownBlockquote, int) {
 		i++
 	}
 
-	children, _ := parseBlocks(quoteLines, 0)
+	children, _ := parseBlocksWithDepth(quoteLines, 0, depth+1)
 	return markdownBlockquote{blocks: children}, i
 }
 
@@ -220,7 +232,7 @@ type listMarker struct {
 	raw       string
 }
 
-func parseList(lines []string, start int) (markdownList, int, bool) {
+func parseList(lines []string, start int, depth int) (markdownList, int, bool) {
 	marker, ok := parseListMarker(lines[start])
 	if !ok {
 		return markdownList{}, start, false
@@ -305,7 +317,7 @@ func parseList(lines []string, start int) (markdownList, int, bool) {
 			i++
 		}
 
-		itemBlocks, _ := parseBlocks(itemLines, 0)
+		itemBlocks, _ := parseBlocksWithDepth(itemLines, 0, depth+1)
 		list.items = append(list.items, markdownListItem{blocks: itemBlocks})
 	}
 
