@@ -144,8 +144,11 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 		}
 	}
 
-	var bestBucket []int
-	bestBucketSize := -1
+	type bucketInfo struct {
+		rune   rune
+		bucket []int
+	}
+	var bucketInfos []bucketInfo
 
 	gs.indexMu.Lock()
 	if gs.indexRuneBuckets != nil {
@@ -160,17 +163,28 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 				}
 				seen[r] = struct{}{}
 				if bucket, ok := gs.indexRuneBuckets[r]; ok && len(bucket) > 0 {
-					if bestBucketSize == -1 || len(bucket) < bestBucketSize {
-						bestBucketSize = len(bucket)
-						bestBucket = bucket
-					}
+					bucketInfos = append(bucketInfos, bucketInfo{rune: r, bucket: bucket})
 				}
 			}
 		}
 	}
 	gs.indexMu.Unlock()
 
-	filtered := borrowCandidateBuffer(len(bestBucket))
+	var bestBucket []int
+	bestSize := -1
+	for _, info := range bucketInfos {
+		if l := len(info.bucket); l > 0 && (bestSize == -1 || l < bestSize) {
+			bestBucket = info.bucket
+			bestSize = l
+		}
+	}
+
+	sizeHint := len(entries)
+	if bestSize > 0 {
+		sizeHint = bestSize
+	}
+	filtered := borrowCandidateBuffer(sizeHint)
+
 	if len(bestBucket) > 0 {
 		for _, idx := range bestBucket {
 			if idx < 0 || idx >= total {
@@ -184,7 +198,7 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 	}
 
 	// Fall back to scanning all entries when no bucket data exists.
-	filtered = borrowCandidateBuffer(total)
+	filtered = filtered[:0]
 	for idx := range entries {
 		if entries[idx].runeBits.contains(requiredBits) {
 			filtered = append(filtered, idx)
