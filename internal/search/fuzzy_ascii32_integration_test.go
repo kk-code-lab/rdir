@@ -44,12 +44,12 @@ func TestASCII32EqualsScalarWhenForced(t *testing.T) {
 		asciiText, asciiTextBuf := runeSliceToASCIIBytes(trunes)
 		asciiPattern, asciiPatternBuf := runeSliceToASCIIBytes(prunes)
 		boundary := acquireBoundaryBuffer(len(trunes))
-		sScore, sMatched, sStart, sEnd, sLen, sCount, sHits, sSpans := fm.matchRunesDPScalar(prunes, trunes, boundary, asciiText, asciiPattern)
+		sScore, sMatched, sStart, sEnd, sLen, sCount, sHits, sSpans := fm.matchRunesDPScalar(prunes, trunes, boundary, asciiText, asciiPattern, true)
 		releaseBoundaryBuffer(boundary)
 
 		// ASCII32 path via matchRunesDP (SIMD gate disabled, ASCII32 forced)
 		boundary2 := acquireBoundaryBuffer(len(trunes))
-		aScore, aMatched, aStart, aEnd, aLen, aCount, aHits, aSpans := fm.matchRunesDP(prunes, trunes, boundary2, asciiText, asciiPattern)
+		aScore, aMatched, aStart, aEnd, aLen, aCount, aHits, aSpans := fm.matchRunesDP(prunes, trunes, boundary2, asciiText, asciiPattern, true)
 		releaseBoundaryBuffer(boundary2)
 
 		releaseByteBuffer(asciiPatternBuf)

@@ -2,8 +2,8 @@
 
 package search
 
-func (fm *FuzzyMatcher) matchRunesDPASCII(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int, []MatchSpan, bool) {
-	score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
+func (fm *FuzzyMatcher) matchRunesDPASCII(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte, wantSpans bool) (float64, bool, int, int, int, int, int, []MatchSpan, bool) {
+	score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern, wantSpans)
 	return score, matched, start, end, targetLen, matchCount, wordHits, spans, true
 }
 

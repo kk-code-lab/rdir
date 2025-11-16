@@ -102,7 +102,7 @@ func (gs *GlobalSearcher) collectIndexRange(acc *asyncAccumulator, start, end in
 	for i := range entries {
 		entry := &entries[i]
 		relPath := entry.relPath
-		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll)
+		score, matched, details := gs.matchTokens(tokens, relPath, caseSensitive, matchAll, true)
 		if !matched {
 			continue
 		}

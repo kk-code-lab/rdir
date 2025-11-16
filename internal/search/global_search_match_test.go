@@ -17,7 +17,7 @@ func TestMatchTokensAllowsNonContiguousMultiTokenQueries(t *testing.T) {
 	}
 
 	path := "root/project/docs/DSP/html/ftv2cl.png"
-	score, matched, _ := gs.matchTokens(tokens, path, false, matchAll)
+	score, matched, _ := gs.matchTokens(tokens, path, false, matchAll, true)
 	if !matched {
 		t.Fatalf("expected query %q to match %q", query, path)
 	}
@@ -38,7 +38,7 @@ func TestMatchTokensPropagatesMatcherSpans(t *testing.T) {
 	}
 
 	path := "third_party/newlib-cygwin/newlib/README"
-	_, matched, details := gs.matchTokens(tokens, path, false, matchAll)
+	_, matched, details := gs.matchTokens(tokens, path, false, matchAll, true)
 	if !matched {
 		t.Fatalf("expected query %q to match %q", query, path)
 	}

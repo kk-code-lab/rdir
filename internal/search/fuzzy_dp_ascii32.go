@@ -4,11 +4,11 @@ package search
 
 import "math"
 
-func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte) (float64, bool, int, int, int, int, int, []MatchSpan, bool) {
+func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *boundaryBuffer, asciiText, asciiPattern []byte, wantSpans bool) (float64, bool, int, int, int, int, int, []MatchSpan, bool) {
 	m := len(pattern)
 	n := len(text)
 	if n == 0 || m == 0 || m > n {
-		score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
+		score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern, wantSpans)
 		return score, matched, start, end, targetLen, matchCount, wordHits, spans, true
 	}
 
@@ -26,7 +26,7 @@ func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *b
 
 	fallback := func() (float64, bool, int, int, int, int, int, []MatchSpan, bool) {
 		releaseDPScratch(s)
-		score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern)
+		score, matched, start, end, targetLen, matchCount, wordHits, spans := fm.matchRunesDPScalar(pattern, text, boundaryBuf, asciiText, asciiPattern, wantSpans)
 		return score, matched, start, end, targetLen, matchCount, wordHits, spans, true
 	}
 
@@ -194,7 +194,7 @@ func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *b
 			releaseDPScratch(s)
 			return 0.0, false, -1, -1, n, 0, 0, nil, true
 		}
-		positions := make([]int, m)
+		positions := s.positions[:m]
 		k := bestEnd
 		for i := m - 1; i >= 0; i-- {
 			positions[i] = k
@@ -224,7 +224,10 @@ func (fm *FuzzyMatcher) matchRunesDPASCII32(pattern, text []rune, boundaryBuf *b
 		}
 		start := positions[0]
 		end := positions[m-1]
-		spans := makeMatchSpansFromPositions(positions)
+		var spans []MatchSpan
+		if wantSpans {
+			spans = makeMatchSpansFromPositions(positions)
+		}
 		releaseDPScratch(s)
 		return score, true, start, end, n, m, hits, spans, true
 	}
