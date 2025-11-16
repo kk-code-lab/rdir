@@ -166,14 +166,18 @@ func (gs *GlobalSearcher) orderTokens(tokens []queryToken) {
 	}
 
 	type tokenOrderScore struct {
-		bucketSize int
-		length     int
+		selectivity float64
+		bestRatio   float64
+		length      int
 	}
 
+	totalEntriesFloat := float64(totalEntries)
 	scores := make([]tokenOrderScore, len(tokens))
 	for i, token := range tokens {
 		length := len(token.runes)
 		best := totalEntries
+		second := totalEntries
+		seen := make(map[rune]struct{})
 		source := token.folded
 		if source == "" {
 			source = token.pattern
@@ -182,23 +186,43 @@ func (gs *GlobalSearcher) orderTokens(tokens []queryToken) {
 			if !isRuneIndexable(r) {
 				continue
 			}
+			if _, ok := seen[r]; ok {
+				continue
+			}
+			seen[r] = struct{}{}
 			if size, ok := bucketSizes[r]; ok {
 				if size < best {
+					second = best
 					best = size
+				} else if size < second {
+					second = size
 				}
 			} else if best > 0 {
+				second = best
 				best = 0
 			}
 		}
+		bestRatio := float64(best) / totalEntriesFloat
+		selectivity := bestRatio
+		if len(seen) >= 2 {
+			pairRatio := (float64(best) * float64(second)) / (totalEntriesFloat * totalEntriesFloat)
+			if pairRatio < selectivity {
+				selectivity = pairRatio
+			}
+		}
 		scores[i] = tokenOrderScore{
-			bucketSize: best,
-			length:     length,
+			selectivity: selectivity,
+			bestRatio:   bestRatio,
+			length:      length,
 		}
 	}
 
 	sort.SliceStable(tokens, func(i, j int) bool {
-		if scores[i].bucketSize != scores[j].bucketSize {
-			return scores[i].bucketSize < scores[j].bucketSize
+		if scores[i].selectivity != scores[j].selectivity {
+			return scores[i].selectivity < scores[j].selectivity
+		}
+		if scores[i].bestRatio != scores[j].bestRatio {
+			return scores[i].bestRatio < scores[j].bestRatio
 		}
 		if scores[i].length != scores[j].length {
 			return scores[i].length > scores[j].length

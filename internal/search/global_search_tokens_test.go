@@ -89,6 +89,35 @@ func TestTokenOrderingUsesRuneBucketSelectivity(t *testing.T) {
 	}
 }
 
+func TestTokenOrderingUsesFingerprintWhenBucketsTie(t *testing.T) {
+	root := t.TempDir()
+	// g appears once, e is less common than f so the ge token should sort ahead of gf.
+	writeTestFile(t, filepath.Join(root, "ge.txt"))
+	writeTestFile(t, filepath.Join(root, "e-1.txt"))
+	writeTestFile(t, filepath.Join(root, "e-2.txt"))
+	writeTestFile(t, filepath.Join(root, "f-1.txt"))
+	writeTestFile(t, filepath.Join(root, "f-2.txt"))
+	writeTestFile(t, filepath.Join(root, "f-3.txt"))
+	writeTestFile(t, filepath.Join(root, "f-4.txt"))
+
+	searcher := NewGlobalSearcher(root, false, nil)
+	searcher.buildIndex(time.Now())
+
+	tokens, matchAll := prepareQueryTokens("gf ge", false)
+	if matchAll {
+		t.Fatalf("expected tokens for query")
+	}
+
+	searcher.orderTokens(tokens)
+
+	if len(tokens) != 2 {
+		t.Fatalf("expected 2 tokens, got %d", len(tokens))
+	}
+	if tokens[0].raw != "ge" {
+		t.Fatalf("expected token with rarer multi-rune fingerprint first, got %q", tokens[0].raw)
+	}
+}
+
 func collectResultFiles(results []GlobalSearchResult) []string {
 	var names []string
 	seen := map[string]bool{}
