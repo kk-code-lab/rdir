@@ -37,11 +37,6 @@ type indexFileRecord struct {
 
 var indexSpanMode = parseIndexSpanMode()
 
-const (
-	maxIntersectBuckets       = 4
-	bucketIntersectSizeFactor = 4
-)
-
 func parseIndexSpanMode() spanRequest {
 	switch strings.ToLower(os.Getenv("RDIR_INDEX_LAZY_SPANS")) {
 	case "full", "0", "false":
@@ -182,39 +177,19 @@ func (gs *GlobalSearcher) indexCandidates(tokens []queryToken, entries []indexed
 		})
 	}
 
-	bestBucketSize := len(entries)
-	if len(bucketInfos) > 0 && len(bucketInfos[0].bucket) < bestBucketSize {
-		bestBucketSize = len(bucketInfos[0].bucket)
+	sizeHint := len(entries)
+	if len(bucketInfos) > 0 && len(bucketInfos[0].bucket) < sizeHint {
+		sizeHint = len(bucketInfos[0].bucket)
 	}
-	filtered := borrowCandidateBuffer(bestBucketSize)
+	filtered := borrowCandidateBuffer(sizeHint)
 
 	if len(bucketInfos) > 0 {
-		base := bucketInfos[0].bucket
-		limit := 1
-		sizeThreshold := len(base) * bucketIntersectSizeFactor
-
-		for i := 1; i < len(bucketInfos) && limit < maxIntersectBuckets; i++ {
-			if sizeThreshold > 0 && len(bucketInfos[i].bucket) > sizeThreshold {
-				break
-			}
-			limit++
-		}
-
-		for _, idx := range base {
+		bestBucket := bucketInfos[0].bucket
+		for _, idx := range bestBucket {
 			if idx < 0 || idx >= total {
 				continue
 			}
-			if !entries[idx].runeBits.contains(requiredBits) {
-				continue
-			}
-			ok := true
-			for i := 1; i < limit; i++ {
-				if !bucketContainsIndex(bucketInfos[i].bucket, idx) {
-					ok = false
-					break
-				}
-			}
-			if ok {
+			if entries[idx].runeBits.contains(requiredBits) {
 				filtered = append(filtered, idx)
 			}
 		}
@@ -650,14 +625,6 @@ func firstRune(s string) rune {
 		}
 	}
 	return 0
-}
-
-func bucketContainsIndex(bucket []int, idx int) bool {
-	if len(bucket) == 0 {
-		return false
-	}
-	pos := sort.SearchInts(bucket, idx)
-	return pos < len(bucket) && bucket[pos] == idx
 }
 
 func (gs *GlobalSearcher) emitProgress(mutator func(*IndexTelemetry)) {
