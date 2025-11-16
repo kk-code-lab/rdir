@@ -16,7 +16,7 @@
 - [ ] **Lower-case name cache**  
   Case-insensitive filtering/search constantly calls `strings.ToLower` per filename/path. Cache folded names in `AppState` (and refresh when directories reload) to reduce CPU/allocs on large trees.
 
-- [ ] **Result pooling**  
+- [x] **Result pooling**  
   `GlobalSearchResult`/`FileEntry` allocations still dominate AND benchmarks (~5 MB/op). Investigate pooling or avoiding `os.FileInfo` until a result is promoted by the collector.
 
 ## Testing & QA
