@@ -36,13 +36,14 @@ These runs include the token selectivity heuristic (smallest index rune bucket f
 ## Update (2025-11-16, Apple M1, `go test ./internal/search -bench IndexCandidates -run '^$' -count=1`)
 
 - Added `BenchmarkIndexCandidatesAND` to contrast bitset-bucket filtering vs a sequential fallback on ~205K indexed files.
-  - `BitsetBuckets`: **0.25ms/op**, 0.73KB/op, 7 allocs/op, ~5k candidates emitted
-  - `SequentialFallback`: **0.53ms/op**, 0B/op, 0 allocs/op
+  - `BitsetBuckets`: **0.69ms/op**, 1.18KB/op, 11 allocs/op, ~5k candidates after intersect/precheck
+  - `SequentialFallback`: **0.48ms/op**, 0B/op, 0 allocs/op
+  - Reports `candidates_pre`/`candidates_post` to make filtering impact visible.
 
 ## Plan (2025-11-16, prioritised steps for >1M entries)
 
-1. Expand index candidate filtering: bitset/bigrams over the full path, intersect buckets for all tokens to slash N before hitting the matcher.
-2. Add cheap pre-checks before DP: `strings.Contains` on `lowerPath` for each token and an upper-bound score guard vs the heap minimum to skip costly matches.
+1. ~~Expand index candidate filtering: bitset/bigrams over the full path, intersect buckets for all tokens to slash N before hitting the matcher.~~
+2. ~~Add cheap pre-checks before DP: `strings.Contains` on `lowerPath` for each token and an upper-bound score guard vs the heap minimum to skip costly matches.~~ (heap guard still pending)
 3. Cache pre-folded []rune + boundary bits in the index and reuse them in `matchTokens`, avoiding per-hit `acquireRunes`/`boundaryBuffer`.
 4. Parallelise candidate scoring (shards + worker pool + final top-K heap), with per-worker matchers/buffers to scale across cores.
 5. After validation, turn SIMD DP on by default (NEON DP32) and add AVX2 for amd64 so ASCII-heavy paths run through faster DP.
