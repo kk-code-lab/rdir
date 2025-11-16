@@ -262,7 +262,19 @@ func BenchmarkIndexCandidatesAND(b *testing.B) {
 			}
 			releaseCandidateBuffer(candidates)
 		}
-		b.ReportMetric(float64(len(searcher.indexCandidates(tokens, entries))), "candidates")
+		candidates := searcher.indexCandidates(tokens, entries)
+		post := 0
+		for _, idx := range candidates {
+			if idx < 0 || idx >= len(entries) {
+				continue
+			}
+			if pathContainsTokens(&entries[idx], entries[idx].relPath, tokens, false) {
+				post++
+			}
+		}
+		b.ReportMetric(float64(len(candidates)), "candidates_pre")
+		b.ReportMetric(float64(post), "candidates_post")
+		releaseCandidateBuffer(candidates)
 	})
 
 	b.Run("SequentialFallback", func(b *testing.B) {
