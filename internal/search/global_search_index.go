@@ -35,6 +35,7 @@ type indexFileRecord struct {
 
 func (gs *GlobalSearcher) searchIndex(query string, caseSensitive bool) []GlobalSearchResult {
 	tokens, matchAll := prepareQueryTokens(query, caseSensitive)
+	gs.orderTokens(tokens)
 	entries := gs.snapshotEntries(0, -1)
 	if matchAll {
 		return gs.collectAllIndexFrom(entries)

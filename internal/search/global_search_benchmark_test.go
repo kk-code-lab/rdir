@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -230,6 +231,7 @@ func BenchmarkGlobalSearcherAsyncWalk(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		done := make(chan struct{})
+		var once sync.Once
 		searcher.SearchRecursiveAsync("file", false, func(results []GlobalSearchResult, isDone bool, inProgress bool) {
 			if !isDone {
 				return
@@ -237,7 +239,9 @@ func BenchmarkGlobalSearcherAsyncWalk(b *testing.B) {
 			if len(results) == 0 {
 				b.Fatalf("expected matches in async results")
 			}
-			close(done)
+			once.Do(func() {
+				close(done)
+			})
 		})
 		<-done
 	}

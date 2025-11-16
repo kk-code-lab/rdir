@@ -117,6 +117,96 @@ func prepareQueryTokens(query string, caseSensitive bool) ([]queryToken, bool) {
 	return tokens, false
 }
 
+// orderTokens reorders tokens to run the most selective ones first.
+// With an index in place we approximate selectivity using rune bucket sizes,
+// falling back to length-based ordering when index stats are unavailable.
+func (gs *GlobalSearcher) orderTokens(tokens []queryToken) {
+	if len(tokens) < 2 {
+		return
+	}
+
+	// Collect the unique indexable runes present in all tokens so we can
+	// snapshot only the bucket sizes we need while holding the mutex.
+	runeSet := make(map[rune]struct{})
+	for _, token := range tokens {
+		source := token.folded
+		if source == "" {
+			source = token.pattern
+		}
+		for _, r := range source {
+			if !isRuneIndexable(r) {
+				continue
+			}
+			runeSet[r] = struct{}{}
+		}
+	}
+
+	if len(runeSet) == 0 {
+		// Nothing indexable to rank by; keep existing order.
+		return
+	}
+
+	bucketSizes := make(map[rune]int, len(runeSet))
+	totalEntries := 0
+
+	gs.indexMu.Lock()
+	totalEntries = len(gs.indexEntries)
+	if gs.indexRuneBuckets != nil {
+		for r := range runeSet {
+			if bucket, ok := gs.indexRuneBuckets[r]; ok {
+				bucketSizes[r] = len(bucket)
+			}
+		}
+	}
+	gs.indexMu.Unlock()
+
+	if totalEntries == 0 || len(bucketSizes) == 0 {
+		// No index data yet; keep length ordering to avoid churn.
+		return
+	}
+
+	type tokenOrderScore struct {
+		bucketSize int
+		length     int
+	}
+
+	scores := make([]tokenOrderScore, len(tokens))
+	for i, token := range tokens {
+		length := len(token.runes)
+		best := totalEntries
+		source := token.folded
+		if source == "" {
+			source = token.pattern
+		}
+		for _, r := range source {
+			if !isRuneIndexable(r) {
+				continue
+			}
+			if size, ok := bucketSizes[r]; ok {
+				if size < best {
+					best = size
+				}
+			} else if best > 0 {
+				best = 0
+			}
+		}
+		scores[i] = tokenOrderScore{
+			bucketSize: best,
+			length:     length,
+		}
+	}
+
+	sort.SliceStable(tokens, func(i, j int) bool {
+		if scores[i].bucketSize != scores[j].bucketSize {
+			return scores[i].bucketSize < scores[j].bucketSize
+		}
+		if scores[i].length != scores[j].length {
+			return scores[i].length > scores[j].length
+		}
+		return tokens[i].raw < tokens[j].raw
+	})
+}
+
 func splitQueryTokens(query string) []string {
 	var tokens []string
 	start := -1

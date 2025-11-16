@@ -26,6 +26,7 @@ func (gs *GlobalSearcher) SearchRecursiveAsync(query string, caseSensitive bool,
 	}
 
 	tokens, matchAll := prepareQueryTokens(query, caseSensitive)
+	gs.orderTokens(tokens)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	token := gs.setCancel(cancel)
