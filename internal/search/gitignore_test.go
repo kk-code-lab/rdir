@@ -4,14 +4,62 @@ import (
 	"testing"
 )
 
+type gitignoreMatchTest struct {
+	name          string
+	gitignore     string
+	path          string
+	gitignorePath string
+	shouldIgnore  bool
+}
+
+type gitignoreMatchWithTypeTest struct {
+	name          string
+	gitignore     string
+	path          string
+	gitignorePath string
+	shouldIgnore  bool
+	isDir         bool
+}
+
+func runGitignoreMatchTests(t *testing.T, tests []gitignoreMatchTest) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			matcher := NewGitignoreMatcher()
+			path := tt.gitignorePath
+			if path == "" {
+				path = "."
+			}
+			matcher.AddPatterns(tt.gitignore, path)
+			result := matcher.Match(tt.path)
+			if result != tt.shouldIgnore {
+				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
+			}
+		})
+	}
+}
+
+func runGitignoreMatchWithTypeTests(t *testing.T, tests []gitignoreMatchWithTypeTest) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			matcher := NewGitignoreMatcher()
+			path := tt.gitignorePath
+			if path == "" {
+				path = "."
+			}
+			matcher.AddPatterns(tt.gitignore, path)
+			result := matcher.MatchWithType(tt.path, tt.isDir)
+			if result != tt.shouldIgnore {
+				t.Errorf("expected %v, got %v for path %q (isDir: %v)", tt.shouldIgnore, result, tt.path, tt.isDir)
+			}
+		})
+	}
+}
+
 // TestEmptyLinesAndComments tests that empty lines and comments are ignored
 func TestEmptyLinesAndComments(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		shouldIgnore bool
-	}{
+	runGitignoreMatchTests(t, []gitignoreMatchTest{
 		{
 			name: "empty line is ignored",
 			gitignore: `
@@ -45,28 +93,12 @@ func TestEmptyLinesAndComments(t *testing.T) {
 			path:         "test.log",
 			shouldIgnore: true,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.Match(tt.path)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
-			}
-		})
-	}
+	})
 }
 
 // TestNegationPatterns tests the ! prefix for negating patterns
 func TestNegationPatterns(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		shouldIgnore bool
-	}{
+	runGitignoreMatchTests(t, []gitignoreMatchTest{
 		{
 			name: "negation reverses ignore",
 			gitignore: `*.log
@@ -102,120 +134,79 @@ debug.log`,
 			path:         "debug.log",
 			shouldIgnore: true,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.Match(tt.path)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
-			}
-		})
-	}
+	})
 }
 
 // TestDirectoriesVsFiles tests the trailing slash for directory-only patterns
 func TestDirectoriesVsFiles(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		isDir        bool
-		shouldIgnore bool
-	}{
+	runGitignoreMatchWithTypeTests(t, []gitignoreMatchWithTypeTest{
 		{
 			name:         "trailing slash matches only directories",
 			gitignore:    `build/`,
 			path:         "build",
-			isDir:        true,
 			shouldIgnore: true,
+			isDir:        true,
 		},
 		{
 			name:         "trailing slash doesn't match file",
 			gitignore:    `build/`,
 			path:         "build",
-			isDir:        false,
 			shouldIgnore: false,
 		},
 		{
 			name:         "pattern without slash matches both file and directory",
 			gitignore:    `build`,
 			path:         "build",
-			isDir:        true,
 			shouldIgnore: true,
+			isDir:        true,
 		},
 		{
 			name:         "pattern without slash matches file",
 			gitignore:    `build`,
 			path:         "build",
-			isDir:        false,
 			shouldIgnore: true,
 		},
 		{
 			name:         "trailing slash in nested directory",
 			gitignore:    `dist/`,
 			path:         "dist",
-			isDir:        true,
 			shouldIgnore: true,
+			isDir:        true,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.MatchWithType(tt.path, tt.isDir)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q (isDir: %v)", tt.shouldIgnore, result, tt.path, tt.isDir)
-			}
-		})
-	}
+	})
 }
 
 // TestAnchoring tests path anchoring with leading slashes
 func TestAnchoring(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		isDir        bool
-		shouldIgnore bool
-	}{
+	runGitignoreMatchWithTypeTests(t, []gitignoreMatchWithTypeTest{
 		{
 			name:         "no slash - matches anywhere",
 			gitignore:    `*.log`,
 			path:         "logs/debug.log",
-			isDir:        false,
 			shouldIgnore: true,
 		},
 		{
 			name:         "leading slash - anchors to root",
 			gitignore:    `/*.log`,
 			path:         "debug.log",
-			isDir:        false,
 			shouldIgnore: true,
 		},
 		{
 			name:         "leading slash - doesn't match in subdirectories",
 			gitignore:    `/*.log`,
 			path:         "logs/debug.log",
-			isDir:        false,
 			shouldIgnore: false,
 		},
 		{
 			name:         "slash in middle - restricts wildcards",
 			gitignore:    `docs/*.html`,
 			path:         "docs/guide.html",
-			isDir:        false,
 			shouldIgnore: true,
 		},
 		{
 			name:         "slash in middle - doesn't cross directories",
 			gitignore:    `docs/*.html`,
 			path:         "docs/en/guide.html",
-			isDir:        false,
 			shouldIgnore: false,
 		},
 		{
@@ -232,28 +223,12 @@ func TestAnchoring(t *testing.T) {
 			isDir:        true,
 			shouldIgnore: false,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.MatchWithType(tt.path, tt.isDir)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q (isDir: %v)", tt.shouldIgnore, result, tt.path, tt.isDir)
-			}
-		})
-	}
+	})
 }
 
 // TestDoubleStarPatterns tests ** wildcard handling
 func TestDoubleStarPatterns(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		shouldIgnore bool
-	}{
+	runGitignoreMatchTests(t, []gitignoreMatchTest{
 		{
 			name:         "** at start matches anywhere",
 			gitignore:    `**/foo`,
@@ -314,28 +289,12 @@ func TestDoubleStarPatterns(t *testing.T) {
 			path:         "a/b/c",
 			shouldIgnore: false,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.Match(tt.path)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
-			}
-		})
-	}
+	})
 }
 
 // TestWildcards tests single character and multi-character wildcards
 func TestWildcards(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		shouldIgnore bool
-	}{
+	runGitignoreMatchTests(t, []gitignoreMatchTest{
 		{
 			name:         "? matches single character",
 			gitignore:    `file?.txt`,
@@ -396,28 +355,12 @@ func TestWildcards(t *testing.T) {
 			path:         "archive.tar.gz",
 			shouldIgnore: true,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.Match(tt.path)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
-			}
-		})
-	}
+	})
 }
 
 // TestTrailingSpaces tests handling of trailing spaces
 func TestTrailingSpaces(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		shouldIgnore bool
-	}{
+	runGitignoreMatchTests(t, []gitignoreMatchTest{
 		{
 			name:         "trailing spaces are ignored",
 			gitignore:    `*.log   `,
@@ -436,28 +379,12 @@ func TestTrailingSpaces(t *testing.T) {
 			path:         "pattern",
 			shouldIgnore: false,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.Match(tt.path)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
-			}
-		})
-	}
+	})
 }
 
 // TestSequentialPatterns tests that patterns are checked in order and last match wins
 func TestSequentialPatterns(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		shouldIgnore bool
-	}{
+	runGitignoreMatchTests(t, []gitignoreMatchTest{
 		{
 			name: "last matching pattern wins - ignore wins",
 			gitignore: `*.log
@@ -482,28 +409,12 @@ debug.log`,
 			path:         "debug.log",
 			shouldIgnore: true,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.Match(tt.path)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
-			}
-		})
-	}
+	})
 }
 
 // TestComplexExamples tests real-world examples from gitignore documentation
 func TestComplexExamples(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		shouldIgnore bool
-	}{
+	runGitignoreMatchTests(t, []gitignoreMatchTest{
 		{
 			name: "ignore build directory and keep gitkeep",
 			gitignore: `build/
@@ -555,28 +466,12 @@ func TestComplexExamples(t *testing.T) {
 			path:         "doc/server/arch.txt",
 			shouldIgnore: true,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.Match(tt.path)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
-			}
-		})
-	}
+	})
 }
 
 // TestLeadingWhitespace tests that leading whitespace is preserved
 func TestLeadingWhitespace(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		shouldIgnore bool
-	}{
+	runGitignoreMatchTests(t, []gitignoreMatchTest{
 		{
 			name:         "leading spaces are preserved in pattern",
 			gitignore:    `  *.log`,
@@ -589,29 +484,12 @@ func TestLeadingWhitespace(t *testing.T) {
 			path:         "debug.log",
 			shouldIgnore: false, // Different spacing doesn't match
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.Match(tt.path)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
-			}
-		})
-	}
+	})
 }
 
 // TestNestedGitignore tests multiple .gitignore files in different directories
 func TestNestedGitignore(t *testing.T) {
-	tests := []struct {
-		name          string
-		gitignorePath string
-		gitignore     string
-		path          string
-		shouldIgnore  bool
-	}{
+	runGitignoreMatchTests(t, []gitignoreMatchTest{
 		{
 			name:          "pattern relative to gitignore location",
 			gitignorePath: "logs",
@@ -626,29 +504,12 @@ func TestNestedGitignore(t *testing.T) {
 			path:          "docs/guide.pdf",
 			shouldIgnore:  true,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, tt.gitignorePath)
-			result := matcher.Match(tt.path)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q", tt.shouldIgnore, result, tt.path)
-			}
-		})
-	}
+	})
 }
 
 // TestEdgeCases tests special cases and edge cases
 func TestEdgeCases(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		path         string
-		isDir        bool
-		shouldIgnore bool
-	}{
+	runGitignoreMatchWithTypeTests(t, []gitignoreMatchWithTypeTest{
 		{
 			name:         "backslash at end of line",
 			gitignore:    `pattern\`,
@@ -684,16 +545,5 @@ func TestEdgeCases(t *testing.T) {
 			isDir:        true,
 			shouldIgnore: true,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewGitignoreMatcher()
-			matcher.AddPatterns(tt.gitignore, ".")
-			result := matcher.MatchWithType(tt.path, tt.isDir)
-			if result != tt.shouldIgnore {
-				t.Errorf("expected %v, got %v for path %q (isDir: %v)", tt.shouldIgnore, result, tt.path, tt.isDir)
-			}
-		})
-	}
+	})
 }

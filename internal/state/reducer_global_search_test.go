@@ -753,11 +753,12 @@ func TestGlobalSearchClearAction(t *testing.T) {
 	}
 }
 
-func TestGlobalSearchNavigateUp(t *testing.T) {
+func runGlobalSearchNavigationTest(t *testing.T, initialIndex int, direction string, expected []int) {
+	t.Helper()
 	state := &AppState{
 		CurrentPath:        "/test",
 		GlobalSearchActive: true,
-		GlobalSearchIndex:  2,
+		GlobalSearchIndex:  initialIndex,
 		GlobalSearchResults: []GlobalSearchResult{
 			{FilePath: "/test/file1.txt", FileName: "file1.txt"},
 			{FilePath: "/test/file2.txt", FileName: "file2.txt"},
@@ -768,75 +769,23 @@ func TestGlobalSearchNavigateUp(t *testing.T) {
 
 	reducer := NewStateReducer()
 
-	// Navigate up
-	if _, err := reducer.Reduce(state, GlobalSearchNavigateAction{Direction: "up"}); err != nil {
-		t.Fatalf("Failed to navigate up: %v", err)
-	}
+	for step, want := range expected {
+		if _, err := reducer.Reduce(state, GlobalSearchNavigateAction{Direction: direction}); err != nil {
+			t.Fatalf("Failed to navigate %s on step %d: %v", direction, step+1, err)
+		}
 
-	if state.GlobalSearchIndex != 1 {
-		t.Errorf("GlobalSearch index should be 1, got %d", state.GlobalSearchIndex)
-	}
-
-	// Navigate up again
-	if _, err := reducer.Reduce(state, GlobalSearchNavigateAction{Direction: "up"}); err != nil {
-		t.Fatalf("Failed to navigate up: %v", err)
-	}
-
-	if state.GlobalSearchIndex != 0 {
-		t.Errorf("GlobalSearch index should be 0, got %d", state.GlobalSearchIndex)
-	}
-
-	// Navigate up at top (should not move)
-	if _, err := reducer.Reduce(state, GlobalSearchNavigateAction{Direction: "up"}); err != nil {
-		t.Fatalf("Failed to navigate up: %v", err)
-	}
-
-	if state.GlobalSearchIndex != 0 {
-		t.Errorf("GlobalSearch index should stay at 0, got %d", state.GlobalSearchIndex)
+		if state.GlobalSearchIndex != want {
+			t.Fatalf("GlobalSearch index should be %d after step %d going %s, got %d", want, step+1, direction, state.GlobalSearchIndex)
+		}
 	}
 }
 
+func TestGlobalSearchNavigateUp(t *testing.T) {
+	runGlobalSearchNavigationTest(t, 2, "up", []int{1, 0, 0})
+}
+
 func TestGlobalSearchNavigateDown(t *testing.T) {
-	state := &AppState{
-		CurrentPath:        "/test",
-		GlobalSearchActive: true,
-		GlobalSearchIndex:  1,
-		GlobalSearchResults: []GlobalSearchResult{
-			{FilePath: "/test/file1.txt", FileName: "file1.txt"},
-			{FilePath: "/test/file2.txt", FileName: "file2.txt"},
-			{FilePath: "/test/file3.txt", FileName: "file3.txt"},
-			{FilePath: "/test/file4.txt", FileName: "file4.txt"},
-		},
-	}
-
-	reducer := NewStateReducer()
-
-	// Navigate down
-	if _, err := reducer.Reduce(state, GlobalSearchNavigateAction{Direction: "down"}); err != nil {
-		t.Fatalf("Failed to navigate down: %v", err)
-	}
-
-	if state.GlobalSearchIndex != 2 {
-		t.Errorf("GlobalSearch index should be 2, got %d", state.GlobalSearchIndex)
-	}
-
-	// Navigate down to end
-	if _, err := reducer.Reduce(state, GlobalSearchNavigateAction{Direction: "down"}); err != nil {
-		t.Fatalf("Failed to navigate down: %v", err)
-	}
-
-	if state.GlobalSearchIndex != 3 {
-		t.Errorf("GlobalSearch index should be 3, got %d", state.GlobalSearchIndex)
-	}
-
-	// Navigate down at bottom (should not move)
-	if _, err := reducer.Reduce(state, GlobalSearchNavigateAction{Direction: "down"}); err != nil {
-		t.Fatalf("Failed to navigate down: %v", err)
-	}
-
-	if state.GlobalSearchIndex != 3 {
-		t.Errorf("GlobalSearch index should stay at 3, got %d", state.GlobalSearchIndex)
-	}
+	runGlobalSearchNavigationTest(t, 1, "down", []int{2, 3, 3})
 }
 
 func TestGlobalSearchOpenAction(t *testing.T) {
