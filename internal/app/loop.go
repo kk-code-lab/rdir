@@ -338,9 +338,7 @@ func (app *Application) handleSidebarClick(y int) bool {
 		return false
 	}
 
-	clickKey := fmt.Sprintf("sidebar-%d", row)
-	app.lastClickKey = clickKey
-	app.lastClickTime = time.Now()
+	_ = app.registerClick(fmt.Sprintf("sidebar-%d", row))
 
 	app.actionCh <- statepkg.GoUpAction{}
 	return true
