@@ -197,7 +197,7 @@ func TestCleanupTerminalRestoresCursorAndWrap(t *testing.T) {
 	p.cleanupTerminal()
 
 	written := buf.String()
-	expected := "\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?7h"
+	expected := "\x1b[?1007l\x1b[?25h\x1b[?7h"
 	if written != expected {
 		t.Fatalf("expected %q, got %q", expected, written)
 	}
@@ -264,8 +264,6 @@ func TestReadKeyEventShiftArrows(t *testing.T) {
 		{name: "shift-up", input: "\x1b[1;2A", want: keyShiftUp},
 		{name: "shift-down", input: "\x1b[1;2B", want: keyShiftDown},
 		{name: "ctrl-up", input: "\x1b[1;5A", want: keyUp},
-		{name: "mouse-wheel-up", input: "\x1b[<64;10;5M", want: keyMouseWheelUp},
-		{name: "mouse-wheel-down", input: "\x1b[<65;10;5M", want: keyMouseWheelDown},
 	}
 
 	for _, tc := range cases {
