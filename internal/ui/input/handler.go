@@ -67,6 +67,9 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 	case tcell.KeyCtrlC:
 		ih.actionChan <- statepkg.QuitAction{}
 		return false
+	case tcell.KeyCtrlZ:
+		ih.actionChan <- statepkg.SuspendAction{}
+		return true
 
 	case tcell.KeyUp:
 		if previewFullScreen {
