@@ -18,6 +18,8 @@ func (app *Application) resumeAfterStop() bool {
 	if err := app.screen.Resume(); err != nil {
 		return false
 	}
+	// Re-enable mouse reporting after resume
+	app.screen.EnableMouse()
 	app.screen.Sync()
 	_ = app.screen.PostEvent(tcell.NewEventInterrupt("resume"))
 	if w, h := app.screen.Size(); w > 0 && h > 0 {

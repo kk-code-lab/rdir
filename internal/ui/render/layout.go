@@ -105,7 +105,7 @@ func (r *Renderer) computeLayout(w int, state *statepkg.AppState) layoutMetrics 
 	}
 
 	metrics := layoutMetrics{}
-	metrics.sidebarWidth = r.sidebarWidthForWidth(w, state)
+	metrics.sidebarWidth = SidebarWidthForWidth(w, state)
 	if metrics.sidebarWidth > w {
 		metrics.sidebarWidth = w
 	}
@@ -184,7 +184,7 @@ func (r *Renderer) computeLayout(w int, state *statepkg.AppState) layoutMetrics 
 	return metrics
 }
 
-func (r *Renderer) sidebarWidthForWidth(w int, state *statepkg.AppState) int {
+func SidebarWidthForWidth(w int, state *statepkg.AppState) int {
 	if state != nil && state.GlobalSearchActive {
 		return 0
 	}
