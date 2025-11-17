@@ -761,10 +761,22 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		}
 		if state.PreviewData != nil {
 			state.PreviewFullScreen = true
-			if !state.restorePreviewScrollForPath(state.CurrentFilePath()) {
+			restored := state.restorePreviewScrollForPath(state.CurrentFilePath())
+			if !restored {
 				state.normalizePreviewScroll()
 			}
-			state.clampPreviewScroll()
+			if state.PreviewData.TextTruncated {
+				if state.PreviewScrollOffset < 0 {
+					state.PreviewScrollOffset = 0
+				}
+				if state.PreviewWrapOffset < 0 {
+					state.PreviewWrapOffset = 0
+				}
+				// Don't clamp downward for truncated previews; the pager will stream
+				// on demand to satisfy the remembered offset.
+			} else {
+				state.clampPreviewScroll()
+			}
 		}
 		return state, nil
 
@@ -772,6 +784,10 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		if state.PreviewFullScreen {
 			state.rememberPreviewScrollForCurrentFile()
 			state.PreviewFullScreen = false
+			// Reset inline preview to the top; the remembered position is kept
+			// in history and will be restored next time fullscreen pager opens.
+			state.normalizePreviewScroll()
+			state.clampPreviewScroll()
 		}
 		return state, nil
 

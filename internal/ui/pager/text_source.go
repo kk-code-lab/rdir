@@ -103,6 +103,13 @@ func (s *textPagerSource) CharCount() int {
 	return s.charCount
 }
 
+func (s *textPagerSource) FullyLoaded() bool {
+	if s == nil {
+		return true
+	}
+	return s.eof
+}
+
 func (s *textPagerSource) LineCount() int {
 	if s == nil {
 		return 0
