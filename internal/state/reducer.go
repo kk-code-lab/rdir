@@ -748,7 +748,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		return state, r.generatePreview(state)
 
 	case ScrollPageUpAction:
-		visibleLines := state.ScreenHeight - 4
+		visibleLines := state.visibleLines()
 		displayIdx := state.getDisplaySelectedIndex()
 		newIdx := displayIdx - visibleLines
 		if newIdx < 0 {
@@ -759,7 +759,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		return state, r.generatePreview(state)
 
 	case ScrollPageDownAction:
-		visibleLines := state.ScreenHeight - 4
+		visibleLines := state.visibleLines()
 		displayFiles := state.getDisplayFiles()
 		displayIdx := state.getDisplaySelectedIndex()
 		newIdx := displayIdx + visibleLines
@@ -1186,7 +1186,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			state.clearDesiredGlobalSearchSelection()
 			state.clearGlobalSearchPendingIndex()
 			// Jump up by viewport height
-			pageSize := state.ScreenHeight - 4 // Account for status bar and borders
+			pageSize := state.visibleLines() // Account for status bar and borders
 			newIdx := state.GlobalSearchIndex - pageSize
 			if newIdx < 0 {
 				newIdx = 0
@@ -1201,7 +1201,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			state.clearDesiredGlobalSearchSelection()
 			state.clearGlobalSearchPendingIndex()
 			// Jump down by viewport height
-			pageSize := state.ScreenHeight - 4 // Account for status bar and borders
+			pageSize := state.visibleLines() // Account for status bar and borders
 			newIdx := state.GlobalSearchIndex + pageSize
 			maxIdx := len(state.GlobalSearchResults) - 1
 			if newIdx > maxIdx {

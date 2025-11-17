@@ -118,7 +118,7 @@ func (s *AppState) clearGlobalSearchPendingIndex() {
 }
 
 func (s *AppState) updateGlobalSearchScroll() {
-	visibleLines := s.ScreenHeight - 4
+	visibleLines := s.visibleLines()
 	if visibleLines < 1 {
 		visibleLines = 1
 	}

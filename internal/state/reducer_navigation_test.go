@@ -168,9 +168,9 @@ func TestScrollPageDown(t *testing.T) {
 		t.Fatalf("Failed to scroll: %v", err)
 	}
 
-	// ScreenHeight 20 - 4 = 16 visible lines, so cursor should move 16 positions down
-	if state.SelectedIndex != 16 {
-		t.Errorf("Expected selected at 16, got %d", state.SelectedIndex)
+	// ScreenHeight 20 -> 17 visible lines, so cursor moves 17 positions down
+	if state.SelectedIndex != 17 {
+		t.Errorf("Expected selected at 17, got %d", state.SelectedIndex)
 	}
 }
 
@@ -193,9 +193,9 @@ func TestScrollPageUp(t *testing.T) {
 		t.Fatalf("Failed to scroll: %v", err)
 	}
 
-	// ScreenHeight 20 - 4 = 16 visible lines, so cursor should move 16 positions up: 25 - 16 = 9
-	if state.SelectedIndex != 9 {
-		t.Errorf("Expected selected at 9, got %d", state.SelectedIndex)
+	// ScreenHeight 20 -> 17 visible lines, so cursor moves 17 positions up: 25 - 17 = 8
+	if state.SelectedIndex != 8 {
+		t.Errorf("Expected selected at 8, got %d", state.SelectedIndex)
 	}
 }
 
@@ -246,7 +246,7 @@ func TestScrollToEnd(t *testing.T) {
 		t.Errorf("Expected selection at %d, got %d", expected, state.SelectedIndex)
 	}
 	displayFiles := state.getDisplayFiles()
-	visibleLines := state.ScreenHeight - 4
+	visibleLines := state.visibleLines()
 	if len(displayFiles) > visibleLines && state.ScrollOffset != len(displayFiles)-visibleLines {
 		t.Errorf("Expected scroll offset to align end of list, got %d", state.ScrollOffset)
 	}
