@@ -404,10 +404,16 @@ func (p *PreviewPager) writeString(s string) {
 // terminal text selection still works.
 func (p *PreviewPager) enableAlternateScroll() {
 	p.writeString("\x1b[?1007h")
+	if p.writer != nil {
+		_ = p.writer.Flush()
+	}
 }
 
 func (p *PreviewPager) disableAlternateScroll() {
 	p.writeString("\x1b[?1007l")
+	if p.writer != nil {
+		_ = p.writer.Flush()
+	}
 }
 
 func (p *PreviewPager) printf(format string, args ...interface{}) {
