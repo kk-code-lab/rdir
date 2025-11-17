@@ -1,6 +1,9 @@
 package app
 
 import (
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -100,6 +103,10 @@ func (app *Application) Run() {
 		}
 	}()
 
+	sigContCh := make(chan os.Signal, 1)
+	signal.Notify(sigContCh, syscall.SIGCONT)
+	defer signal.Stop(sigContCh)
+
 	const animationInterval = 50 * time.Millisecond
 	var animationTimer *time.Timer
 	var animationCh <-chan time.Time
@@ -155,6 +162,10 @@ func (app *Application) Run() {
 			if app.handleAction(action) {
 				renderPending = true
 			}
+		case <-sigContCh:
+			if app.resumeAfterStop() {
+				renderPending = true
+			}
 		}
 
 		if app.processActions() {
@@ -175,6 +186,8 @@ func (app *Application) handleEvent(ev tcell.Event) bool {
 		if !app.input.ProcessEvent(ev) {
 			app.shouldQuit = true
 		}
+	case *tcell.EventInterrupt:
+		return true
 	default:
 		return false
 	}
@@ -215,6 +228,10 @@ func (app *Application) handleAction(action statepkg.Action) bool {
 		app.currentPath = app.state.CurrentPath
 		app.shouldQuit = true
 		return false
+	case statepkg.SuspendAction:
+		app.suspendToShell()
+		app.resumeAfterStop()
+		return true
 	}
 
 	return app.handleAppAction(action)
@@ -255,4 +272,23 @@ func (app *Application) runPreviewPager() (err error) {
 	}()
 
 	return view.Run()
+}
+
+func (app *Application) suspendToShell() {
+	// Return terminal control to the shell before stopping the process.
+	_ = app.screen.Suspend()
+	_ = syscall.Kill(0, syscall.SIGTSTP)
+}
+
+func (app *Application) resumeAfterStop() bool {
+	if err := app.screen.Resume(); err != nil {
+		return false
+	}
+	app.screen.Sync()
+	_ = app.screen.PostEvent(tcell.NewEventInterrupt("resume"))
+	if w, h := app.screen.Size(); w > 0 && h > 0 {
+		app.state.ScreenWidth = w
+		app.state.ScreenHeight = h
+	}
+	return true
 }
