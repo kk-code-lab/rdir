@@ -220,7 +220,7 @@ func TestPreviewPagerToggleFormatSwitchesViews(t *testing.T) {
 		PreviewData: preview,
 		CurrentPath: ".",
 	}
-	pager, err := NewPreviewPager(state)
+	pager, err := NewPreviewPager(state, nil, nil)
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
@@ -281,6 +281,89 @@ func TestReadKeyEventShiftArrows(t *testing.T) {
 				t.Fatalf("expected %v, got %v", tc.want, ev.kind)
 			}
 		})
+	}
+}
+
+func TestReadKeyEventEdit(t *testing.T) {
+	t.Parallel()
+	p := &PreviewPager{reader: bufio.NewReader(strings.NewReader("e"))}
+	ev, err := p.readKeyEvent()
+	if err != nil {
+		t.Fatalf("readKeyEvent: %v", err)
+	}
+	if ev.kind != keyOpenEditor {
+		t.Fatalf("expected keyOpenEditor, got %v", ev.kind)
+	}
+
+	p = &PreviewPager{reader: bufio.NewReader(strings.NewReader("E"))}
+	ev, err = p.readKeyEvent()
+	if err != nil {
+		t.Fatalf("readKeyEvent upper: %v", err)
+	}
+	if ev.kind != keyOpenEditor {
+		t.Fatalf("expected keyOpenEditor for upper, got %v", ev.kind)
+	}
+}
+
+func TestRestoreAfterEditorStreamingKeepsPosition(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.txt")
+	var builder strings.Builder
+	lineCount := 200
+	for i := 0; i < lineCount; i++ {
+		builder.WriteString(fmt.Sprintf("line %03d\n", i))
+	}
+	if err := os.WriteFile(path, []byte(builder.String()), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	lines := []string{"line 000", "line 001", "line 002", "line 003", "line 004"}
+	metas := make([]statepkg.TextLineMetadata, len(lines))
+	offset := int64(0)
+	for i, l := range lines {
+		metas[i] = statepkg.TextLineMetadata{
+			Offset:       offset,
+			Length:       len(l) + 1,
+			RuneCount:    len(l) + 1,
+			DisplayWidth: displayWidth(l + " \n"),
+		}
+		offset += int64(len(l) + 1)
+	}
+
+	preview := &statepkg.PreviewData{
+		Name:          "big.txt",
+		TextLines:     lines,
+		TextLineMeta:  metas,
+		TextBytesRead: offset,
+		TextTruncated: true,
+		TextEncoding:  fsutil.EncodingUnknown,
+	}
+	state := &statepkg.AppState{
+		CurrentPath: dir,
+		PreviewData: preview,
+	}
+
+	p := &PreviewPager{state: state, wrapEnabled: false, height: 20}
+	p.restoreAfterEditor(150, 0)
+
+	if got := p.state.PreviewScrollOffset; got != 150 {
+		t.Fatalf("scroll offset lost: got %d want 150", got)
+	}
+	if got := p.lineCount(); got <= 150 {
+		t.Fatalf("expected streamed lines to reach 151, got %d", got)
+	}
+}
+
+func TestHandleKeyEditorStaysOpen(t *testing.T) {
+	state := &statepkg.AppState{
+		CurrentPath:     ".",
+		PreviewData:     &statepkg.PreviewData{Name: "file.txt"},
+		EditorAvailable: true,
+	}
+	p := &PreviewPager{state: state, editorCmd: []string{}}
+	if done := p.handleKey(keyEvent{kind: keyOpenEditor}); done {
+		t.Fatalf("pager should stay open after editor")
 	}
 }
 

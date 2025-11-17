@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -33,12 +34,15 @@ var termGetSize = term.GetSize
 
 type PreviewPager struct {
 	state           *statepkg.AppState
+	editorCmd       []string
+	reducer         *statepkg.StateReducer
 	input           *os.File
 	outputFile      *os.File
 	output          io.Writer
 	reader          *bufio.Reader
 	writer          *bufio.Writer
 	restoreTerm     *term.State
+	stopKeyReader   func()
 	width           int
 	height          int
 	wrapEnabled     bool
@@ -62,15 +66,21 @@ type PreviewPager struct {
 	preloadLines    int
 	showInfo        bool
 	showFormatted   bool
+	lastErr         error
+	restartKeys     bool
 }
 
-func NewPreviewPager(state *statepkg.AppState) (*PreviewPager, error) {
+var pagerCommand = exec.Command
+
+func NewPreviewPager(state *statepkg.AppState, editorCmd []string, reducer *statepkg.StateReducer) (*PreviewPager, error) {
 	if state == nil || state.PreviewData == nil {
 		return nil, errors.New("preview data unavailable")
 	}
 	pager := &PreviewPager{
 		state:       state,
 		wrapEnabled: state.PreviewWrap,
+		editorCmd:   append([]string(nil), editorCmd...),
+		reducer:     reducer,
 	}
 	pager.prepareContent()
 	return pager, nil
@@ -219,7 +229,7 @@ func (p *PreviewPager) Run() error {
 	var keyEvents <-chan keyEvent
 	var keyErrs <-chan error
 	if resizeEvents != nil {
-		keyEvents, keyErrs = p.startKeyReader(done)
+		keyEvents, keyErrs, p.stopKeyReader = p.startKeyReader(done)
 	}
 
 	p.updateSize()
@@ -233,13 +243,21 @@ func (p *PreviewPager) Run() error {
 			needsRender = false
 		}
 
+		if p.restartKeys {
+			if p.stopKeyReader != nil {
+				p.stopKeyReader()
+			}
+			keyEvents, keyErrs, p.stopKeyReader = p.startKeyReader(done)
+			p.restartKeys = false
+		}
+
 		if resizeEvents == nil || keyEvents == nil {
 			event, err := p.readKeyEvent()
 			if err != nil {
 				return err
 			}
 			if done := p.handleKey(event); done {
-				return nil
+				return p.lastErr
 			}
 			needsRender = true
 			continue
@@ -250,7 +268,7 @@ func (p *PreviewPager) Run() error {
 			needsRender = true
 		case event := <-keyEvents:
 			if done := p.handleKey(event); done {
-				return nil
+				return p.lastErr
 			}
 			needsRender = true
 		case err := <-keyErrs:
@@ -728,6 +746,7 @@ func (p *PreviewPager) clampScroll(totalLines, visible int) {
 }
 
 func (p *PreviewPager) handleKey(ev keyEvent) bool {
+	p.lastErr = nil
 	contentRows := p.height - (len(p.headerLines()) + 1) - 1
 	if contentRows < 1 {
 		contentRows = 1
@@ -748,6 +767,15 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 	switch ev.kind {
 	case keyQuit, keyEscape, keyCtrlC, keyLeft:
 		return true
+	case keyOpenEditor:
+		if err := p.openInEditor(); err != nil {
+			p.lastErr = err
+			return true
+		}
+		totalLines = p.lineCount()
+		if p.wrapEnabled {
+			p.ensureRowMetrics()
+		}
 	case keyUp:
 		if p.wrapEnabled {
 			p.scrollRows(totalLines, -1)
@@ -824,6 +852,130 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 	return false
 }
 
+func (p *PreviewPager) openInEditor() error {
+	if p == nil || len(p.editorCmd) == 0 {
+		return nil
+	}
+	if p.state == nil || p.state.PreviewData == nil || p.state.PreviewData.IsDir {
+		return nil
+	}
+	if p.state != nil && !p.state.EditorAvailable {
+		return nil
+	}
+	if p.input == nil {
+		return errors.New("no tty available")
+	}
+
+	savedScroll := p.state.PreviewScrollOffset
+	savedWrap := p.state.PreviewWrapOffset
+
+	filePath := filepath.Join(p.state.CurrentPath, p.state.PreviewData.Name)
+
+	if p.stopKeyReader != nil {
+		p.stopKeyReader()
+		p.stopKeyReader = nil
+	}
+
+	if p.rawTextSource != nil {
+		p.rawTextSource.Close()
+		p.rawTextSource = nil
+	}
+	if p.binarySource != nil {
+		p.binarySource.Close()
+		p.binarySource = nil
+	}
+
+	if p.restoreTerm != nil {
+		_ = term.Restore(int(p.input.Fd()), p.restoreTerm)
+	}
+	p.writeString("\x1b[?25h")
+	p.writeString("\x1b[?7h")
+	if p.writer != nil {
+		_ = p.writer.Flush()
+	}
+
+	args := append([]string(nil), p.editorCmd...)
+	args = append(args, filePath)
+	cmd := pagerCommand(args[0], args[1:]...)
+	cmd.Stdin = p.input
+	cmd.Stdout = p.output
+	cmd.Stderr = p.output
+
+	err := cmd.Run()
+
+	if err2 := p.enterPagerMode(); err == nil && err2 != nil {
+		err = err2
+	}
+
+	if err == nil {
+		reducer := p.reducer
+		if reducer == nil {
+			reducer = statepkg.NewStateReducer()
+		}
+		if genErr := reducer.GeneratePreview(p.state); genErr != nil {
+			err = genErr
+		} else {
+			p.restoreAfterEditor(savedScroll, savedWrap)
+		}
+	}
+
+	p.restartKeys = true
+
+	return err
+}
+
+// enterPagerMode re-enters raw terminal mode after returning from an external
+// editor and reapplies pager-specific terminal settings.
+func (p *PreviewPager) enterPagerMode() error {
+	if p.input == nil {
+		return errors.New("no tty available")
+	}
+
+	rawState, rawErr := term.MakeRaw(int(p.input.Fd()))
+	if rawErr == nil {
+		p.restoreTerm = rawState
+	}
+
+	if p.reader != nil {
+		p.reader.Reset(p.input)
+	} else {
+		p.reader = bufio.NewReader(p.input)
+	}
+	if p.writer != nil {
+		p.writer.Reset(p.output)
+	} else {
+		p.writer = bufio.NewWriter(p.output)
+	}
+
+	p.applyWrapSetting()
+	p.writeString("\x1b[?25l")
+	if p.writer != nil {
+		_ = p.writer.Flush()
+	}
+
+	return rawErr
+}
+
+// restoreAfterEditor rebuilds display buffers and restores scroll position for
+// streaming previews after returning from an external editor.
+func (p *PreviewPager) restoreAfterEditor(savedScroll, savedWrap int) {
+	p.prepareContent()
+	p.state.PreviewScrollOffset = savedScroll
+	p.state.PreviewWrapOffset = savedWrap
+	if !p.showFormatted && p.rawTextSource != nil {
+		_ = p.rawTextSource.EnsureLine(savedScroll + 1)
+	}
+	if p.wrapEnabled {
+		p.ensureRowMetrics()
+	}
+	visible := p.height - (len(p.headerLines()) + 1) - 1
+	if visible < 1 {
+		visible = 1
+	}
+	totalLines := p.lineCount()
+	p.clampScroll(totalLines, visible)
+}
+
 func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 	wrap := "off"
 	if p.wrapEnabled {
@@ -867,7 +1019,7 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		if approx {
 			linesText = fmt.Sprintf("~%s", linesText)
 		}
-		return fmt.Sprintf("%d-%d/%d rows (%s, %d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  f format  i info",
+		return fmt.Sprintf("%d-%d/%d rows (%s, %d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  f format  i info  e edit",
 			startRow, endRow, totalRows, linesText, percent, charCount, wrap, formatMode, hidden, info)
 	}
 
@@ -887,7 +1039,7 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 	if approx {
 		linesText = fmt.Sprintf("%d-%d/~%d lines", start, end, totalLines)
 	}
-	return fmt.Sprintf("%s (%d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  Shift+↑/↓ ±10  ←/Esc/q exit  w/→ wrap  f format  i info",
+	return fmt.Sprintf("%s (%d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  Shift+↑/↓ ±10  ←/Esc/q exit  w/→ wrap  f format  i info  e edit",
 		linesText, percent, charCount, wrap, formatMode, hidden, info)
 }
 
@@ -1378,6 +1530,7 @@ const (
 	keyCtrlC
 	keyToggleInfo
 	keyToggleFormat
+	keyOpenEditor
 	keyShiftUp
 	keyShiftDown
 	keyCtrlZ
@@ -1413,6 +1566,8 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keyToggleInfo}, nil
 	case 'f', 'F':
 		return keyEvent{kind: keyToggleFormat}, nil
+	case 'e', 'E':
+		return keyEvent{kind: keyOpenEditor}, nil
 	case ' ':
 		return keyEvent{kind: keySpace}, nil
 	case 'b', 'B':

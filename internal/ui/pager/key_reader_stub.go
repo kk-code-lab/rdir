@@ -2,6 +2,6 @@
 
 package pager
 
-func (p *PreviewPager) startKeyReader(done <-chan struct{}) (<-chan keyEvent, <-chan error) {
-	return nil, nil
+func (p *PreviewPager) startKeyReader(done <-chan struct{}) (<-chan keyEvent, <-chan error, func()) {
+	return nil, nil, nil
 }
