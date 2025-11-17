@@ -506,7 +506,7 @@ func (app *Application) handleAppAction(action statepkg.Action) bool {
 }
 
 func (app *Application) runPreviewPager() (err error) {
-	view, err := pagerui.NewPreviewPager(app.state)
+	view, err := pagerui.NewPreviewPager(app.state, app.editorCmd, app.reducer)
 	if err != nil {
 		return err
 	}
