@@ -340,6 +340,7 @@ func (p *PreviewPager) initTerminal() error {
 
 	p.reader = bufio.NewReader(p.input)
 	p.writer = bufio.NewWriter(p.output)
+	p.enableMouseTracking()
 
 	rawState, err := term.MakeRaw(int(p.input.Fd()))
 	if err != nil {
@@ -350,6 +351,7 @@ func (p *PreviewPager) initTerminal() error {
 }
 
 func (p *PreviewPager) cleanupTerminal() {
+	p.disableMouseTracking()
 	if p.binarySource != nil {
 		p.binarySource.Close()
 	}
@@ -395,6 +397,17 @@ func (p *PreviewPager) writeString(s string) {
 	case p.output != nil:
 		_, _ = fmt.Fprint(p.output, s)
 	}
+}
+
+func (p *PreviewPager) enableMouseTracking() {
+	// Enable Xterm mouse tracking with SGR coordinates so wheel events are delivered.
+	p.writeString("\x1b[?1000h")
+	p.writeString("\x1b[?1006h")
+}
+
+func (p *PreviewPager) disableMouseTracking() {
+	p.writeString("\x1b[?1006l")
+	p.writeString("\x1b[?1000l")
 }
 
 func (p *PreviewPager) printf(format string, args ...interface{}) {
@@ -748,6 +761,18 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 	switch ev.kind {
 	case keyQuit, keyEscape, keyCtrlC, keyLeft:
 		return true
+	case keyMouseWheelUp:
+		if p.wrapEnabled {
+			p.scrollRows(totalLines, -mouseScrollLines)
+		} else {
+			p.state.PreviewScrollOffset -= mouseScrollLines
+		}
+	case keyMouseWheelDown:
+		if p.wrapEnabled {
+			p.scrollRows(totalLines, mouseScrollLines)
+		} else {
+			p.state.PreviewScrollOffset += mouseScrollLines
+		}
 	case keyUp:
 		if p.wrapEnabled {
 			p.scrollRows(totalLines, -1)
@@ -1381,7 +1406,11 @@ const (
 	keyShiftUp
 	keyShiftDown
 	keyCtrlZ
+	keyMouseWheelUp
+	keyMouseWheelDown
 )
+
+const mouseScrollLines = 3
 
 type keyEvent struct {
 	kind keyKind
@@ -1496,6 +1525,11 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 		return keyEvent{kind: keyUnknown}, nil
 	}
 
+	// SGR mouse events: CSI <btn;x;y M/m
+	if seq[0] == '<' {
+		return p.parseMouseSGR(seq)
+	}
+
 	final := seq[len(seq)-1]
 	params, modifier := parseCSIParameters(string(seq[:len(seq)-1]))
 
@@ -1562,6 +1596,34 @@ func parseCSIParameters(param string) (string, int) {
 	}
 	base := strings.Join(baseParts, ";")
 	return base, modifier
+}
+
+func (p *PreviewPager) parseMouseSGR(seq []byte) (keyEvent, error) {
+	if len(seq) < 2 {
+		return keyEvent{kind: keyUnknown}, nil
+	}
+	final := seq[len(seq)-1]
+	if final != 'M' && final != 'm' {
+		return keyEvent{kind: keyUnknown}, nil
+	}
+	body := string(seq[1 : len(seq)-1]) // drop '<' and final
+	parts := strings.Split(body, ";")
+	if len(parts) < 1 {
+		return keyEvent{kind: keyUnknown}, nil
+	}
+	btn, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return keyEvent{kind: keyUnknown}, nil
+	}
+	// Wheel up/down use button codes 64/65 per SGR mouse.
+	switch btn {
+	case 64:
+		return keyEvent{kind: keyMouseWheelUp}, nil
+	case 65:
+		return keyEvent{kind: keyMouseWheelDown}, nil
+	default:
+		return keyEvent{kind: keyUnknown}, nil
+	}
 }
 
 func hasShiftModifier(mod int) bool {
