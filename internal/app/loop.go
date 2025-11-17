@@ -3,7 +3,6 @@ package app
 import (
 	"os"
 	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -103,9 +102,12 @@ func (app *Application) Run() {
 		}
 	}()
 
-	sigContCh := make(chan os.Signal, 1)
-	signal.Notify(sigContCh, syscall.SIGCONT)
-	defer signal.Stop(sigContCh)
+	var sigContCh chan os.Signal
+	if sigs := contSignals(); len(sigs) > 0 {
+		sigContCh = make(chan os.Signal, 1)
+		signal.Notify(sigContCh, sigs...)
+		defer signal.Stop(sigContCh)
+	}
 
 	const animationInterval = 50 * time.Millisecond
 	var animationTimer *time.Timer
@@ -272,23 +274,4 @@ func (app *Application) runPreviewPager() (err error) {
 	}()
 
 	return view.Run()
-}
-
-func (app *Application) suspendToShell() {
-	// Return terminal control to the shell before stopping the process.
-	_ = app.screen.Suspend()
-	_ = syscall.Kill(0, syscall.SIGTSTP)
-}
-
-func (app *Application) resumeAfterStop() bool {
-	if err := app.screen.Resume(); err != nil {
-		return false
-	}
-	app.screen.Sync()
-	_ = app.screen.PostEvent(tcell.NewEventInterrupt("resume"))
-	if w, h := app.screen.Size(); w > 0 && h > 0 {
-		app.state.ScreenWidth = w
-		app.state.ScreenHeight = h
-	}
-	return true
 }

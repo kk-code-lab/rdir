@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"unicode/utf8"
 
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
@@ -374,21 +373,6 @@ func (p *PreviewPager) cleanupTerminal() {
 	if p.input != nil && p.input.Name() == "/dev/tty" {
 		_ = p.input.Close()
 	}
-}
-
-func (p *PreviewPager) suspendToShell() error {
-	if p.input != nil && p.restoreTerm != nil {
-		_ = term.Restore(int(p.input.Fd()), p.restoreTerm)
-	}
-	if p.writer != nil {
-		p.writeString("\x1b[?25h")
-		p.writeString("\x1b[?7h")
-		_ = p.writer.Flush()
-	} else {
-		p.writeString("\x1b[?25h")
-		p.writeString("\x1b[?7h")
-	}
-	return syscall.Kill(0, syscall.SIGTSTP)
 }
 
 func (p *PreviewPager) resumeFromShell() error {
