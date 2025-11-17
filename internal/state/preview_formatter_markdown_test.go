@@ -163,6 +163,7 @@ func TestHardLineBreaksInListsAndQuotes(t *testing.T) {
 	got := formatMarkdownLines(lines)
 	want := []string{
 		"• item line",
+		"",
 		"  continues",
 		"",
 		"│ quoted line",
@@ -376,13 +377,61 @@ func TestMarkdownListWithFencedCodeBlock(t *testing.T) {
 	got := formatMarkdownLines(lines)
 	want := []string{
 		"• item with code",
-		"  ",
+		"",
 		"      [go]",
 		"      fmt.Println(\"ok\")",
-		"  ",
+		"",
 		"  tail",
 		"",
 		"2. second top-level item",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestMarkdownOrderedListAfterFencedBlockHasSpacing(t *testing.T) {
+	lines := []string{
+		"```",
+		"1. inside code",
+		"```",
+		" 1. numbered list",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"    1. inside code",
+		"",
+		"1. numbered list",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
+func TestMarkdownListPreservesBlankLineBetweenItems(t *testing.T) {
+	lines := []string{
+		"1. **Bundle files** (`bundle-test.yaml` and `bundle-prod.yaml`) define:",
+		"   - Platform version and components",
+		"   - Repo sync configuration (syncs `clusters/<env>` path)",
+		"   - HTTP proxy configuration applied to controllers",
+		"   - Resource limits for controllers",
+		"",
+		"2. **Cluster directories** (`clusters/test/` and `clusters/prod/`):",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"1. Bundle files (bundle-test.yaml and bundle-prod.yaml) define:",
+		"",
+		"  ◦ Platform version and components",
+		"  ◦ Repo sync configuration (syncs clusters/<env> path)",
+		"  ◦ HTTP proxy configuration applied to controllers",
+		"  ◦ Resource limits for controllers",
+		"",
+		"2. Cluster directories (clusters/test/ and clusters/prod/):",
 	}
 
 	if diff := diffLines(want, got); diff != "" {

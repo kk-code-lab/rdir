@@ -1,6 +1,10 @@
 package state
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
 
 func renderMarkdownSegments(doc markdownDocument, opts markdownRenderOptions) [][]StyledTextSegment {
 	var lines [][]StyledTextSegment
@@ -63,22 +67,63 @@ func renderCodeBlockSegments(block markdownCodeBlock) [][]StyledTextSegment {
 
 func renderListSegments(list markdownList, depth int, opts markdownRenderOptions) [][]StyledTextSegment {
 	var lines [][]StyledTextSegment
+	addLine := func(line []StyledTextSegment) {
+		if line == nil {
+			if len(lines) == 0 || lines[len(lines)-1] != nil {
+				lines = append(lines, nil)
+			}
+			return
+		}
+		lines = append(lines, line)
+	}
+
 	pad := strings.Repeat("  ", depth)
+	prevHadBody := false
 	for idx, item := range list.items {
 		bullet := bulletSymbol(depth, list.ordered, idx, list.start)
 		blocks := renderBlocksSegments(item.blocks, depth+1, opts)
+		hadBody := len(blocks) > 1
+		if idx > 0 && prevHadBody {
+			addLine(nil)
+		}
 		if len(blocks) == 0 {
-			lines = append(lines, []StyledTextSegment{{Text: pad + bullet, Style: TextStylePlain}})
+			addLine([]StyledTextSegment{{Text: pad + bullet, Style: TextStylePlain}})
+			prevHadBody = false
 			continue
 		}
 		first := append([]StyledTextSegment{{Text: pad + bullet + " ", Style: TextStylePlain}}, blocks[0]...)
-		lines = append(lines, first)
-		for _, line := range blocks[1:] {
-			prefix := pad + strings.Repeat(" ", displayWidthStr(bullet)+1)
-			lines = append(lines, append([]StyledTextSegment{{Text: prefix, Style: TextStylePlain}}, line...))
+		addLine(first)
+		if hadBody {
+			addLine(nil)
 		}
+		for i := 1; i < len(blocks); i++ {
+			line := blocks[i]
+			if line != nil {
+				text := strings.TrimLeft(joinSegmentsText(line), " ")
+				if startsListMarker(text) {
+					addLine(line)
+					continue
+				}
+				prefix := pad + strings.Repeat(" ", displayWidthStr(bullet)+1)
+				line = append([]StyledTextSegment{{Text: prefix, Style: TextStylePlain}}, line...)
+			}
+			addLine(line)
+		}
+		prevHadBody = hadBody
 	}
 	return lines
+}
+
+func startsListMarker(text string) bool {
+	if text == "" {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(text)
+	switch r {
+	case '•', '◦', '▪':
+		return true
+	}
+	return unicode.IsDigit(r)
 }
 
 func renderBlockquoteSegments(b markdownBlockquote, depth int, opts markdownRenderOptions) [][]StyledTextSegment {
@@ -97,12 +142,18 @@ func renderBlocksSegments(blocks []markdownBlock, depth int, opts markdownRender
 	var lines [][]StyledTextSegment
 	for idx, block := range blocks {
 		rendered := renderBlockSegments(block, depth, opts)
-		if idx > 0 && len(rendered) > 0 && len(lines) > 0 && len(lines[len(lines)-1]) != 0 {
+		if idx > 0 && len(rendered) > 0 && len(lines) > 0 && len(lines[len(lines)-1]) != 0 &&
+			(depth == 0 || !blockIsList(block)) {
 			lines = append(lines, nil)
 		}
 		lines = append(lines, rendered...)
 	}
 	return lines
+}
+
+func blockIsList(block markdownBlock) bool {
+	_, ok := block.(markdownList)
+	return ok
 }
 
 func renderTableSegments(tbl markdownTable, opts tableRenderOptions) [][]StyledTextSegment {
