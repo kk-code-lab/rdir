@@ -340,7 +340,6 @@ func (p *PreviewPager) initTerminal() error {
 
 	p.reader = bufio.NewReader(p.input)
 	p.writer = bufio.NewWriter(p.output)
-	p.enableAlternateScroll()
 
 	rawState, err := term.MakeRaw(int(p.input.Fd()))
 	if err != nil {
@@ -351,7 +350,6 @@ func (p *PreviewPager) initTerminal() error {
 }
 
 func (p *PreviewPager) cleanupTerminal() {
-	p.disableAlternateScroll()
 	if p.binarySource != nil {
 		p.binarySource.Close()
 	}
@@ -396,23 +394,6 @@ func (p *PreviewPager) writeString(s string) {
 		_, _ = p.writer.WriteString(s)
 	case p.output != nil:
 		_, _ = fmt.Fprint(p.output, s)
-	}
-}
-
-// enableAlternateScroll turns on xterm's alternate scroll mode (DECSET 1007),
-// which makes wheel events arrive as arrow keys without capturing button1, so
-// terminal text selection still works.
-func (p *PreviewPager) enableAlternateScroll() {
-	p.writeString("\x1b[?1007h")
-	if p.writer != nil {
-		_ = p.writer.Flush()
-	}
-}
-
-func (p *PreviewPager) disableAlternateScroll() {
-	p.writeString("\x1b[?1007l")
-	if p.writer != nil {
-		_ = p.writer.Flush()
 	}
 }
 

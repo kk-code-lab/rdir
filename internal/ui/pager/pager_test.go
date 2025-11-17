@@ -197,7 +197,7 @@ func TestCleanupTerminalRestoresCursorAndWrap(t *testing.T) {
 	p.cleanupTerminal()
 
 	written := buf.String()
-	expected := "\x1b[?1007l\x1b[?25h\x1b[?7h"
+	expected := "\x1b[?25h\x1b[?7h"
 	if written != expected {
 		t.Fatalf("expected %q, got %q", expected, written)
 	}
