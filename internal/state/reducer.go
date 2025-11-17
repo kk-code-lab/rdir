@@ -1586,7 +1586,19 @@ func (r *StateReducer) refreshDirectory(state *AppState) error {
 
 // addToHistory adds path to history, removing forward history if needed
 func (r *StateReducer) addToHistory(state *AppState, path string) {
-	// If not at end of history, truncate forward
+	// If target matches previous entry, just move back in history (no mutation).
+	if state.HistoryIndex > 0 && state.History[state.HistoryIndex-1] == path {
+		state.HistoryIndex--
+		return
+	}
+
+	// If target matches next entry, move forward in history.
+	if state.HistoryIndex < len(state.History)-1 && state.History[state.HistoryIndex+1] == path {
+		state.HistoryIndex++
+		return
+	}
+
+	// If not at end of history and target is a new branch, truncate forward.
 	if state.HistoryIndex < len(state.History)-1 {
 		state.History = state.History[:state.HistoryIndex+1]
 	}
