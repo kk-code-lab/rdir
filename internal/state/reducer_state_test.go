@@ -84,7 +84,7 @@ func TestUpdateScrollVisibility(t *testing.T) {
 
 	state.updateScrollVisibility()
 
-	visibleLines := state.ScreenHeight - 4
+	visibleLines := state.visibleLines()
 	if state.ScrollOffset > 50 {
 		t.Error("ScrollOffset should not be greater than selected index")
 	}
@@ -362,10 +362,10 @@ func TestUpdateScrollVisibility_SelectionBelowScroll(t *testing.T) {
 	state.updateScrollVisibility()
 
 	// Selected file is below visible range, should scroll down
-	// displayIdx = 6, visibleLines = 6, scrollOffset + visibleLines = 6
-	// So 6 >= 0 + 6, scroll: 6 - 6 + 1 = 1
-	if state.ScrollOffset != 1 {
-		t.Errorf("Expected ScrollOffset=1, got %d", state.ScrollOffset)
+	// displayIdx = 6, visibleLines = 7, scrollOffset + visibleLines = 7
+	// 6 < 7, so scrollOffset stays 0
+	if state.ScrollOffset != 0 {
+		t.Errorf("Expected ScrollOffset=0, got %d", state.ScrollOffset)
 	}
 }
 
@@ -381,7 +381,7 @@ func TestUpdateScrollVisibility_WithHideHiddenFiles(t *testing.T) {
 		},
 		SelectedIndex:   5, // Actual file index (file4)
 		ScrollOffset:    0,
-		ScreenHeight:    10, // 10 - 4 = 6 visible lines
+		ScreenHeight:    10, // 10 - 3 = 7 visible lines
 		FilterActive:    false,
 		HideHiddenFiles: true, // Hides .hidden1 and .hidden2
 	}
@@ -571,7 +571,7 @@ func TestCenterScrollOnSelection_WithHideHiddenFiles(t *testing.T) {
 
 	displayIdx := state.getDisplaySelectedIndex()
 	displayFiles := state.getDisplayFiles()
-	visibleLines := state.ScreenHeight - 4
+	visibleLines := state.visibleLines()
 	maxOffset := len(displayFiles) - visibleLines
 
 	t.Logf("displayIdx=%d, len(displayFiles)=%d, visibleLines=%d, maxOffset=%d",
@@ -584,11 +584,11 @@ func TestCenterScrollOnSelection_WithHideHiddenFiles(t *testing.T) {
 	// For SelectedIndex=19, count visible files from 0 to 18:
 	// file1, file3, file5, ..., file17 = 9 visible files → displayIdx=9
 	// len(displayFiles) = 10 (file1,3,5,7,9,11,13,15,17,19)
-	// maxOffset = 10 - 6 = 4
-	// center = 9 - 6/2 = 9 - 3 = 6, but clamped to maxOffset=4
-	// So result should be 4
-	if state.ScrollOffset != 4 {
-		t.Errorf("Expected ScrollOffset=4 (clamped to maxOffset), got %d", state.ScrollOffset)
+	// maxOffset = 10 - 7 = 3
+	// center = 9 - 7/2 = 9 - 3 = 6, but clamped to maxOffset=3
+	// So result should be 3
+	if state.ScrollOffset != 3 {
+		t.Errorf("Expected ScrollOffset=3 (clamped to maxOffset), got %d", state.ScrollOffset)
 	}
 }
 

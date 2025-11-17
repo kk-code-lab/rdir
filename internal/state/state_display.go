@@ -178,7 +178,7 @@ func (s *AppState) setDisplaySelectedIndex(displayIdx int) {
 
 func (s *AppState) updateScrollVisibility() {
 	displayIdx := s.getDisplaySelectedIndex()
-	visibleLines := s.ScreenHeight - 4
+	visibleLines := s.visibleLines()
 
 	if displayIdx < 0 {
 		return
@@ -205,7 +205,7 @@ func (s *AppState) updateScrollVisibility() {
 
 func (s *AppState) centerScrollOnSelection() {
 	displayIdx := s.getDisplaySelectedIndex()
-	visibleLines := s.ScreenHeight - 4
+	visibleLines := s.visibleLines()
 
 	if displayIdx < 0 {
 		return
@@ -224,4 +224,17 @@ func (s *AppState) centerScrollOnSelection() {
 	if s.ScrollOffset > maxOffset {
 		s.ScrollOffset = maxOffset
 	}
+}
+
+// visibleLines returns the number of rows available for the list, mirroring the renderer's layout.
+func (s *AppState) visibleLines() int {
+	listStartY := 1
+	if s.FilterActive || s.GlobalSearchActive {
+		listStartY = 2
+	}
+	visibleLines := s.ScreenHeight - 2 - listStartY
+	if visibleLines < 0 {
+		return 0
+	}
+	return visibleLines
 }

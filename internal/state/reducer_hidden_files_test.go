@@ -391,7 +391,7 @@ func TestToggleHiddenFiles_CursorVisibilityOnScreen(t *testing.T) {
 	}
 
 	// Check visibility
-	visibleLines := state.ScreenHeight - 4
+	visibleLines := state.visibleLines()
 	displayIdx := state.getDisplaySelectedIndex()
 
 	t.Logf("ScrollOffset: %d", state.ScrollOffset)
@@ -654,7 +654,7 @@ func TestToggleHiddenFiles_WithScrollOffset(t *testing.T) {
 	displayAfter := state.getDisplayFiles()
 	t.Logf("  len(displayFiles): %d", len(displayAfter))
 
-	visibleLines := state.ScreenHeight - 4
+	visibleLines := state.visibleLines()
 	t.Logf("  visibleLines: %d", visibleLines)
 	t.Logf("  ScrollOffset valid? %d < %d", state.ScrollOffset, len(displayAfter)-visibleLines+1)
 

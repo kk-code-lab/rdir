@@ -601,7 +601,7 @@ func TestGlobalSearchScrollFollowsSelection(t *testing.T) {
 		t.Fatalf("expected index 15, got %d", state.GlobalSearchIndex)
 	}
 
-	visibleLines := state.ScreenHeight - 4
+	visibleLines := state.visibleLines()
 	expectedScroll := state.GlobalSearchIndex - visibleLines + 1
 	if expectedScroll < 0 {
 		expectedScroll = 0
