@@ -215,11 +215,19 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 	}
 	// Mouse wheel scrolls the main list regardless of button 1.
 	if ev.Buttons()&tcell.WheelUp != 0 {
-		app.actionCh <- statepkg.ScrollUpAction{}
+		if app.state != nil && app.state.GlobalSearchActive {
+			app.actionCh <- statepkg.GlobalSearchNavigateAction{Direction: "up"}
+		} else {
+			app.actionCh <- statepkg.ScrollUpAction{}
+		}
 		return true
 	}
 	if ev.Buttons()&tcell.WheelDown != 0 {
-		app.actionCh <- statepkg.ScrollDownAction{}
+		if app.state != nil && app.state.GlobalSearchActive {
+			app.actionCh <- statepkg.GlobalSearchNavigateAction{Direction: "down"}
+		} else {
+			app.actionCh <- statepkg.ScrollDownAction{}
+		}
 		return true
 	}
 
