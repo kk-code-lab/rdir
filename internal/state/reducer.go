@@ -478,6 +478,52 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		r.addToHistory(state, parent)
 		return state, r.generatePreview(state)
 
+	case GoToPathAction:
+		if a.Path == "" {
+			return state, nil
+		}
+		target := filepath.Clean(a.Path)
+		if target == state.CurrentPath {
+			return state, r.generatePreview(state)
+		}
+
+		r.selectionHistory[state.CurrentPath] = state.SelectedIndex
+		prevName := filepath.Base(state.CurrentPath)
+
+		if err := r.changeDirectory(state, target); err != nil {
+			return state, err
+		}
+
+		state.clearGlobalSearch(false)
+
+		// Prefer selecting the child we came from, if it exists.
+		if prevName != "" {
+			for idx, f := range state.Files {
+				if f.Name == prevName {
+					state.SelectedIndex = idx
+					r.ensureSelectionVisible(state)
+					state.centerScrollOnSelection()
+					r.addToHistory(state, target)
+					return state, r.generatePreview(state)
+				}
+			}
+		}
+
+		if savedIdx, ok := r.selectionHistory[target]; ok && savedIdx < len(state.Files) {
+			state.SelectedIndex = savedIdx
+			r.ensureSelectionVisible(state)
+		} else {
+			if len(state.Files) > 0 {
+				state.SelectedIndex = 0
+			} else {
+				state.SelectedIndex = -1
+			}
+		}
+
+		state.centerScrollOnSelection()
+		r.addToHistory(state, target)
+		return state, r.generatePreview(state)
+
 	case GoHomeAction:
 		homeDir, err := userHomeDirFn()
 		if err != nil {
@@ -739,6 +785,15 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			return state, nil
 		}
 		state.setDisplaySelectedIndex(len(displayFiles) - 1)
+		state.updateScrollVisibility()
+		return state, r.generatePreview(state)
+
+	case MouseSelectAction:
+		displayFiles := state.getDisplayFiles()
+		if a.DisplayIndex < 0 || a.DisplayIndex >= len(displayFiles) {
+			return state, nil
+		}
+		state.setDisplaySelectedIndex(a.DisplayIndex)
 		state.updateScrollVisibility()
 		return state, r.generatePreview(state)
 
@@ -1107,6 +1162,22 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 				state.GlobalSearchIndex++
 				state.updateGlobalSearchScroll()
 			}
+		}
+		return state, nil
+
+	case GlobalSearchSelectIndexAction:
+		if state.GlobalSearchActive && len(state.GlobalSearchResults) > 0 {
+			state.clearDesiredGlobalSearchSelection()
+			state.clearGlobalSearchPendingIndex()
+			idx := a.Index
+			if idx < 0 {
+				idx = 0
+			}
+			if idx >= len(state.GlobalSearchResults) {
+				idx = len(state.GlobalSearchResults) - 1
+			}
+			state.GlobalSearchIndex = idx
+			state.updateGlobalSearchScroll()
 		}
 		return state, nil
 

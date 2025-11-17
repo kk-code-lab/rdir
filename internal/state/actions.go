@@ -36,6 +36,11 @@ type ScrollToEndAction struct{}
 
 // ===== VIEW ACTIONS =====
 
+// MouseSelectAction selects a row in the main file list by its display index.
+type MouseSelectAction struct {
+	DisplayIndex int
+}
+
 type ResizeAction struct {
 	Width  int
 	Height int
@@ -47,6 +52,9 @@ type OpenEditorAction struct{}
 type RefreshDirectoryAction struct{}
 type OpenPagerAction struct{}
 type SuspendAction struct{}
+type GoToPathAction struct {
+	Path string
+}
 
 // ===== PREVIEW ACTIONS =====
 
@@ -76,6 +84,11 @@ type GlobalSearchMoveCursorAction struct {
 type GlobalSearchClearAction struct{}
 type GlobalSearchNavigateAction struct {
 	Direction string // "up" or "down"
+}
+
+// GlobalSearchSelectIndexAction selects a specific result row (0-based).
+type GlobalSearchSelectIndexAction struct {
+	Index int
 }
 type GlobalSearchPageUpAction struct{}
 type GlobalSearchPageDownAction struct{}

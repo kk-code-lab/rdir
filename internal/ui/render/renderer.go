@@ -93,7 +93,7 @@ func (r *Renderer) drawHeader(state *statepkg.AppState, w, h int) {
 
 	if endX < w {
 		available := w - endX
-		segments := r.formatBreadcrumbSegments(currentPath)
+		segments := FormatBreadcrumbSegments(currentPath)
 		if len(segments) > 0 {
 			lastIdx := len(segments) - 1
 			if lastIdx > 0 {
@@ -175,7 +175,7 @@ func (r *Renderer) fitBreadcrumb(path string, width int) string {
 	return ellipsis + string(resultRunes)
 }
 
-func (r *Renderer) formatBreadcrumbSegments(path string) []string {
+func FormatBreadcrumbSegments(path string) []string {
 	if path == "" {
 		return []string{"/"}
 	}

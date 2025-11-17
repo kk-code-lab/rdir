@@ -2,6 +2,7 @@ package app
 
 import (
 	"os"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
@@ -22,6 +23,10 @@ type Application struct {
 	clipboardCmd   []string
 	clipboardAvail bool
 	editorCmd      []string
+
+	// Mouse state
+	lastClickTime time.Time
+	lastClickKey  string
 }
 
 // Close cleans up resources.

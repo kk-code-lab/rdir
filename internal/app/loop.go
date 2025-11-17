@@ -1,8 +1,10 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -10,7 +12,10 @@ import (
 	"github.com/kk-code-lab/rdir/internal/ui/input"
 	pagerui "github.com/kk-code-lab/rdir/internal/ui/pager"
 	renderui "github.com/kk-code-lab/rdir/internal/ui/render"
+	"github.com/mattn/go-runewidth"
 )
+
+const doubleClickThreshold = 300 * time.Millisecond
 
 func NewApplication() (*Application, error) {
 	screen, err := tcell.NewScreen()
@@ -20,6 +25,8 @@ func NewApplication() (*Application, error) {
 	if err := screen.Init(); err != nil {
 		return nil, err
 	}
+	// Parse mouse sequences so modified clicks don't leak as key events.
+	screen.EnableMouse()
 
 	cwd, err := GetCwd()
 	if err != nil {
@@ -188,12 +195,231 @@ func (app *Application) handleEvent(ev tcell.Event) bool {
 		if !app.input.ProcessEvent(ev) {
 			app.shouldQuit = true
 		}
+	case *tcell.EventMouse:
+		if !app.handleMouse(ev) {
+			app.shouldQuit = true
+		}
+		return true
 	case *tcell.EventInterrupt:
 		return true
 	default:
 		return false
 	}
 	return true
+}
+
+// handleMouse maps primary-clicks to selection and navigation.
+func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
+	if app.state == nil {
+		return true
+	}
+	if ev.Buttons()&tcell.Button1 == 0 {
+		return true
+	}
+	if app.state.PreviewFullScreen {
+		return true
+	}
+
+	x, y := ev.Position()
+
+	// Breadcrumb (top row)
+	if y == 0 {
+		if app.handleBreadcrumbClick(x) {
+			return true
+		}
+	}
+
+	sidebarWidth := renderui.SidebarWidthForWidth(app.state.ScreenWidth, app.state)
+
+	// Sidebar click: go up and select sibling.
+	if sidebarWidth > 0 && x < sidebarWidth {
+		if app.handleSidebarClick(y) {
+			return true
+		}
+		// otherwise fall through to list handling
+	}
+
+	listStartY := 1
+	if app.state.FilterActive || app.state.GlobalSearchActive {
+		listStartY = 2
+	}
+	bottomLimit := app.state.ScreenHeight - 2 // leave room for status line
+	if y < listStartY || y >= bottomLimit {
+		return true
+	}
+	row := y - listStartY
+	if row < 0 {
+		return true
+	}
+
+	clickKey := fmt.Sprintf("list-%d", row)
+	doubleClick := app.lastClickKey == clickKey && time.Since(app.lastClickTime) <= doubleClickThreshold
+	app.lastClickKey = clickKey
+	app.lastClickTime = time.Now()
+
+	if app.state.GlobalSearchActive {
+		idx := app.state.GlobalSearchScroll + row
+		if idx >= 0 && idx < len(app.state.GlobalSearchResults) {
+			app.actionCh <- statepkg.GlobalSearchSelectIndexAction{Index: idx}
+			if doubleClick {
+				app.actionCh <- statepkg.GlobalSearchOpenAction{}
+			}
+		}
+		return true
+	}
+
+	displayIdx := app.state.ScrollOffset + row
+	displayFiles := app.state.DisplayFiles()
+	if displayIdx < 0 || displayIdx >= len(displayFiles) {
+		return true
+	}
+	app.actionCh <- statepkg.MouseSelectAction{DisplayIndex: displayIdx}
+	if doubleClick {
+		app.actionCh <- statepkg.RightArrowAction{}
+	}
+	return true
+}
+
+func (app *Application) handleSidebarClick(y int) bool {
+	entries := app.state.ParentEntries
+	if len(entries) == 0 {
+		return false
+	}
+
+	parentPath := filepath.Dir(app.state.CurrentPath)
+	hasParent := parentPath != "" && parentPath != app.state.CurrentPath
+	if !hasParent {
+		return false
+	}
+
+	h := app.state.ScreenHeight
+	maxRows := h - 2
+	if maxRows < 1 {
+		maxRows = 1
+	}
+
+	currentName := filepath.Base(app.state.CurrentPath)
+	currentIdx := 0
+	foundCurrent := false
+	for idx, entry := range entries {
+		if entry.Name == currentName {
+			currentIdx = idx
+			foundCurrent = true
+			break
+		}
+	}
+	if !foundCurrent {
+		currentIdx = 0
+	}
+
+	startIdx := 0
+	if len(entries) > maxRows {
+		startIdx = currentIdx - maxRows/2
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx > len(entries)-maxRows {
+			startIdx = len(entries) - maxRows
+		}
+	}
+	endIdx := len(entries)
+	if endIdx-startIdx > maxRows {
+		endIdx = startIdx + maxRows
+	}
+
+	row := y - 1 // sidebar starts at y=1
+	if row < 0 || row >= endIdx-startIdx {
+		return false
+	}
+
+	clickKey := fmt.Sprintf("sidebar-%d", row)
+	app.lastClickKey = clickKey
+	app.lastClickTime = time.Now()
+
+	app.actionCh <- statepkg.GoUpAction{}
+	return true
+}
+
+func (app *Application) handleBreadcrumbClick(x int) bool {
+	if x < 0 || app.state == nil {
+		return false
+	}
+	headerText := "rdir"
+	pos := runewidth.StringWidth(headerText)
+	if x < pos {
+		return false
+	}
+	if pos < app.state.ScreenWidth {
+		pos++ // space after header
+	}
+
+	available := app.state.ScreenWidth - pos
+	segments := renderui.FormatBreadcrumbSegments(app.state.CurrentPath)
+	if len(segments) == 0 {
+		return false
+	}
+
+	// Build full breadcrumb text and widths; if it doesn't fit, ignore clicks to avoid mismap.
+	totalWidth := 0
+	for i, s := range segments {
+		if i > 0 {
+			totalWidth += runewidth.StringWidth(" › ")
+		}
+		totalWidth += runewidth.StringWidth(s)
+	}
+	if totalWidth > available {
+		return false
+	}
+
+	currentX := pos
+	for i, s := range segments {
+		if i > 0 {
+			sepW := runewidth.StringWidth(" › ")
+			if x >= currentX && x < currentX+sepW {
+				// click on separator -> treat as previous segment
+				if i > 0 {
+					app.jumpToBreadcrumb(segments, i-1)
+				}
+				return true
+			}
+			currentX += sepW
+		}
+
+		segW := runewidth.StringWidth(s)
+		if x >= currentX && x < currentX+segW {
+			app.jumpToBreadcrumb(segments, i)
+			return true
+		}
+		currentX += segW
+	}
+	return false
+}
+
+func (app *Application) jumpToBreadcrumb(segments []string, idx int) {
+	if idx < 0 || idx >= len(segments) {
+		return
+	}
+
+	// Rebuild path from segments up to idx.
+	path := ""
+	if len(segments) > 0 && segments[0] == "/" {
+		path = "/"
+	}
+	for i := 0; i <= idx; i++ {
+		if segments[i] == "/" {
+			continue
+		}
+		if path == "" || path == "/" {
+			path = filepath.Join(path, segments[i])
+		} else {
+			path = filepath.Join(path, segments[i])
+		}
+	}
+	if path == "" {
+		path = "/"
+	}
+
+	app.actionCh <- statepkg.GoToPathAction{Path: path}
 }
 
 func (app *Application) processActions() bool {
