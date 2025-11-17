@@ -318,7 +318,9 @@ func parseList(lines []string, start int, depth int) (markdownList, int, bool) {
 		}
 
 		itemBlocks, _ := parseBlocksWithDepth(itemLines, 0, depth+1)
-		list.items = append(list.items, markdownListItem{blocks: itemBlocks})
+		list.items = append(list.items, markdownListItem{
+			blocks: itemBlocks,
+		})
 	}
 
 	return list, i, true
