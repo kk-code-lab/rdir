@@ -618,15 +618,6 @@ func isRuneIndexable(r rune) bool {
 	return r >= 'à' && r <= 'ž'
 }
 
-func firstRune(s string) rune {
-	for _, r := range s {
-		if isRuneIndexable(r) {
-			return r
-		}
-	}
-	return 0
-}
-
 func (gs *GlobalSearcher) emitProgress(mutator func(*IndexTelemetry)) {
 	var snapshot IndexTelemetry
 	var cb func(IndexTelemetry)

@@ -99,6 +99,12 @@ func (p *PreviewPager) prepareContent() {
 		p.rawLineWidths = nil
 		p.rawSanitized = nil
 		p.rawSanitizedWid = nil
+		if p.state != nil && p.state.PreviewScrollOffset > 0 {
+			// Preload up to the remembered scroll position so reopening the pager
+			// lands where the user left off, even when the file was previously only
+			// partially streamed.
+			_ = textSource.EnsureLine(p.state.PreviewScrollOffset)
+		}
 		p.charCount = textSource.CharCount()
 	} else {
 		if len(lines) == 0 {
@@ -204,6 +210,7 @@ func (p *PreviewPager) Run() error {
 		return err
 	}
 	defer p.cleanupTerminal()
+	defer p.persistLoadedLines()
 
 	done := make(chan struct{})
 	defer close(done)
@@ -253,6 +260,30 @@ func (p *PreviewPager) Run() error {
 			return nil
 		}
 	}
+}
+
+// persistLoadedLines copies the portion of the streaming text source that has
+// been read so far back into PreviewData so the inline (non-fullscreen) preview
+// can display the area the user just viewed in the pager.
+// It is intentionally lightweight: we only copy lines already fetched; display
+// metadata is omitted so the renderer will measure widths lazily.
+func (p *PreviewPager) persistLoadedLines() {
+	if p == nil || p.state == nil || p.state.PreviewData == nil || p.rawTextSource == nil {
+		return
+	}
+	count := p.rawTextSource.LineCount()
+	if count == 0 {
+		return
+	}
+	lines := make([]string, count)
+	for i := 0; i < count; i++ {
+		lines[i] = textutil.SanitizeTerminalText(p.rawTextSource.Line(i))
+	}
+	p.state.PreviewData.TextLines = lines
+	p.state.PreviewData.FormattedTextLines = nil
+	p.state.PreviewData.FormattedSegments = nil
+	p.state.PreviewData.FormattedSegmentLineMeta = nil
+	p.state.PreviewData.LineCount = count
 }
 
 func (p *PreviewPager) startResizeWatcher(done <-chan struct{}) <-chan struct{} {
@@ -745,6 +776,7 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		p.state.PreviewWrapOffset = 0
 	case keyEnd:
 		p.scrollToEnd(totalLines)
+		totalLines = p.lineCount()
 	case keyToggleWrap, keyRight:
 		if p.binaryMode {
 			break
@@ -795,6 +827,8 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		hidden = "yes"
 	}
 
+	approx := !p.showFormatted && p.rawTextSource != nil && !p.rawTextSource.FullyLoaded()
+
 	if p.wrapEnabled {
 		totalRows := p.totalRowCount()
 		startRow := 0
@@ -809,8 +843,12 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 			endRow = totalRows
 		}
 		percent := p.progressPercent(startRow, totalRows)
-		return fmt.Sprintf("%d-%d/%d rows (%d lines, %d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  f format  i info",
-			startRow, endRow, totalRows, totalLines, percent, charCount, wrap, formatMode, hidden, info)
+		linesText := fmt.Sprintf("%d lines", totalLines)
+		if approx {
+			linesText = fmt.Sprintf("~%s", linesText)
+		}
+		return fmt.Sprintf("%d-%d/%d rows (%s, %d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  f format  i info",
+			startRow, endRow, totalRows, linesText, percent, charCount, wrap, formatMode, hidden, info)
 	}
 
 	start := 0
@@ -825,8 +863,12 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		end = totalLines
 	}
 	percent := p.progressPercent(start, totalLines)
-	return fmt.Sprintf("%d-%d/%d lines (%d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  Shift+↑/↓ ±10  ←/Esc/q exit  w/→ wrap  f format  i info",
-		start, end, totalLines, percent, charCount, wrap, formatMode, hidden, info)
+	linesText := fmt.Sprintf("%d-%d/%d lines", start, end, totalLines)
+	if approx {
+		linesText = fmt.Sprintf("%d-%d/~%d lines", start, end, totalLines)
+	}
+	return fmt.Sprintf("%s (%d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  Shift+↑/↓ ±10  ←/Esc/q exit  w/→ wrap  f format  i info",
+		linesText, percent, charCount, wrap, formatMode, hidden, info)
 }
 
 func (p *PreviewPager) lineCount() int {
