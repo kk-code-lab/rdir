@@ -231,7 +231,7 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 
 	sidebarWidth := renderui.SidebarWidthForWidth(app.state.ScreenWidth, app.state)
 
-	// Sidebar click: go up and select sibling.
+	// Sidebar click: jump to parent directory (any row).
 	if sidebarWidth > 0 && x < sidebarWidth {
 		if app.handleSidebarClick(y) {
 			return true
@@ -252,14 +252,11 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 		return true
 	}
 
-	clickKey := fmt.Sprintf("list-%d", row)
-	doubleClick := app.lastClickKey == clickKey && time.Since(app.lastClickTime) <= doubleClickThreshold
-	app.lastClickKey = clickKey
-	app.lastClickTime = time.Now()
-
 	if app.state.GlobalSearchActive {
 		idx := app.state.GlobalSearchScroll + row
 		if idx >= 0 && idx < len(app.state.GlobalSearchResults) {
+			result := app.state.GlobalSearchResults[idx]
+			doubleClick := app.registerClick(fmt.Sprintf("gs-%s", result.FilePath))
 			app.actionCh <- statepkg.GlobalSearchSelectIndexAction{Index: idx}
 			if doubleClick {
 				app.actionCh <- statepkg.GlobalSearchOpenAction{}
@@ -273,11 +270,20 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 	if displayIdx < 0 || displayIdx >= len(displayFiles) {
 		return true
 	}
+	doubleClick := app.registerClick(displayFiles[displayIdx].FullPath)
 	app.actionCh <- statepkg.MouseSelectAction{DisplayIndex: displayIdx}
 	if doubleClick {
 		app.actionCh <- statepkg.RightArrowAction{}
 	}
 	return true
+}
+
+// registerClick remembers the last click key and reports whether it is a double-click.
+func (app *Application) registerClick(key string) bool {
+	doubleClick := app.lastClickKey == key && time.Since(app.lastClickTime) <= doubleClickThreshold
+	app.lastClickKey = key
+	app.lastClickTime = time.Now()
+	return doubleClick
 }
 
 func (app *Application) handleSidebarClick(y int) bool {
