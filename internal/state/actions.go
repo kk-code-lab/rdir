@@ -51,7 +51,6 @@ type ToggleHiddenFilesAction struct{}
 type OpenEditorAction struct{}
 type RefreshDirectoryAction struct{}
 type OpenPagerAction struct{}
-type SuspendAction struct{}
 type GoToPathAction struct {
 	Path string
 }
