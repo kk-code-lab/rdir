@@ -41,11 +41,8 @@ func PrintSetup(shellOverride string, cfg Config) {
         return $?
     fi
 
-    RDIR_DISABLE_SUSPEND=1 command %s &
-    rdir_pid=$!
-    wait $rdir_pid
-
-    result_file="$TMPDIR/rdir_result_$rdir_pid.txt"
+    result_file="$TMPDIR/rdir_result_$$.txt"
+    RDIR_DISABLE_SUSPEND=1 RDIR_RESULT_FILE="$result_file" command %s "$@"
     if [ -f "$result_file" ] && [ ! -L "$result_file" ] && [ -O "$result_file" ]; then
         dest=$(cat "$result_file" 2>/dev/null)
         rm -f "$result_file"
@@ -64,11 +61,8 @@ func PrintSetup(shellOverride string, cfg Config) {
         return $status
     end
 
-    env RDIR_DISABLE_SUSPEND=1 command %s &
-    set rdir_pid $last_pid
-    wait $rdir_pid
-
-    set result_file "$TMPDIR/rdir_result_$rdir_pid.txt"
+    set result_file "$TMPDIR/rdir_result_$$.txt"
+    env RDIR_DISABLE_SUSPEND=1 RDIR_RESULT_FILE="$result_file" command %s $argv
     if test -f "$result_file" -a ! -L "$result_file" -a -O "$result_file"
         set dest (cat "$result_file" 2>/dev/null)
         if test -d "$dest" 2>/dev/null
@@ -86,11 +80,11 @@ end
         return
     }
 
-    $env:RDIR_DISABLE_SUSPEND = "1"
-    $process = Start-Process -FilePath %s -NoNewWindow -PassThru
+    $envVars = @{ RDIR_DISABLE_SUSPEND = "1"; RDIR_RESULT_FILE = (Join-Path $env:TEMP "rdir_result_$PID.txt") }
+    $process = Start-Process -FilePath %s -NoNewWindow -PassThru -Environment $envVars
     $process.WaitForExit()
 
-    $resultFile = Join-Path $env:TEMP "rdir_result_$($process.Id).txt"
+    $resultFile = $envVars.RDIR_RESULT_FILE
     try {
         if (Test-Path $resultFile -PathType Leaf) {
             $dest = Get-Content $resultFile -Raw -ErrorAction SilentlyContinue | ForEach-Object { $_.Trim() }
@@ -117,6 +111,7 @@ if "%%~1"==""
     exit /b 0
 ) else (
     set "RDIR_DISABLE_SUSPEND=1"
+    set "RDIR_RESULT_FILE=%%TEMP%%\rdir_result_%%RANDOM%%.txt"
     %s %%*
     exit /b %%errorlevel%%
 )
@@ -128,11 +123,8 @@ if "%%~1"==""
         return $?
     fi
 
-    command %s &
-    rdir_pid=$!
-    wait $rdir_pid
-
-    result_file="$TMPDIR/rdir_result_$rdir_pid.txt"
+    result_file="$TMPDIR/rdir_result_$$.txt"
+    RDIR_DISABLE_SUSPEND=1 RDIR_RESULT_FILE="$result_file" command %s "$@"
     if [ -f "$result_file" ] && [ ! -L "$result_file" ] && [ -O "$result_file" ]; then
         dest=$(cat "$result_file" 2>/dev/null)
         rm -f "$result_file"
