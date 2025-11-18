@@ -41,7 +41,7 @@ func PrintSetup(shellOverride string, cfg Config) {
         return $?
     fi
 
-    command %s &
+    RDIR_DISABLE_SUSPEND=1 command %s &
     rdir_pid=$!
     wait $rdir_pid
 
@@ -64,7 +64,7 @@ func PrintSetup(shellOverride string, cfg Config) {
         return $status
     end
 
-    command %s &
+    env RDIR_DISABLE_SUSPEND=1 command %s &
     set rdir_pid $last_pid
     wait $rdir_pid
 
@@ -86,6 +86,7 @@ end
         return
     }
 
+    $env:RDIR_DISABLE_SUSPEND = "1"
     $process = Start-Process -FilePath %s -NoNewWindow -PassThru
     $process.WaitForExit()
 
@@ -99,6 +100,7 @@ end
         }
     } finally {
         Remove-Item $resultFile -ErrorAction SilentlyContinue
+        Remove-Item Env:RDIR_DISABLE_SUSPEND -ErrorAction SilentlyContinue
     }
 }
 `, quoted, quoted)
@@ -114,6 +116,7 @@ if "%%~1"==""
     )
     exit /b 0
 ) else (
+    set "RDIR_DISABLE_SUSPEND=1"
     %s %%*
     exit /b %%errorlevel%%
 )

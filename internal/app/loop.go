@@ -36,8 +36,9 @@ func NewApplication() (*Application, error) {
 
 	clipboardCmd, clipboardAvail := detectClipboard()
 	editorCmd, editorAvail := detectEditorCommand()
+	disableSuspend := os.Getenv("RDIR_DISABLE_SUSPEND") == "1"
 
-	state := newInitialState(cwd, clipboardAvail, editorAvail)
+	state := newInitialState(cwd, clipboardAvail, editorAvail, disableSuspend)
 	w, h := screen.Size()
 	state.ScreenWidth = w
 	state.ScreenHeight = h
@@ -79,7 +80,7 @@ func NewApplication() (*Application, error) {
 	return app, nil
 }
 
-func newInitialState(cwd string, clipboardAvail, editorAvail bool) *statepkg.AppState {
+func newInitialState(cwd string, clipboardAvail, editorAvail bool, disableSuspend bool) *statepkg.AppState {
 	return &statepkg.AppState{
 		CurrentPath:        cwd,
 		Files:              []statepkg.FileEntry{},
@@ -93,6 +94,7 @@ func newInitialState(cwd string, clipboardAvail, editorAvail bool) *statepkg.App
 		ClipboardAvailable: clipboardAvail,
 		EditorAvailable:    editorAvail,
 		HideHiddenFiles:    true,
+		DisableSuspend:     disableSuspend,
 	}
 }
 

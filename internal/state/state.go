@@ -142,6 +142,7 @@ type AppState struct {
 	ClipboardAvailable bool      // Whether clipboard command is available
 	LastYankTime       time.Time // Time of last successful yank (for flash effect)
 	EditorAvailable    bool      // Whether an editor command is available for 'e'
+	DisableSuspend     bool      // When true, Ctrl+Z quits instead of suspending (used by shell wrapper)
 
 	// Error state
 	LastError error
