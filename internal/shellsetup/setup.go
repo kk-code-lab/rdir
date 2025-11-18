@@ -61,7 +61,7 @@ func PrintSetup(shellOverride string, cfg Config) {
         return $status
     end
 
-    set result_file "$TMPDIR/rdir_result_$$.txt"
+    set result_file "$TMPDIR/rdir_result_$fish_pid.txt"
     env RDIR_DISABLE_SUSPEND=1 RDIR_RESULT_FILE="$result_file" command %s $argv
     if test -f "$result_file" -a ! -L "$result_file" -a -O "$result_file"
         set dest (cat "$result_file" 2>/dev/null)
