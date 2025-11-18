@@ -422,26 +422,59 @@ func (app *Application) jumpToBreadcrumb(segments []string, idx int) {
 		return
 	}
 
-	// Rebuild path from segments up to idx.
-	path := ""
-	if len(segments) > 0 && segments[0] == "/" {
-		path = "/"
-	}
-	for i := 0; i <= idx; i++ {
-		if segments[i] == "/" {
-			continue
-		}
-		if path == "" || path == "/" {
-			path = filepath.Join(path, segments[i])
-		} else {
-			path = filepath.Join(path, segments[i])
-		}
-	}
+	path := buildBreadcrumbPath(segments, idx)
 	if path == "" {
-		path = "/"
+		return
 	}
 
 	app.actionCh <- statepkg.GoToPathAction{Path: path}
+}
+
+// buildBreadcrumbPath assembles an absolute path from breadcrumb segments.
+// It preserves Windows drive roots ("C:") so clicks stay absolute there.
+func buildBreadcrumbPath(segments []string, idx int) string {
+	if idx < 0 || idx >= len(segments) {
+		return ""
+	}
+
+	sep := string(filepath.Separator)
+	first := segments[0]
+	isDrive := len(first) == 2 && (first[1] == ':') && ((first[0] >= 'A' && first[0] <= 'Z') || (first[0] >= 'a' && first[0] <= 'z'))
+
+	// Handle Windows drive letters like "C:".
+	if isDrive {
+		if idx == 0 {
+			return first + sep
+		}
+
+		path := first + sep
+		for i := 1; i <= idx && i < len(segments); i++ {
+			path = filepath.Join(path, segments[i])
+		}
+		return path
+	}
+
+	// Unix-style absolute path starting with root.
+	if first == "/" || first == sep {
+		path := sep
+		for i := 1; i <= idx && i < len(segments); i++ {
+			if segments[i] == "/" {
+				continue
+			}
+			path = filepath.Join(path, segments[i])
+		}
+		return path
+	}
+
+	// Fallback: relative path construction.
+	path := first
+	for i := 1; i <= idx && i < len(segments); i++ {
+		path = filepath.Join(path, segments[i])
+	}
+	if path == "" {
+		return sep
+	}
+	return path
 }
 
 func (app *Application) processActions() bool {
