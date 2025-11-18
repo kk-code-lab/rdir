@@ -62,11 +62,14 @@ func main() {
 
 	app.Run()
 
-	// Write selected directory to temp file for shell integration
-	// Use PID to make filename unique (supports multiple rdir instances)
+	// Write selected directory to temp file for shell integration.
+	// If RDIR_RESULT_FILE is set, honor it; otherwise fall back to PID-based file.
 	if path := app.GetCurrentPath(); path != "" {
-		tempDir := os.TempDir()
-		resultFile := filepath.Join(tempDir, fmt.Sprintf("rdir_result_%d.txt", os.Getpid()))
+		resultFile := os.Getenv("RDIR_RESULT_FILE")
+		if resultFile == "" {
+			tempDir := os.TempDir()
+			resultFile = filepath.Join(tempDir, fmt.Sprintf("rdir_result_%d.txt", os.Getpid()))
+		}
 		// Write with 0600 permissions (owner only) for security
 		if err := os.WriteFile(resultFile, []byte(path), 0600); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not write result file: %v\n", err)
