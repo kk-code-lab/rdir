@@ -42,7 +42,7 @@ func PrintSetup(shellOverride string, cfg Config) {
     fi
 
     result_file="$TMPDIR/rdir_result_$$.txt"
-    RDIR_DISABLE_SUSPEND=1 RDIR_RESULT_FILE="$result_file" command %s "$@"
+    RDIR_RESULT_FILE="$result_file" command %s "$@"
     if [ -f "$result_file" ] && [ ! -L "$result_file" ] && [ -O "$result_file" ]; then
         dest=$(cat "$result_file" 2>/dev/null)
         rm -f "$result_file"
@@ -62,7 +62,7 @@ func PrintSetup(shellOverride string, cfg Config) {
     end
 
     set result_file "$TMPDIR/rdir_result_$fish_pid.txt"
-    env RDIR_DISABLE_SUSPEND=1 RDIR_RESULT_FILE="$result_file" command %s $argv
+    env RDIR_RESULT_FILE="$result_file" command %s $argv
     if test -f "$result_file" -a ! -L "$result_file" -a -O "$result_file"
         set dest (cat "$result_file" 2>/dev/null)
         if test -d "$dest" 2>/dev/null
@@ -80,7 +80,7 @@ end
         return
     }
 
-    $envVars = @{ RDIR_DISABLE_SUSPEND = "1"; RDIR_RESULT_FILE = (Join-Path $env:TEMP "rdir_result_$PID.txt") }
+    $envVars = @{ RDIR_RESULT_FILE = (Join-Path $env:TEMP "rdir_result_$PID.txt") }
     $process = Start-Process -FilePath %s -NoNewWindow -PassThru -Environment $envVars
     $process.WaitForExit()
 
@@ -94,7 +94,6 @@ end
         }
     } finally {
         Remove-Item $resultFile -ErrorAction SilentlyContinue
-        Remove-Item Env:RDIR_DISABLE_SUSPEND -ErrorAction SilentlyContinue
     }
 }
 `, quoted, quoted)
@@ -110,7 +109,6 @@ if "%%~1"==""
     )
     exit /b 0
 ) else (
-    set "RDIR_DISABLE_SUSPEND=1"
     set "RDIR_RESULT_FILE=%%TEMP%%\rdir_result_%%RANDOM%%.txt"
     %s %%*
     exit /b %%errorlevel%%
@@ -124,7 +122,7 @@ if "%%~1"==""
     fi
 
     result_file="$TMPDIR/rdir_result_$$.txt"
-    RDIR_DISABLE_SUSPEND=1 RDIR_RESULT_FILE="$result_file" command %s "$@"
+    RDIR_RESULT_FILE="$result_file" command %s "$@"
     if [ -f "$result_file" ] && [ ! -L "$result_file" ] && [ -O "$result_file" ]; then
         dest=$(cat "$result_file" 2>/dev/null)
         rm -f "$result_file"

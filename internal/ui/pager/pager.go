@@ -393,19 +393,6 @@ func (p *PreviewPager) cleanupTerminal() {
 	}
 }
 
-func (p *PreviewPager) resumeFromShell() error {
-	if p.input == nil {
-		return errors.New("no tty available")
-	}
-	rawState, err := term.MakeRaw(int(p.input.Fd()))
-	if err != nil {
-		return err
-	}
-	p.restoreTerm = rawState
-	p.applyWrapSetting()
-	return nil
-}
-
 func (p *PreviewPager) writeString(s string) {
 	switch {
 	case p.writer != nil:
@@ -811,13 +798,6 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 			p.scrollRows(totalLines, contentRows)
 		} else {
 			p.state.PreviewScrollOffset += contentRows
-		}
-	case keyCtrlZ:
-		if err := p.suspendToShell(); err != nil {
-			return true
-		}
-		if err := p.resumeFromShell(); err != nil {
-			return true
 		}
 	case keyHome:
 		p.state.PreviewScrollOffset = 0
@@ -1533,7 +1513,6 @@ const (
 	keyOpenEditor
 	keyShiftUp
 	keyShiftDown
-	keyCtrlZ
 )
 
 type keyEvent struct {
@@ -1578,8 +1557,6 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keyEnd}, nil
 	case 0x03:
 		return keyEvent{kind: keyCtrlC}, nil
-	case 0x1a:
-		return keyEvent{kind: keyCtrlZ}, nil
 	default:
 		if b == '\r' || b == '\n' {
 			return keyEvent{kind: keySpace}, nil

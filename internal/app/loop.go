@@ -2,8 +2,6 @@ package app
 
 import (
 	"fmt"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -36,9 +34,8 @@ func NewApplication() (*Application, error) {
 
 	clipboardCmd, clipboardAvail := detectClipboard()
 	editorCmd, editorAvail := detectEditorCommand()
-	disableSuspend := os.Getenv("RDIR_DISABLE_SUSPEND") == "1"
 
-	state := newInitialState(cwd, clipboardAvail, editorAvail, disableSuspend)
+	state := newInitialState(cwd, clipboardAvail, editorAvail)
 	w, h := screen.Size()
 	state.ScreenWidth = w
 	state.ScreenHeight = h
@@ -80,7 +77,7 @@ func NewApplication() (*Application, error) {
 	return app, nil
 }
 
-func newInitialState(cwd string, clipboardAvail, editorAvail bool, disableSuspend bool) *statepkg.AppState {
+func newInitialState(cwd string, clipboardAvail, editorAvail bool) *statepkg.AppState {
 	return &statepkg.AppState{
 		CurrentPath:        cwd,
 		Files:              []statepkg.FileEntry{},
@@ -94,7 +91,6 @@ func newInitialState(cwd string, clipboardAvail, editorAvail bool, disableSuspen
 		ClipboardAvailable: clipboardAvail,
 		EditorAvailable:    editorAvail,
 		HideHiddenFiles:    true,
-		DisableSuspend:     disableSuspend,
 	}
 }
 
@@ -110,13 +106,6 @@ func (app *Application) Run() {
 			eventChan <- app.screen.PollEvent()
 		}
 	}()
-
-	var sigContCh chan os.Signal
-	if sigs := contSignals(); len(sigs) > 0 {
-		sigContCh = make(chan os.Signal, 1)
-		signal.Notify(sigContCh, sigs...)
-		defer signal.Stop(sigContCh)
-	}
 
 	const animationInterval = 50 * time.Millisecond
 	var animationTimer *time.Timer
@@ -171,10 +160,6 @@ func (app *Application) Run() {
 			renderPending = true
 		case action := <-app.actionCh:
 			if app.handleAction(action) {
-				renderPending = true
-			}
-		case <-sigContCh:
-			if app.resumeAfterStop() {
 				renderPending = true
 			}
 		}
@@ -513,10 +498,6 @@ func (app *Application) handleAction(action statepkg.Action) bool {
 		app.currentPath = app.state.CurrentPath
 		app.shouldQuit = true
 		return false
-	case statepkg.SuspendAction:
-		app.suspendToShell()
-		app.resumeAfterStop()
-		return true
 	}
 
 	return app.handleAppAction(action)
