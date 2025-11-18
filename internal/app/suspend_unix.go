@@ -11,7 +11,10 @@ import (
 func (app *Application) suspendToShell() {
 	// Return terminal control to the shell before stopping the process.
 	_ = app.screen.Suspend()
-	_ = syscall.Kill(0, syscall.SIGTSTP)
+	// Stop only this process; avoid signalling the entire process group
+	// (which can include the wrapper shell function/process that launched
+	// rdir, breaking job control like `fg`).
+	_ = syscall.Kill(syscall.Getpid(), syscall.SIGTSTP)
 }
 
 func (app *Application) resumeAfterStop() bool {

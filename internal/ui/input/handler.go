@@ -68,6 +68,10 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 		ih.actionChan <- statepkg.QuitAction{}
 		return false
 	case tcell.KeyCtrlZ:
+		if ih.state != nil && ih.state.DisableSuspend {
+			ih.actionChan <- statepkg.QuitAction{}
+			return false
+		}
 		ih.actionChan <- statepkg.SuspendAction{}
 		return true
 
