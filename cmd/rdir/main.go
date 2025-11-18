@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -61,8 +62,14 @@ func main() {
 
 	app.Run()
 
-	// Output the current directory so shell can cd to it
+	// Write selected directory to temp file for shell integration
+	// Use PID to make filename unique (supports multiple rdir instances)
 	if path := app.GetCurrentPath(); path != "" {
-		fmt.Println(path)
+		tempDir := os.TempDir()
+		resultFile := filepath.Join(tempDir, fmt.Sprintf("rdir_result_%d.txt", os.Getpid()))
+		// Write with 0600 permissions (owner only) for security
+		if err := os.WriteFile(resultFile, []byte(path), 0600); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not write result file: %v\n", err)
+		}
 	}
 }

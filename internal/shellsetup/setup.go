@@ -41,12 +41,20 @@ func PrintSetup(shellOverride string, cfg Config) {
         return $?
     fi
 
-    dest="$(command %s)"
-    status=$?
-    if [ $status -ne 0 ] || [ -z "$dest" ]; then
-        dest="$PWD"
+    command %s &
+    rdir_pid=$!
+    wait $rdir_pid
+
+    result_file="$TMPDIR/rdir_result_$rdir_pid.txt"
+    if [ -f "$result_file" ] && [ ! -L "$result_file" ] && [ -O "$result_file" ]; then
+        dest=$(cat "$result_file" 2>/dev/null)
+        rm -f "$result_file"
+        if [ -d "$dest" ] 2>/dev/null; then
+            cd "$dest"
+        fi
+    else
+        rm -f "$result_file" 2>/dev/null
     fi
-    cd "$dest"
 }
 `, quoted, quoted)
 	case "fish":
@@ -56,11 +64,18 @@ func PrintSetup(shellOverride string, cfg Config) {
         return $status
     end
 
-    set dest (command %s)
-    if test $status -ne 0 -o -z "$dest"
-        set dest $PWD
+    command %s &
+    set rdir_pid $last_pid
+    wait $rdir_pid
+
+    set result_file "$TMPDIR/rdir_result_$rdir_pid.txt"
+    if test -f "$result_file" -a ! -L "$result_file" -a -O "$result_file"
+        set dest (cat "$result_file" 2>/dev/null)
+        if test -d "$dest" 2>/dev/null
+            builtin cd "$dest"
+        end
     end
-    builtin cd "$dest"
+    rm -f "$result_file" 2>/dev/null
 end
 `, quoted, quoted)
 	case "pwsh", "powershell":
@@ -71,11 +86,20 @@ end
         return
     }
 
-    $dest = & %s
-    if (-not $dest) {
-        $dest = (Get-Location).Path
+    $process = Start-Process -FilePath %s -NoNewWindow -PassThru
+    $process.WaitForExit()
+
+    $resultFile = Join-Path $env:TEMP "rdir_result_$($process.Id).txt"
+    try {
+        if (Test-Path $resultFile -PathType Leaf) {
+            $dest = Get-Content $resultFile -Raw -ErrorAction SilentlyContinue | ForEach-Object { $_.Trim() }
+            if ((Test-Path $dest -PathType Container) -and -not [string]::IsNullOrEmpty($dest)) {
+                Set-Location $dest
+            }
+        }
+    } finally {
+        Remove-Item $resultFile -ErrorAction SilentlyContinue
     }
-    Set-Location $dest
 }
 `, quoted, quoted)
 	case "tcsh", "csh":
@@ -101,12 +125,20 @@ if "%%~1"==""
         return $?
     fi
 
-    dest="$(command %s)"
-    status=$?
-    if [ $status -ne 0 ] || [ -z "$dest" ]; then
-        dest="$PWD"
+    command %s &
+    rdir_pid=$!
+    wait $rdir_pid
+
+    result_file="$TMPDIR/rdir_result_$rdir_pid.txt"
+    if [ -f "$result_file" ] && [ ! -L "$result_file" ] && [ -O "$result_file" ]; then
+        dest=$(cat "$result_file" 2>/dev/null)
+        rm -f "$result_file"
+        if [ -d "$dest" ] 2>/dev/null; then
+            cd "$dest"
+        fi
+    else
+        rm -f "$result_file" 2>/dev/null
     fi
-    cd "$dest"
 }
 `, quoted, quoted)
 	}
