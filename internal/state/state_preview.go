@@ -1,6 +1,9 @@
 package state
 
-import "os"
+import (
+	"os"
+	"time"
+)
 
 func clonePreviewData(src *PreviewData) *PreviewData {
 	if src == nil {
@@ -197,5 +200,33 @@ func (s *AppState) normalizePreviewScroll() {
 		if s.PreviewScrollOffset < 0 {
 			s.PreviewScrollOffset = 0
 		}
+	}
+}
+
+type entryFileInfo struct {
+	name    string
+	size    int64
+	modTime time.Time
+	mode    os.FileMode
+	isDir   bool
+}
+
+func (e entryFileInfo) Name() string       { return e.name }
+func (e entryFileInfo) Size() int64        { return e.size }
+func (e entryFileInfo) Mode() os.FileMode  { return e.mode }
+func (e entryFileInfo) ModTime() time.Time { return e.modTime }
+func (e entryFileInfo) IsDir() bool        { return e.isDir }
+func (e entryFileInfo) Sys() interface{}   { return nil }
+
+func fileInfoFromEntry(entry *FileEntry) os.FileInfo {
+	if entry == nil {
+		return nil
+	}
+	return entryFileInfo{
+		name:    entry.Name,
+		size:    entry.Size,
+		modTime: entry.Modified,
+		mode:    entry.Mode,
+		isDir:   entry.IsDir,
 	}
 }

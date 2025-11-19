@@ -1,5 +1,7 @@
 package state
 
+import "os"
+
 // Action is the base interface for all state mutations
 type Action interface{}
 
@@ -55,6 +57,14 @@ type GoToPathAction struct {
 	Path string
 }
 
+// DirectoryLoadResultAction installs results from the async directory loader.
+type DirectoryLoadResultAction struct {
+	Token   int
+	Path    string
+	Entries []FileEntry
+	Err     error
+}
+
 // ===== PREVIEW ACTIONS =====
 
 type PreviewEnterFullScreenAction struct{}
@@ -66,6 +76,16 @@ type PreviewScrollPageDownAction struct{}
 type PreviewScrollToStartAction struct{}
 type PreviewScrollToEndAction struct{}
 type TogglePreviewWrapAction struct{}
+type PreviewLoadStartAction struct {
+	Token int
+}
+type PreviewLoadResultAction struct {
+	Token   int
+	Path    string
+	Preview *PreviewData
+	Info    os.FileInfo
+	Err     error
+}
 
 // ===== GLOBAL SEARCH ACTIONS =====
 

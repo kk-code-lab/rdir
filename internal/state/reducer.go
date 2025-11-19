@@ -5,15 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	searchpkg "github.com/kk-code-lab/rdir/internal/search"
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
-	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -21,6 +20,7 @@ const (
 	formattedPreviewMaxBytes       = 32 * 1024
 	binaryPreviewMaxBytes          = 1024
 	binaryPreviewLineWidth         = 16
+	previewDebounceDelay           = 150 * time.Millisecond
 )
 
 func min(a, b int) int {
@@ -31,6 +31,8 @@ func min(a, b int) int {
 }
 
 var userHomeDirFn = os.UserHomeDir
+
+type directoryPostLoadFunc func(*StateReducer, *AppState) error
 
 func formatBinaryPreviewLines(content []byte, totalSize int64) BinaryPreview {
 	if len(content) == 0 {
@@ -221,14 +223,106 @@ func textLineMetadataFromSegments(lines [][]StyledTextSegment) []TextLineMetadat
 
 // StateReducer applies actions to state
 type StateReducer struct {
-	selectionHistory map[string]int // path -> selected index
+	selectionHistory   map[string]int // path -> selected index
+	directoryCallbacks map[int][]directoryPostLoadFunc
 }
 
 // NewStateReducer creates a new reducer
 func NewStateReducer() *StateReducer {
 	return &StateReducer{
-		selectionHistory: make(map[string]int),
+		selectionHistory:   make(map[string]int),
+		directoryCallbacks: make(map[int][]directoryPostLoadFunc),
 	}
+}
+
+func (r *StateReducer) enqueueDirectoryCallback(token int, fn directoryPostLoadFunc) {
+	if token == 0 || fn == nil {
+		return
+	}
+	r.directoryCallbacks[token] = append(r.directoryCallbacks[token], fn)
+}
+
+func (r *StateReducer) dropDirectoryCallbacks(token int) {
+	if token == 0 {
+		return
+	}
+	delete(r.directoryCallbacks, token)
+}
+
+func (r *StateReducer) runDirectoryCallbacks(state *AppState, token int) (bool, error) {
+	callbacks, ok := r.directoryCallbacks[token]
+	if !ok || len(callbacks) == 0 {
+		return false, nil
+	}
+	delete(r.directoryCallbacks, token)
+
+	for _, cb := range callbacks {
+		if err := cb(r, state); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
+func (r *StateReducer) completeDirectoryChange(state *AppState, loading bool, fn directoryPostLoadFunc) (*AppState, error) {
+	if fn == nil {
+		if loading {
+			return state, nil
+		}
+		return state, r.generatePreview(state)
+	}
+
+	if loading {
+		token := state.ActiveDirectoryLoadToken()
+		r.enqueueDirectoryCallback(token, fn)
+		return state, nil
+	}
+
+	if err := fn(r, state); err != nil {
+		return state, err
+	}
+	return state, nil
+}
+
+func (r *StateReducer) changeDirectory(state *AppState, path string) error {
+	_, err := r.changeDirectoryWithStatus(state, path)
+	return err
+}
+
+func (r *StateReducer) changeDirectoryWithStatus(state *AppState, path string) (bool, error) {
+	dirPath := path
+	if dirPath == "" {
+		dirPath = state.CurrentPath
+	}
+	dirPath = filepath.Clean(dirPath)
+
+	loader := state.DirectoryLoader
+	dispatch := state.getDispatch()
+	if loader == nil || dispatch == nil {
+		if err := LoadDirectory(state, dirPath); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
+	prevToken := state.ActiveDirectoryLoadToken()
+	if prevToken != 0 {
+		loader.Cancel(prevToken)
+		r.dropDirectoryCallbacks(prevToken)
+	}
+
+	token := state.nextDirectoryLoadToken()
+	state.setDirectoryLoadInFlight(token, dirPath)
+
+	loader.Start(DirectoryLoadRequest{
+		Token: token,
+		Path:  dirPath,
+		Callback: func(result DirectoryLoadResult) {
+			dispatch(DirectoryLoadResultAction(result))
+		},
+	})
+
+	return true, nil
 }
 
 func queryHasUppercase(s string) bool {
@@ -429,28 +523,32 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 
 		// Navigate to new directory
 		newPath := filepath.Join(state.CurrentPath, file.Name)
-		if err := r.changeDirectory(state, newPath); err != nil {
+		loading, err := r.changeDirectoryWithStatus(state, newPath)
+		if err != nil {
 			return state, err
 		}
 
-		// Clear global search when navigating to a new directory
-		state.clearGlobalSearch(false)
+		post := func(r *StateReducer, state *AppState) error {
+			// Clear global search when navigating to a new directory
+			state.clearGlobalSearch(false)
 
-		// Only restore saved selection if we DIDN'T enter from a filtered view
-		// When entering from filter, start at first file (SelectedIndex = 0)
-		if !wasFilteredWhenEntering {
-			if savedIdx, ok := r.selectionHistory[newPath]; ok && savedIdx < len(state.Files) {
-				state.SelectedIndex = savedIdx
-				r.ensureSelectionVisible(state)
+			// Only restore saved selection if we DIDN'T enter from a filtered view
+			// When entering from filter, start at first file (SelectedIndex = 0)
+			if !wasFilteredWhenEntering {
+				if savedIdx, ok := r.selectionHistory[newPath]; ok && savedIdx < len(state.Files) {
+					state.SelectedIndex = savedIdx
+					r.ensureSelectionVisible(state)
+				}
 			}
+
+			// Center the selected file on screen when entering a directory
+			state.centerScrollOnSelection()
+
+			r.addToHistory(state, newPath)
+			return r.generatePreview(state)
 		}
-		// If entered from filter, SelectedIndex is already 0 from resetViewport()
 
-		// Center the selected file on screen when entering a directory
-		state.centerScrollOnSelection()
-
-		r.addToHistory(state, newPath)
-		return state, r.generatePreview(state)
+		return r.completeDirectoryChange(state, loading, post)
 
 	case GoUpAction:
 		parent := filepath.Dir(state.CurrentPath)
@@ -465,27 +563,32 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		currentDirName := filepath.Base(state.CurrentPath)
 
 		// Navigate to parent
-		if err := r.changeDirectory(state, parent); err != nil {
+		loading, err := r.changeDirectoryWithStatus(state, parent)
+		if err != nil {
 			return state, err
 		}
 
-		// Clear global search when navigating to a new directory
-		state.clearGlobalSearch(false)
+		post := func(r *StateReducer, state *AppState) error {
+			// Clear global search when navigating to a new directory
+			state.clearGlobalSearch(false)
 
-		// Find and select the directory we just came from
-		for idx, f := range state.Files {
-			if f.IsDir && f.Name == currentDirName {
-				state.SelectedIndex = idx
-				break
+			// Find and select the directory we just came from
+			for idx, f := range state.Files {
+				if f.IsDir && f.Name == currentDirName {
+					state.SelectedIndex = idx
+					break
+				}
 			}
+
+			r.ensureSelectionVisible(state)
+
+			// Center the selected directory on screen
+			state.centerScrollOnSelection()
+			r.addToHistory(state, parent)
+			return r.generatePreview(state)
 		}
 
-		r.ensureSelectionVisible(state)
-
-		// Center the selected directory on screen
-		state.centerScrollOnSelection()
-		r.addToHistory(state, parent)
-		return state, r.generatePreview(state)
+		return r.completeDirectoryChange(state, loading, post)
 
 	case GoToPathAction:
 		if a.Path == "" {
@@ -499,39 +602,44 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		r.selectionHistory[state.CurrentPath] = state.SelectedIndex
 		prevName := filepath.Base(state.CurrentPath)
 
-		if err := r.changeDirectory(state, target); err != nil {
+		loading, err := r.changeDirectoryWithStatus(state, target)
+		if err != nil {
 			return state, err
 		}
 
-		state.clearGlobalSearch(false)
+		post := func(r *StateReducer, state *AppState) error {
+			state.clearGlobalSearch(false)
 
-		// Prefer selecting the child we came from, if it exists.
-		if prevName != "" {
-			for idx, f := range state.Files {
-				if f.Name == prevName {
-					state.SelectedIndex = idx
-					r.ensureSelectionVisible(state)
-					state.centerScrollOnSelection()
-					r.addToHistory(state, target)
-					return state, r.generatePreview(state)
+			// Prefer selecting the child we came from, if it exists.
+			if prevName != "" {
+				for idx, f := range state.Files {
+					if f.Name == prevName {
+						state.SelectedIndex = idx
+						r.ensureSelectionVisible(state)
+						state.centerScrollOnSelection()
+						r.addToHistory(state, target)
+						return r.generatePreview(state)
+					}
 				}
 			}
-		}
 
-		if savedIdx, ok := r.selectionHistory[target]; ok && savedIdx < len(state.Files) {
-			state.SelectedIndex = savedIdx
-			r.ensureSelectionVisible(state)
-		} else {
-			if len(state.Files) > 0 {
-				state.SelectedIndex = 0
+			if savedIdx, ok := r.selectionHistory[target]; ok && savedIdx < len(state.Files) {
+				state.SelectedIndex = savedIdx
+				r.ensureSelectionVisible(state)
 			} else {
-				state.SelectedIndex = -1
+				if len(state.Files) > 0 {
+					state.SelectedIndex = 0
+				} else {
+					state.SelectedIndex = -1
+				}
 			}
+
+			state.centerScrollOnSelection()
+			r.addToHistory(state, target)
+			return r.generatePreview(state)
 		}
 
-		state.centerScrollOnSelection()
-		r.addToHistory(state, target)
-		return state, r.generatePreview(state)
+		return r.completeDirectoryChange(state, loading, post)
 
 	case GoHomeAction:
 		homeDir, err := userHomeDirFn()
@@ -549,20 +657,25 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 
 		r.selectionHistory[state.CurrentPath] = state.SelectedIndex
 
-		if err := r.changeDirectory(state, homeDir); err != nil {
+		loading, err := r.changeDirectoryWithStatus(state, homeDir)
+		if err != nil {
 			return state, err
 		}
 
-		state.clearGlobalSearch(false)
+		post := func(r *StateReducer, state *AppState) error {
+			state.clearGlobalSearch(false)
 
-		if savedIdx, ok := r.selectionHistory[homeDir]; ok && savedIdx < len(state.Files) {
-			state.SelectedIndex = savedIdx
-			r.ensureSelectionVisible(state)
+			if savedIdx, ok := r.selectionHistory[homeDir]; ok && savedIdx < len(state.Files) {
+				state.SelectedIndex = savedIdx
+				r.ensureSelectionVisible(state)
+			}
+
+			state.centerScrollOnSelection()
+			r.addToHistory(state, homeDir)
+			return r.generatePreview(state)
 		}
 
-		state.centerScrollOnSelection()
-		r.addToHistory(state, homeDir)
-		return state, r.generatePreview(state)
+		return r.completeDirectoryChange(state, loading, post)
 
 	case GoToHistoryAction:
 		switch a.Direction {
@@ -573,22 +686,27 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 
 				state.HistoryIndex--
 				path := state.History[state.HistoryIndex]
-				if err := r.changeDirectory(state, path); err != nil {
+				loading, err := r.changeDirectoryWithStatus(state, path)
+				if err != nil {
 					return state, err
 				}
 
-				// Clear global search when navigating to a new directory
-				state.clearGlobalSearch(false)
+				post := func(r *StateReducer, state *AppState) error {
+					// Clear global search when navigating to a new directory
+					state.clearGlobalSearch(false)
 
-				// Restore saved position AFTER changing directory
-				// changeDirectory calls resetViewport which zeros SelectedIndex
-				if savedIdx, ok := r.selectionHistory[path]; ok && savedIdx < len(state.Files) {
-					state.SelectedIndex = savedIdx
-					r.ensureSelectionVisible(state)
+					// Restore saved position AFTER changing directory
+					// changeDirectory calls resetViewport which zeros SelectedIndex
+					if savedIdx, ok := r.selectionHistory[path]; ok && savedIdx < len(state.Files) {
+						state.SelectedIndex = savedIdx
+						r.ensureSelectionVisible(state)
+					}
+					// Center the selected file on screen
+					state.centerScrollOnSelection()
+					return r.generatePreview(state)
 				}
-				// Center the selected file on screen
-				state.centerScrollOnSelection()
-				return state, r.generatePreview(state)
+
+				return r.completeDirectoryChange(state, loading, post)
 			}
 		case "forward":
 			if state.HistoryIndex < len(state.History)-1 {
@@ -597,31 +715,132 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 
 				state.HistoryIndex++
 				path := state.History[state.HistoryIndex]
-				if err := r.changeDirectory(state, path); err != nil {
+				loading, err := r.changeDirectoryWithStatus(state, path)
+				if err != nil {
 					return state, err
 				}
 
-				// Clear global search when navigating to a new directory
-				state.clearGlobalSearch(false)
+				post := func(r *StateReducer, state *AppState) error {
+					// Clear global search when navigating to a new directory
+					state.clearGlobalSearch(false)
 
-				// Restore saved position AFTER changing directory
-				// changeDirectory calls resetViewport which zeros SelectedIndex
-				if savedIdx, ok := r.selectionHistory[path]; ok && savedIdx < len(state.Files) {
-					state.SelectedIndex = savedIdx
-					r.ensureSelectionVisible(state)
+					// Restore saved position AFTER changing directory
+					// changeDirectory calls resetViewport which zeros SelectedIndex
+					if savedIdx, ok := r.selectionHistory[path]; ok && savedIdx < len(state.Files) {
+						state.SelectedIndex = savedIdx
+						r.ensureSelectionVisible(state)
+					}
+					// Center the selected file on screen
+					state.centerScrollOnSelection()
+					return r.generatePreview(state)
 				}
-				// Center the selected file on screen
-				state.centerScrollOnSelection()
-				return state, r.generatePreview(state)
+
+				return r.completeDirectoryChange(state, loading, post)
 			}
 		}
 		return state, nil
 
 	case RefreshDirectoryAction:
-		if err := r.refreshDirectory(state); err != nil {
+		snapshot := captureRefreshSnapshot(state)
+		loading, err := r.changeDirectoryWithStatus(state, state.CurrentPath)
+		if err != nil {
 			return state, err
 		}
-		return state, r.generatePreview(state)
+
+		post := func(r *StateReducer, state *AppState) error {
+			applyRefreshSnapshot(state, snapshot)
+			return r.generatePreview(state)
+		}
+
+		return r.completeDirectoryChange(state, loading, post)
+
+	case DirectoryLoadResultAction:
+		if a.Token != state.ActiveDirectoryLoadToken() {
+			return state, nil
+		}
+
+		state.clearDirectoryLoadingState()
+
+		if a.Err != nil {
+			state.LastError = a.Err
+			r.dropDirectoryCallbacks(a.Token)
+			return state, nil
+		}
+
+		applyDirectoryEntries(state, a.Path, a.Entries)
+
+		ran, err := r.runDirectoryCallbacks(state, a.Token)
+		if err != nil {
+			return state, err
+		}
+		if !ran {
+			return state, r.generatePreview(state)
+		}
+		return state, nil
+
+	case PreviewLoadStartAction:
+		pendingToken, pendingPath, pendingReset := state.previewPendingLoad()
+		if pendingToken == 0 || pendingToken != a.Token || pendingPath == "" {
+			return state, nil
+		}
+
+		state.cancelPreviewDebounceTimer()
+		state.clearPreviewPendingLoad()
+
+		loader := state.PreviewLoader
+		dispatch := state.getDispatch()
+		if loader == nil || dispatch == nil {
+			preview, info, err := buildPreviewData(pendingPath, state.HideHiddenFiles)
+			if err != nil {
+				state.PreviewData = nil
+				state.resetPreviewScroll()
+				return state, nil
+			}
+			state.clearPreviewLoadingState()
+			r.applyPreviewToState(state, preview, info, pendingReset, pendingPath)
+			return state, nil
+		}
+
+		// Cancel any inflight load (should already be cancelled, but be defensive).
+		if state.ActivePreviewLoadToken() != 0 {
+			loader.Cancel(state.ActivePreviewLoadToken())
+		}
+
+		state.setPreviewLoadInFlight(pendingToken, pendingPath, pendingReset)
+
+		loader.Start(PreviewLoadRequest{
+			Token:      pendingToken,
+			Path:       pendingPath,
+			HideHidden: state.HideHiddenFiles,
+			Callback: func(result PreviewLoadResult) {
+				dispatch(PreviewLoadResultAction{
+					Token:   result.Token,
+					Path:    result.Path,
+					Preview: result.Data,
+					Info:    result.Info,
+					Err:     result.Err,
+				})
+			},
+		})
+		return state, nil
+
+	case PreviewLoadResultAction:
+		if a.Token != state.ActivePreviewLoadToken() {
+			return state, nil
+		}
+
+		resetScroll := state.previewShouldResetScroll()
+		state.clearPreviewLoadingState()
+
+		if a.Err != nil {
+			state.LastError = a.Err
+			state.PreviewData = nil
+			state.resetPreviewScroll()
+			return state, nil
+		}
+
+		r.applyPreviewToState(state, a.Preview, a.Info, resetScroll, a.Path)
+		return state, nil
 
 	// ===== FILTERING =====
 
@@ -1285,27 +1504,33 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			r.selectionHistory[state.CurrentPath] = state.SelectedIndex
 
 			// Navigate to the directory containing the file
-			if err := r.changeDirectory(state, result.DirPath); err != nil {
+			loading, err := r.changeDirectoryWithStatus(state, result.DirPath)
+			if err != nil {
 				return state, err
 			}
 
-			// Find and select the file in the new directory
-			for i, f := range state.Files {
-				if f.Name == result.FileName {
-					state.SelectedIndex = i
-					break
+			post := func(r *StateReducer, state *AppState) error {
+				// Find and select the file in the new directory
+				for i, f := range state.Files {
+					if f.Name == result.FileName {
+						state.SelectedIndex = i
+						break
+					}
 				}
+
+				state.updateScrollVisibility()
+
+				// Add to history just like normal navigation
+				r.addToHistory(state, result.DirPath)
+
+				// Close global search after navigating
+				state.clearGlobalSearch(false)
+				return r.generatePreview(state)
 			}
 
-			state.updateScrollVisibility()
-
-			// Add to history just like normal navigation
-			r.addToHistory(state, result.DirPath)
-
-			// Close global search after navigating
-			state.clearGlobalSearch(false)
+			return r.completeDirectoryChange(state, loading, post)
 		}
-		return state, r.generatePreview(state)
+		return state, nil
 
 	case ToggleHiddenFilesAction:
 		// IMPORTANT: Remember display position BEFORE toggle
@@ -1623,11 +1848,6 @@ func (r *StateReducer) ensureSelectionVisible(state *AppState) {
 	state.SelectedIndex = -1
 }
 
-// changeDirectory changes current directory and loads files
-func (r *StateReducer) changeDirectory(state *AppState, path string) error {
-	return LoadDirectory(state, path)
-}
-
 type filterSnapshot struct {
 	active        bool
 	query         string
@@ -1653,33 +1873,42 @@ func findFileIndexByName(files []FileEntry, name string) int {
 	return -1
 }
 
-func (r *StateReducer) refreshDirectory(state *AppState) error {
+type refreshSnapshot struct {
+	prevFileName      string
+	prevSelectedIndex int
+	prevDisplayIdx    int
+	prevScrollOffset  int
+	prevFilter        filterSnapshot
+}
+
+func captureRefreshSnapshot(state *AppState) refreshSnapshot {
 	prevFile := state.getCurrentFile()
 	prevFileName := ""
 	if prevFile != nil {
 		prevFileName = prevFile.Name
 	}
 
-	prevSelectedIndex := state.SelectedIndex
-	prevDisplayIdx := state.getDisplaySelectedIndex()
-	prevScrollOffset := state.ScrollOffset
-	prevFilter := snapshotFilterState(state)
-
-	if err := LoadDirectory(state); err != nil {
-		return err
+	return refreshSnapshot{
+		prevFileName:      prevFileName,
+		prevSelectedIndex: state.SelectedIndex,
+		prevDisplayIdx:    state.getDisplaySelectedIndex(),
+		prevScrollOffset:  state.ScrollOffset,
+		prevFilter:        snapshotFilterState(state),
 	}
+}
 
+func applyRefreshSnapshot(state *AppState, snap refreshSnapshot) {
 	restoredIndex := -1
-	if prevFileName != "" {
-		if idx := findFileIndexByName(state.Files, prevFileName); idx >= 0 {
+	if snap.prevFileName != "" {
+		if idx := findFileIndexByName(state.Files, snap.prevFileName); idx >= 0 {
 			state.SelectedIndex = idx
 			restoredIndex = idx
 		}
 	}
 
-	if restoredIndex == -1 && prevSelectedIndex >= 0 {
-		if prevSelectedIndex < len(state.Files) {
-			state.SelectedIndex = prevSelectedIndex
+	if restoredIndex == -1 && snap.prevSelectedIndex >= 0 {
+		if snap.prevSelectedIndex < len(state.Files) {
+			state.SelectedIndex = snap.prevSelectedIndex
 		} else if len(state.Files) > 0 {
 			state.SelectedIndex = len(state.Files) - 1
 		} else {
@@ -1688,18 +1917,59 @@ func (r *StateReducer) refreshDirectory(state *AppState) error {
 		restoredIndex = state.SelectedIndex
 	}
 
-	if prevFilter.active {
+	if snap.prevFilter.active {
 		state.FilterActive = true
-		state.FilterQuery = prevFilter.query
-		state.FilterCaseSensitive = prevFilter.caseSensitive
-		state.FilterSavedIndex = prevFilter.savedIndex
+		state.FilterQuery = snap.prevFilter.query
+		state.FilterCaseSensitive = snap.prevFilter.caseSensitive
+		state.FilterSavedIndex = snap.prevFilter.savedIndex
 		state.recomputeFilter()
-		state.retainSelectionAfterFilterChange(restoredIndex, prevDisplayIdx)
+		state.retainSelectionAfterFilterChange(restoredIndex, snap.prevDisplayIdx)
 	}
 
-	state.ScrollOffset = prevScrollOffset
+	state.ScrollOffset = snap.prevScrollOffset
 	state.updateScrollVisibility()
-	return nil
+}
+
+func (r *StateReducer) cancelPreviewLoad(state *AppState) {
+	if state == nil {
+		return
+	}
+	token := state.ActivePreviewLoadToken()
+	if token != 0 && state.PreviewLoader != nil {
+		state.PreviewLoader.Cancel(token)
+	}
+	state.clearPreviewLoadingState()
+	state.cancelPreviewDebounceTimer()
+	state.clearPreviewPendingLoad()
+}
+
+func (r *StateReducer) applyPreviewToState(state *AppState, preview *PreviewData, info os.FileInfo, resetScroll bool, path string) {
+	if state == nil {
+		return
+	}
+	if preview == nil {
+		state.PreviewData = nil
+		state.resetPreviewScroll()
+		return
+	}
+
+	if info != nil {
+		state.storeFilePreview(path, info, preview)
+	}
+
+	state.PreviewData = preview
+	if resetScroll {
+		if path != "" && state.restorePreviewScrollForPath(path) {
+			state.clampPreviewScroll()
+		} else {
+			state.PreviewScrollOffset = 0
+			state.PreviewWrapOffset = 0
+		}
+		state.PreviewFullScreen = false
+	} else {
+		state.clampPreviewScroll()
+		state.rememberPreviewScrollForCurrentFile()
+	}
 }
 
 // addToHistory adds path to history, removing forward history if needed
@@ -1732,121 +2002,68 @@ func (r *StateReducer) addToHistory(state *AppState, path string) {
 func (r *StateReducer) generatePreview(state *AppState) error {
 	file := state.getCurrentFile()
 	if file == nil {
+		r.cancelPreviewLoad(state)
 		state.PreviewData = nil
 		state.resetPreviewScroll()
 		return nil
 	}
 
+	filePath := filepath.Join(state.CurrentPath, file.Name)
 	sameFile := state.PreviewData != nil &&
 		state.PreviewData.Name == file.Name &&
 		state.PreviewData.IsDir == file.IsDir
 	resetScroll := !sameFile
 
-	filePath := filepath.Join(state.CurrentPath, file.Name)
-	info, err := os.Stat(filePath)
-	if err != nil {
-		state.PreviewData = nil
-		state.resetPreviewScroll()
+	// Fast path: if we already have cached preview with matching metadata, reuse it immediately
+	if info := fileInfoFromEntry(file); info != nil {
+		if cached, ok := state.getCachedFilePreview(filePath, info); ok {
+			r.applyPreviewToState(state, cached, info, resetScroll, filePath)
+			// Still continue to schedule loader to refresh in background for freshness.
+		}
+	}
+
+	loader := state.PreviewLoader
+	dispatch := state.getDispatch()
+	if loader == nil || dispatch == nil {
+		r.cancelPreviewLoad(state)
+		preview, info, err := buildPreviewData(filePath, state.HideHiddenFiles)
+		if err != nil {
+			state.PreviewData = nil
+			state.resetPreviewScroll()
+			return nil
+		}
+		state.clearPreviewLoadingState()
+		r.applyPreviewToState(state, preview, info, resetScroll, filePath)
 		return nil
 	}
 
-	if !info.IsDir() {
-		if cached, ok := state.getCachedFilePreview(filePath, info); ok {
-			state.PreviewData = cached
-			if resetScroll {
-				if !state.restorePreviewScrollForPath(filePath) {
-					state.PreviewScrollOffset = 0
-					state.PreviewWrapOffset = 0
-				}
-				state.PreviewFullScreen = false
-			}
-			state.clampPreviewScroll()
-			return nil
-		}
+	// If a load is currently in progress for another file, cancel it.
+	if state.PreviewLoading && state.PreviewLoadingPath != "" && state.PreviewLoadingPath != filePath {
+		r.cancelPreviewLoad(state)
 	}
 
-	// Normalize filename for preview display
-	normalizedName := norm.NFC.String(info.Name())
-
-	preview := &PreviewData{
-		IsDir:    info.IsDir(),
-		Name:     normalizedName,
-		Size:     info.Size(),
-		Modified: info.ModTime(),
-		Mode:     info.Mode(),
+	// If a load is already pending for this path, just update reset flag.
+	if pendingToken, pendingPath, _ := state.previewPendingLoad(); pendingPath == filePath && pendingToken != 0 {
+		state.setPreviewPendingLoad(pendingToken, filePath, resetScroll)
+		return nil
+	} else if pendingPath != "" && pendingPath != filePath {
+		state.cancelPreviewDebounceTimer()
+		state.clearPreviewPendingLoad()
 	}
 
-	if info.IsDir() {
-		// Directory preview
-		entries, err := os.ReadDir(filePath)
-		if err == nil {
-			for _, e := range entries {
-				entryInfo, err := e.Info()
-				if err != nil {
-					continue
-				}
-
-				isDir := e.IsDir()
-				isSymlink := (entryInfo.Mode() & os.ModeSymlink) != 0
-				if isSymlink {
-					targetInfo, err := os.Stat(filepath.Join(filePath, e.Name()))
-					if err == nil {
-						isDir = targetInfo.IsDir()
-					}
-				}
-
-				normalizedName := norm.NFC.String(e.Name())
-				entry := FileEntry{
-					Name:      normalizedName,
-					IsDir:     isDir,
-					IsSymlink: isSymlink,
-					Size:      entryInfo.Size(),
-					Modified:  entryInfo.ModTime(),
-					Mode:      entryInfo.Mode(),
-				}
-
-				if state.HideHiddenFiles && entry.IsHidden() {
-					continue
-				}
-
-				preview.DirEntries = append(preview.DirEntries, entry)
-			}
-
-			sort.Slice(preview.DirEntries, func(i, j int) bool {
-				if preview.DirEntries[i].IsDir != preview.DirEntries[j].IsDir {
-					return preview.DirEntries[i].IsDir
-				}
-				return preview.DirEntries[i].Name < preview.DirEntries[j].Name
-			})
-		}
-	} else {
-		// File preview: show text snippet or binary hex dump depending on detection
-		content, err := fsutil.ReadFileHead(filePath, previewByteLimit)
-		if err == nil {
-			ctx := previewFormatContext{
-				path:    filePath,
-				info:    info,
-				content: content,
-			}
-			for _, formatter := range previewFormatters {
-				if formatter.CanHandle(ctx) {
-					formatter.Format(ctx, preview)
-					break
-				}
-			}
-		}
-		state.storeFilePreview(filePath, info, preview)
+	// If a load is currently running for this same path, keep waiting.
+	if state.PreviewLoading && state.PreviewLoadingPath == filePath {
+		state.pendingPreviewReset = resetScroll
+		return nil
 	}
 
-	state.PreviewData = preview
-	if resetScroll {
-		state.PreviewScrollOffset = 0
-		state.PreviewWrapOffset = 0
-		state.PreviewFullScreen = false
-	} else {
-		state.clampPreviewScroll()
-		state.rememberPreviewScrollForCurrentFile()
-	}
+	state.cancelPreviewDebounceTimer()
+
+	token := state.nextPreviewLoadToken()
+	state.setPreviewPendingLoad(token, filePath, resetScroll)
+	state.previewDebounceTimer = time.AfterFunc(previewDebounceDelay, func() {
+		dispatch(PreviewLoadStartAction{Token: token})
+	})
 	return nil
 }
 

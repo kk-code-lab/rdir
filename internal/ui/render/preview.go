@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
@@ -26,9 +27,20 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 	}
 
 	y := 1
+	loading := state != nil && state.PreviewLoading
+	loadingLabel := ""
+	if loading {
+		loadingLabel = r.previewLoadingLabel(state)
+	}
+
 	if state.PreviewData == nil {
 		placeholder := " preview unavailable "
-		r.drawTextLine(startX, y, panelWidth, placeholder, baseStyle.Dim(true))
+		style := baseStyle.Dim(true)
+		if loading {
+			placeholder = loadingLabel
+			style = baseStyle.Foreground(r.theme.SymlinkFg).Bold(true)
+		}
+		r.drawTextLine(startX, y, panelWidth, placeholder, style)
 		y++
 		for y < h-1 {
 			for x := startX; x < startX+panelWidth && x < w; x++ {
@@ -61,6 +73,13 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		}
 		y++
 		return true
+	}
+
+	if loading && state.PreviewScrollOffset == 0 {
+		indicatorStyle := baseStyle.Foreground(r.theme.SymlinkFg).Bold(true)
+		if !drawLine(loadingLabel, indicatorStyle) {
+			return
+		}
 	}
 
 	if preview.IsDir && len(preview.DirEntries) > 0 {
@@ -189,6 +208,35 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		}
 		y++
 	}
+}
+
+func (r *Renderer) previewLoadingLabel(state *statepkg.AppState) string {
+	spinner := r.previewSpinner(state)
+	label := fmt.Sprintf(" %s loading preview… ", spinner)
+	if state == nil {
+		return label
+	}
+	if file := state.CurrentFile(); file != nil && file.Name != "" {
+		label = fmt.Sprintf(" %s loading %s… ", spinner, textutil.SanitizeTerminalText(file.Name))
+	}
+	return label
+}
+
+var previewSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+func (r *Renderer) previewSpinner(state *statepkg.AppState) string {
+	if state == nil || state.PreviewLoadingStarted.IsZero() {
+		return previewSpinnerFrames[0]
+	}
+	elapsed := time.Since(state.PreviewLoadingStarted)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	frame := int(elapsed/(100*time.Millisecond)) % len(previewSpinnerFrames)
+	if frame < 0 {
+		frame = 0
+	}
+	return previewSpinnerFrames[frame]
 }
 
 func (r *Renderer) drawBinaryPreviewLine(line string, startX, panelWidth int, mode binaryPreviewMode, style tcell.Style, y, bottomLimit, screenWidth int) bool {
