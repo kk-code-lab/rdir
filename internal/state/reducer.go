@@ -372,16 +372,20 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 
 	case NavigateDownAction:
 		displayFiles := state.getDisplayFiles()
+		if len(displayFiles) == 0 {
+			return state, nil
+		}
+
 		displayIdx := state.getDisplaySelectedIndex()
 
 		// If no selection yet (in filter mode with -1), start at 0
 		if displayIdx < 0 {
 			displayIdx = 0
-		} else if displayIdx < len(displayFiles)-1 {
-			displayIdx = displayIdx + 1
+		} else if displayIdx >= len(displayFiles)-1 {
+			// Already at last item, nothing to do
+			return state, nil
 		} else {
-			// Already at last item, stay there
-			return state, r.generatePreview(state)
+			displayIdx++
 		}
 
 		state.setDisplaySelectedIndex(displayIdx)
@@ -390,16 +394,21 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 
 	case NavigateUpAction:
 		displayFiles := state.getDisplayFiles()
+		if len(displayFiles) == 0 {
+			return state, nil
+		}
+
 		displayIdx := state.getDisplaySelectedIndex()
 
 		// If no selection yet (in filter mode with -1), start at last item
 		if displayIdx < 0 {
 			displayIdx = len(displayFiles) - 1
-		} else if displayIdx > 0 {
-			displayIdx = displayIdx - 1
 		} else {
-			// Already at first item, stay there
-			return state, r.generatePreview(state)
+			if displayIdx == 0 {
+				// Already at first item
+				return state, nil
+			}
+			displayIdx--
 		}
 
 		state.setDisplaySelectedIndex(displayIdx)
@@ -731,40 +740,72 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 	// ===== SCROLLING =====
 
 	case ScrollUpAction:
-		if state.getDisplaySelectedIndex() > 0 {
-			newIdx := state.getDisplaySelectedIndex() - 1
-			state.setDisplaySelectedIndex(newIdx)
-			state.updateScrollVisibility()
+		displayIdx := state.getDisplaySelectedIndex()
+		if displayIdx <= 0 {
+			return state, nil
 		}
+
+		state.setDisplaySelectedIndex(displayIdx - 1)
+		state.updateScrollVisibility()
 		return state, r.generatePreview(state)
 
 	case ScrollDownAction:
 		displayFiles := state.getDisplayFiles()
-		if state.getDisplaySelectedIndex() < len(displayFiles)-1 {
-			newIdx := state.getDisplaySelectedIndex() + 1
-			state.setDisplaySelectedIndex(newIdx)
-			state.updateScrollVisibility()
+		if len(displayFiles) == 0 {
+			return state, nil
 		}
+
+		displayIdx := state.getDisplaySelectedIndex()
+		if displayIdx >= len(displayFiles)-1 {
+			return state, nil
+		}
+
+		state.setDisplaySelectedIndex(displayIdx + 1)
+		state.updateScrollVisibility()
 		return state, r.generatePreview(state)
 
 	case ScrollPageUpAction:
+		displayFiles := state.getDisplayFiles()
+		if len(displayFiles) == 0 {
+			return state, nil
+		}
+
 		visibleLines := state.visibleLines()
+		if visibleLines <= 0 {
+			return state, nil
+		}
+
 		displayIdx := state.getDisplaySelectedIndex()
+
 		newIdx := displayIdx - visibleLines
 		if newIdx < 0 {
 			newIdx = 0
+		}
+		if newIdx == displayIdx {
+			return state, nil
 		}
 		state.setDisplaySelectedIndex(newIdx)
 		state.updateScrollVisibility()
 		return state, r.generatePreview(state)
 
 	case ScrollPageDownAction:
-		visibleLines := state.visibleLines()
 		displayFiles := state.getDisplayFiles()
+		if len(displayFiles) == 0 {
+			return state, nil
+		}
+
+		visibleLines := state.visibleLines()
+		if visibleLines <= 0 {
+			return state, nil
+		}
+
 		displayIdx := state.getDisplaySelectedIndex()
 		newIdx := displayIdx + visibleLines
 		if newIdx >= len(displayFiles) {
 			newIdx = len(displayFiles) - 1
+		}
+		if newIdx == displayIdx {
+			return state, nil
 		}
 		state.setDisplaySelectedIndex(newIdx)
 		state.updateScrollVisibility()
@@ -775,6 +816,9 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		if len(displayFiles) == 0 {
 			return state, nil
 		}
+		if state.getDisplaySelectedIndex() == 0 {
+			return state, nil
+		}
 		state.setDisplaySelectedIndex(0)
 		state.updateScrollVisibility()
 		return state, r.generatePreview(state)
@@ -782,6 +826,9 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 	case ScrollToEndAction:
 		displayFiles := state.getDisplayFiles()
 		if len(displayFiles) == 0 {
+			return state, nil
+		}
+		if state.getDisplaySelectedIndex() == len(displayFiles)-1 {
 			return state, nil
 		}
 		state.setDisplaySelectedIndex(len(displayFiles) - 1)
