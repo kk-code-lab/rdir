@@ -292,7 +292,7 @@ func (r *StateReducer) changeDirectory(state *AppState, path string) error {
 func (r *StateReducer) changeDirectoryWithStatus(state *AppState, path string) (bool, error) {
 	dirPath := path
 	if dirPath == "" {
-		dirPath = state.CurrentPath
+		dirPath = state.navigationPath()
 	}
 	dirPath = filepath.Clean(dirPath)
 
@@ -551,8 +551,9 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		return r.completeDirectoryChange(state, loading, post)
 
 	case GoUpAction:
-		parent := filepath.Dir(state.CurrentPath)
-		if parent == state.CurrentPath {
+		currentPath := state.navigationPath()
+		parent := filepath.Dir(currentPath)
+		if parent == currentPath {
 			return state, nil // Already at root
 		}
 
@@ -560,7 +561,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		r.selectionHistory[state.CurrentPath] = state.SelectedIndex
 
 		// Find which directory we came from
-		currentDirName := filepath.Base(state.CurrentPath)
+		currentDirName := filepath.Base(currentPath)
 
 		// Navigate to parent
 		loading, err := r.changeDirectoryWithStatus(state, parent)
@@ -595,7 +596,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			return state, nil
 		}
 		target := filepath.Clean(a.Path)
-		if target == state.CurrentPath {
+		if target == state.navigationPath() {
 			return state, r.generatePreview(state)
 		}
 
@@ -651,7 +652,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		}
 
 		homeDir = filepath.Clean(homeDir)
-		if homeDir == state.CurrentPath {
+		if homeDir == state.navigationPath() {
 			return state, nil
 		}
 
@@ -807,6 +808,16 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		}
 
 		state.setPreviewLoadInFlight(pendingToken, pendingPath, pendingReset)
+
+		// If we have a fresh cache entry, show it immediately after debounce while
+		// the loader refreshes in the background.
+		if entry := state.getCurrentFile(); entry != nil {
+			if info := fileInfoFromEntry(entry); info != nil {
+				if cached, ok := state.getCachedFilePreview(pendingPath, info); ok {
+					r.applyPreviewToState(state, cached, info, pendingReset, pendingPath)
+				}
+			}
+		}
 
 		loader.Start(PreviewLoadRequest{
 			Token:      pendingToken,
@@ -2014,17 +2025,17 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 		state.PreviewData.IsDir == file.IsDir
 	resetScroll := !sameFile
 
-	// Fast path: if we already have cached preview with matching metadata, reuse it immediately
-	if info := fileInfoFromEntry(file); info != nil {
-		if cached, ok := state.getCachedFilePreview(filePath, info); ok {
-			r.applyPreviewToState(state, cached, info, resetScroll, filePath)
-			// Still continue to schedule loader to refresh in background for freshness.
-		}
-	}
-
 	loader := state.PreviewLoader
 	dispatch := state.getDispatch()
 	if loader == nil || dispatch == nil {
+		// Synchronous path: reuse cache immediately if it matches before doing any work.
+		if info := fileInfoFromEntry(file); info != nil {
+			if cached, ok := state.getCachedFilePreview(filePath, info); ok {
+				r.applyPreviewToState(state, cached, info, resetScroll, filePath)
+				return nil
+			}
+		}
+
 		r.cancelPreviewLoad(state)
 		preview, info, err := buildPreviewData(filePath, state.HideHiddenFiles)
 		if err != nil {
