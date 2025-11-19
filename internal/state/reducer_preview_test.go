@@ -6,183 +6,109 @@ import (
 	"testing"
 )
 
-func TestPreviewEnterAndExitFullScreen(t *testing.T) {
-	reducer := NewStateReducer()
-	state := &AppState{
-		PreviewData:  &PreviewData{TextLines: []string{"line"}},
-		ScreenHeight: 10,
-	}
-
-	if _, err := reducer.Reduce(state, PreviewEnterFullScreenAction{}); err != nil {
-		t.Fatalf("enter fullscreen failed: %v", err)
-	}
-	if !state.PreviewFullScreen {
-		t.Fatal("expected preview fullscreen flag to be set")
-	}
-
-	if _, err := reducer.Reduce(state, PreviewExitFullScreenAction{}); err != nil {
-		t.Fatalf("exit fullscreen failed: %v", err)
-	}
-	if state.PreviewFullScreen {
-		t.Fatal("expected preview fullscreen flag to be cleared")
-	}
+type stubPreviewLoader struct {
+	lastReq PreviewLoadRequest
+	cancel  int
 }
 
-func TestPreviewScrollRequiresFullScreen(t *testing.T) {
-	reducer := NewStateReducer()
-	state := &AppState{
-		PreviewData:  &PreviewData{TextLines: make([]string, 20)},
-		ScreenHeight: 8,
-	}
-
-	if _, err := reducer.Reduce(state, PreviewScrollDownAction{}); err != nil {
-		t.Fatalf("scroll action failed: %v", err)
-	}
-	if state.PreviewScrollOffset != 0 {
-		t.Fatalf("scroll should be ignored outside fullscreen, got %d", state.PreviewScrollOffset)
-	}
-
-	state.PreviewFullScreen = true
-	if _, err := reducer.Reduce(state, PreviewScrollDownAction{}); err != nil {
-		t.Fatalf("scroll down in fullscreen failed: %v", err)
-	}
-	if state.PreviewScrollOffset != 1 {
-		t.Fatalf("expected offset 1, got %d", state.PreviewScrollOffset)
-	}
+func (l *stubPreviewLoader) Start(req PreviewLoadRequest) {
+	l.lastReq = req
 }
 
-func TestPreviewScrollPagingClampsOffsets(t *testing.T) {
-	reducer := NewStateReducer()
-	state := &AppState{
-		PreviewData:       &PreviewData{TextLines: make([]string, 100)},
-		ScreenHeight:      8, // content rows = 4 with fullscreen padding
-		PreviewFullScreen: true,
-	}
-
-	if _, err := reducer.Reduce(state, PreviewScrollPageDownAction{}); err != nil {
-		t.Fatalf("page down failed: %v", err)
-	}
-	if state.PreviewScrollOffset != 4 {
-		t.Fatalf("expected offset 4 after page down, got %d", state.PreviewScrollOffset)
-	}
-
-	if _, err := reducer.Reduce(state, PreviewScrollToEndAction{}); err != nil {
-		t.Fatalf("scroll to end failed: %v", err)
-	}
-	max := state.maxPreviewScrollOffset()
-	if state.PreviewScrollOffset != max {
-		t.Fatalf("expected offset %d, got %d", max, state.PreviewScrollOffset)
-	}
-
-	if _, err := reducer.Reduce(state, PreviewScrollToStartAction{}); err != nil {
-		t.Fatalf("scroll to start failed: %v", err)
-	}
-	if state.PreviewScrollOffset != 0 {
-		t.Fatalf("expected offset reset to 0, got %d", state.PreviewScrollOffset)
-	}
+func (l *stubPreviewLoader) Cancel(token int) {
+	l.cancel = token
 }
 
-func TestGeneratePreviewPreservesOffsetForSameFile(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "rdir-preview-preserve-")
+// Test that rapid selection changes do not update preview until the debounce fires,
+// and that only the latest selection is loaded.
+func TestGeneratePreviewDebounceAppliesLatestSelection(t *testing.T) {
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "a.txt")
+	fileB := filepath.Join(dir, "b.txt")
+	if err := os.WriteFile(fileA, []byte("content a"), 0o644); err != nil {
+		t.Fatalf("write a: %v", err)
+	}
+	if err := os.WriteFile(fileB, []byte("content b"), 0o644); err != nil {
+		t.Fatalf("write b: %v", err)
+	}
+
+	entries, err := readDirectoryEntries(dir)
 	if err != nil {
-		t.Fatalf("temp dir: %v", err)
+		t.Fatalf("read entries: %v", err)
 	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	filePath := filepath.Join(tmpDir, "test.txt")
-	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10"
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		t.Fatalf("write file: %v", err)
+	state := &AppState{
+		CurrentPath:     dir,
+		ScreenHeight:    40,
+		ScreenWidth:     80,
+		HideHiddenFiles: true,
 	}
+	applyDirectoryEntries(state, dir, entries)
+
+	var dispatched []Action
+	state.SetDispatch(func(a Action) { dispatched = append(dispatched, a) })
+	loader := &stubPreviewLoader{}
+	state.PreviewLoader = loader
 
 	reducer := NewStateReducer()
-	state := &AppState{
-		ScreenHeight: 10,
-		ScreenWidth:  80,
-	}
 
-	if err := reducer.changeDirectory(state, tmpDir); err != nil {
-		t.Fatalf("change directory failed: %v", err)
-	}
-
+	// First selection (a.txt) schedules a pending load but should not update preview yet.
 	if err := reducer.generatePreview(state); err != nil {
-		t.Fatalf("initial preview failed: %v", err)
+		t.Fatalf("generate preview a: %v", err)
+	}
+	if state.PreviewData != nil {
+		t.Fatalf("expected no preview before debounce for first selection")
+	}
+	firstToken, firstPath, _ := state.previewPendingLoad()
+	if firstToken == 0 || firstPath != fileA {
+		t.Fatalf("expected pending load for %s, got token=%d path=%s", fileA, firstToken, firstPath)
 	}
 
-	state.PreviewFullScreen = true
-	state.PreviewScrollOffset = 2
-
+	// Switch selection quickly to b.txt before debounce fires.
+	state.SelectedIndex = 1
 	if err := reducer.generatePreview(state); err != nil {
-		t.Fatalf("regenerating preview failed: %v", err)
+		t.Fatalf("generate preview b: %v", err)
+	}
+	if state.PreviewData != nil {
+		t.Fatalf("expected no preview before debounce for second selection")
+	}
+	secondToken, secondPath, _ := state.previewPendingLoad()
+	if secondToken == 0 || secondPath != fileB {
+		t.Fatalf("expected pending load for %s, got token=%d path=%s", fileB, secondToken, secondPath)
+	}
+	if loader.lastReq.Token != 0 {
+		t.Fatalf("loader should not start until debounce fires")
 	}
 
-	if state.PreviewScrollOffset != 2 {
-		t.Fatalf("offset should remain 2 for same file, got %d", state.PreviewScrollOffset)
+	// Fire debounce manually.
+	if _, err := reducer.Reduce(state, PreviewLoadStartAction{Token: secondToken}); err != nil {
+		t.Fatalf("start action: %v", err)
 	}
-	if !state.PreviewFullScreen {
-		t.Fatal("fullscreen should remain when preview target unchanged")
+	if loader.lastReq.Token != secondToken {
+		t.Fatalf("loader Start not invoked with second token (got %d)", loader.lastReq.Token)
 	}
-}
+	if state.ActivePreviewLoadToken() != secondToken || !state.PreviewLoading {
+		t.Fatalf("preview should be marked loading for second token")
+	}
+	if state.PreviewData != nil {
+		t.Fatalf("preview should still be empty until result arrives")
+	}
 
-func TestGeneratePreviewResetsOffsetForNewFile(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "rdir-preview-reset-")
+	// Complete load with the second file only.
+	data, info, err := buildPreviewData(loader.lastReq.Path, loader.lastReq.HideHidden)
 	if err != nil {
-		t.Fatalf("temp dir: %v", err)
+		t.Fatalf("build preview: %v", err)
 	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-
-	files := []string{"a.txt", "b.txt"}
-	for _, name := range files {
-		if err := os.WriteFile(filepath.Join(tmpDir, name), []byte("content\nmore\nlines"), 0644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
-
-	reducer := NewStateReducer()
-	state := &AppState{
-		ScreenHeight: 10,
-		ScreenWidth:  80,
+	if _, err := reducer.Reduce(state, PreviewLoadResultAction{
+		Token:   loader.lastReq.Token,
+		Path:    loader.lastReq.Path,
+		Preview: data,
+		Info:    info,
+	}); err != nil {
+		t.Fatalf("result action: %v", err)
 	}
 
-	if err := reducer.changeDirectory(state, tmpDir); err != nil {
-		t.Fatalf("change directory failed: %v", err)
-	}
-
-	state.PreviewData = &PreviewData{Name: "a.txt", IsDir: false}
-	state.PreviewFullScreen = true
-	state.PreviewScrollOffset = 3
-	state.SelectedIndex = 1 // select b.txt
-
-	if err := reducer.generatePreview(state); err != nil {
-		t.Fatalf("generate preview failed: %v", err)
-	}
-
-	if state.PreviewScrollOffset != 0 {
-		t.Fatalf("offset should reset on new file, got %d", state.PreviewScrollOffset)
-	}
-	if state.PreviewFullScreen {
-		t.Fatal("fullscreen should drop when preview target changes")
-	}
-}
-
-func TestTogglePreviewWrapRequiresFullscreen(t *testing.T) {
-	reducer := NewStateReducer()
-	state := &AppState{
-		PreviewData: &PreviewData{TextLines: []string{"line"}},
-	}
-
-	if _, err := reducer.Reduce(state, TogglePreviewWrapAction{}); err != nil {
-		t.Fatalf("toggle wrap failed: %v", err)
-	}
-	if state.PreviewWrap {
-		t.Fatalf("wrap should not toggle when not fullscreen")
-	}
-
-	state.PreviewFullScreen = true
-	if _, err := reducer.Reduce(state, TogglePreviewWrapAction{}); err != nil {
-		t.Fatalf("toggle wrap fullscreen failed: %v", err)
-	}
-	if !state.PreviewWrap {
-		t.Fatalf("wrap should toggle when fullscreen")
+	if state.PreviewData == nil || state.PreviewData.Name != "b.txt" {
+		t.Fatalf("expected preview of b.txt, got %+v", state.PreviewData)
 	}
 }

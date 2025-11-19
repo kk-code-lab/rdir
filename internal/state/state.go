@@ -214,6 +214,13 @@ func (s *AppState) clearDirectoryLoadingState() {
 	s.DirectoryLoadingPath = ""
 }
 
+func (s *AppState) navigationPath() string {
+	if s.DirectoryLoadingPath != "" {
+		return s.DirectoryLoadingPath
+	}
+	return s.CurrentPath
+}
+
 func (s *AppState) nextPreviewLoadToken() int {
 	s.previewLoadSeq++
 	return s.previewLoadSeq

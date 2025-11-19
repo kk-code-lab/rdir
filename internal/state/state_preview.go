@@ -222,6 +222,11 @@ func fileInfoFromEntry(entry *FileEntry) os.FileInfo {
 	if entry == nil {
 		return nil
 	}
+	if entry.IsSymlink && entry.FullPath != "" {
+		if targetInfo, err := os.Stat(entry.FullPath); err == nil {
+			return targetInfo
+		}
+	}
 	return entryFileInfo{
 		name:    entry.Name,
 		size:    entry.Size,
