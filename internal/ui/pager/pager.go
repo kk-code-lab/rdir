@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 	"github.com/mattn/go-runewidth"
@@ -29,6 +30,54 @@ const (
 	statusBarStyle         = "\x1b[48;5;236m\x1b[97m"
 	shiftScrollLines       = 10
 )
+
+type pagerContentKind int
+
+const (
+	pagerContentUnknown pagerContentKind = iota
+	pagerContentText
+	pagerContentMarkdown
+	pagerContentJSON
+	pagerContentBinary
+)
+
+func (p *PreviewPager) contentKind() pagerContentKind {
+	if p == nil || p.state == nil || p.state.PreviewData == nil {
+		return pagerContentUnknown
+	}
+	preview := p.state.PreviewData
+	switch {
+	case len(preview.BinaryInfo.Lines) > 0:
+		return pagerContentBinary
+	case preview.FormattedKind == "markdown":
+		return pagerContentMarkdown
+	case len(preview.FormattedTextLines) > 0:
+		name := strings.ToLower(filepath.Ext(preview.Name))
+		if name == ".json" {
+			return pagerContentJSON
+		}
+		return pagerContentText
+	case len(preview.TextLines) > 0 || preview.LineCount > 0:
+		return pagerContentText
+	default:
+		return pagerContentUnknown
+	}
+}
+
+func contentKindLabel(kind pagerContentKind) string {
+	switch kind {
+	case pagerContentBinary:
+		return "binary"
+	case pagerContentMarkdown:
+		return "markdown"
+	case pagerContentJSON:
+		return "json"
+	case pagerContentText:
+		return "text"
+	default:
+		return "file"
+	}
+}
 
 var termGetSize = term.GetSize
 
@@ -294,14 +343,38 @@ func (p *PreviewPager) persistLoadedLines() {
 		return
 	}
 	lines := make([]string, count)
+	metas := make([]statepkg.TextLineMetadata, count)
 	for i := 0; i < count; i++ {
 		lines[i] = textutil.SanitizeTerminalText(p.rawTextSource.Line(i))
+		if i < len(p.rawTextSource.lines) {
+			rec := p.rawTextSource.lines[i]
+			metas[i] = statepkg.TextLineMetadata{
+				Offset:       rec.offset,
+				Length:       rec.length,
+				RuneCount:    rec.runeCount,
+				DisplayWidth: rec.displayWidth,
+			}
+		}
 	}
-	p.state.PreviewData.TextLines = lines
-	p.state.PreviewData.FormattedTextLines = nil
-	p.state.PreviewData.FormattedSegments = nil
-	p.state.PreviewData.FormattedSegmentLineMeta = nil
-	p.state.PreviewData.LineCount = count
+	preview := p.state.PreviewData
+	preview.TextLines = lines
+	preview.TextLineMeta = metas
+	preview.FormattedTextLines = nil
+	preview.FormattedSegments = nil
+	preview.FormattedSegmentLineMeta = nil
+	preview.LineCount = count
+	preview.TextCharCount = p.rawTextSource.CharCount()
+	if preview.TextCharCount < 0 {
+		preview.TextCharCount = 0
+	}
+	preview.TextBytesRead = p.rawTextSource.nextOffset
+	if len(p.rawTextSource.partialLine) > 0 {
+		preview.TextRemainder = append([]byte(nil), p.rawTextSource.partialLine...)
+	} else {
+		preview.TextRemainder = nil
+	}
+	preview.TextEncoding = p.rawTextSource.encoding
+	preview.TextTruncated = !p.rawTextSource.FullyLoaded()
 }
 
 func (p *PreviewPager) startResizeWatcher(done <-chan struct{}) <-chan struct{} {
@@ -832,6 +905,19 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 	return false
 }
 
+func (p *PreviewPager) canOpenEditor() bool {
+	if p == nil || p.state == nil || p.state.PreviewData == nil {
+		return false
+	}
+	if p.state.PreviewData.IsDir {
+		return false
+	}
+	if len(p.editorCmd) == 0 || !p.state.EditorAvailable {
+		return false
+	}
+	return true
+}
+
 func (p *PreviewPager) openInEditor() error {
 	if p == nil || len(p.editorCmd) == 0 {
 		return nil
@@ -957,30 +1043,32 @@ func (p *PreviewPager) restoreAfterEditor(savedScroll, savedWrap int) {
 }
 
 func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
-	wrap := "off"
-	if p.wrapEnabled {
-		wrap = "on"
-	}
-	info := "off"
-	if p.showInfo {
-		info = "on"
-	}
-	formatMode := "raw"
-	if len(p.formattedLines) > 0 && p.showFormatted {
-		formatMode = "pretty"
-	} else if len(p.formattedLines) > 0 {
-		formatMode = "raw"
-	}
-	if p.state != nil && p.state.PreviewData != nil && p.state.PreviewData.FormattedUnavailableReason != "" {
-		formatMode = "raw*"
-	}
-	hidden := "no"
-	if p.state != nil && p.state.PreviewData != nil && p.state.PreviewData.HiddenFormattingDetected {
-		hidden = "yes"
-	}
+	lineApprox := p.isLineCountApprox()
+	charApprox := p.isCharCountApprox()
+	kind := p.contentKind()
 
-	approx := !p.showFormatted && p.rawTextSource != nil && !p.rawTextSource.FullyLoaded()
+	segments := []string{p.positionSegment(totalLines, visible, lineApprox)}
+	if count := p.countSegment(kind, charCount, charApprox); count != "" {
+		segments = append(segments, count)
+	}
+	segments = append(segments, p.statusBadges(kind)...)
+	segments = filterEmptyStrings(segments)
 
+	status := strings.Join(segments, "  ")
+	help := strings.Join(p.helpSegments(), "  ")
+	if help != "" {
+		if status != "" {
+			status += "  "
+		}
+		status += help
+	}
+	return status
+}
+
+func (p *PreviewPager) positionSegment(totalLines, visible int, approx bool) string {
+	if visible < 1 {
+		visible = 1
+	}
 	if p.wrapEnabled {
 		totalRows := p.totalRowCount()
 		startRow := 0
@@ -999,10 +1087,13 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		if approx {
 			linesText = fmt.Sprintf("~%s", linesText)
 		}
-		return fmt.Sprintf("%d-%d/%d rows (%s, %d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  ←/Esc/q exit  w/→ wrap  f format  i info  e edit",
-			startRow, endRow, totalRows, linesText, percent, charCount, wrap, formatMode, hidden, info)
+		return fmt.Sprintf("%d-%d/%d rows (%s, %d%%)", startRow, endRow, totalRows, linesText, percent)
 	}
 
+	lineLabel := "lines"
+	if p.binaryMode {
+		lineLabel = "rows"
+	}
 	start := 0
 	if totalLines > 0 {
 		start = p.state.PreviewScrollOffset + 1
@@ -1015,12 +1106,95 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		end = totalLines
 	}
 	percent := p.progressPercent(start, totalLines)
-	linesText := fmt.Sprintf("%d-%d/%d lines", start, end, totalLines)
-	if approx {
-		linesText = fmt.Sprintf("%d-%d/~%d lines", start, end, totalLines)
+	linesText := fmt.Sprintf("%d-%d/%d %s", start, end, totalLines, lineLabel)
+	if approx && !p.binaryMode {
+		linesText = fmt.Sprintf("%d-%d/~%d %s", start, end, totalLines, lineLabel)
 	}
-	return fmt.Sprintf("%s (%d%%)  %d chars  wrap:%s fmt:%s hidden:%s info:%s  ↑↓/PgUp/PgDn scroll  Shift+↑/↓ ±10  ←/Esc/q exit  w/→ wrap  f format  i info  e edit",
-		linesText, percent, charCount, wrap, formatMode, hidden, info)
+	return fmt.Sprintf("%s (%d%%)", linesText, percent)
+}
+
+func (p *PreviewPager) countSegment(kind pagerContentKind, charCount int, approx bool) string {
+	if charCount <= 0 {
+		return ""
+	}
+	prefix := ""
+	if approx {
+		prefix = "~"
+	}
+	if kind == pagerContentBinary {
+		return fmt.Sprintf("%s%d bytes", prefix, charCount)
+	}
+	return fmt.Sprintf("%s%d chars", prefix, charCount)
+}
+
+func (p *PreviewPager) statusBadges(kind pagerContentKind) []string {
+	preview := (*statepkg.PreviewData)(nil)
+	if p.state != nil {
+		preview = p.state.PreviewData
+	}
+	badges := []string{}
+	if label := contentKindLabel(kind); label != "" {
+		badges = append(badges, "type:"+label)
+	}
+	if !p.binaryMode {
+		wrap := "off"
+		if p.wrapEnabled {
+			wrap = "on"
+		}
+		badges = append(badges, "wrap:"+wrap)
+	}
+	formattedAvailable := len(p.formattedLines) > 0
+	formattedReason := preview != nil && preview.FormattedUnavailableReason != ""
+	if formattedAvailable || formattedReason {
+		mode := "raw"
+		if formattedAvailable && p.showFormatted {
+			mode = "pretty"
+		} else if formattedReason && !formattedAvailable {
+			mode = "raw*"
+		}
+		badges = append(badges, "fmt:"+mode)
+	}
+	if preview != nil && preview.HiddenFormattingDetected && !p.binaryMode {
+		badges = append(badges, "hidden:yes")
+	}
+	infoState := "off"
+	if p.showInfo {
+		infoState = "on"
+	}
+	badges = append(badges, "info:"+infoState)
+	return badges
+}
+
+func (p *PreviewPager) helpSegments() []string {
+	segments := []string{
+		"↑↓/PgUp/PgDn scroll",
+		"Shift+↑/↓ ±10",
+		"Home/End jump",
+		"←/Esc/q exit",
+	}
+	if !p.binaryMode {
+		segments = append(segments, "w/→ wrap")
+	}
+	if len(p.formattedLines) > 0 {
+		segments = append(segments, "f format")
+	}
+	segments = append(segments, "i info")
+	if p.canOpenEditor() {
+		segments = append(segments, "e edit")
+	}
+	return segments
+}
+
+func filterEmptyStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		result = append(result, v)
+	}
+	return result
 }
 
 func (p *PreviewPager) lineCount() int {
@@ -1046,10 +1220,56 @@ func (p *PreviewPager) lineCount() int {
 }
 
 func (p *PreviewPager) totalCharCount() int {
-	if !p.showFormatted && p.rawTextSource != nil {
+	if p.rawTextSource != nil {
 		return p.rawTextSource.CharCount()
 	}
 	return p.charCount
+}
+
+func (p *PreviewPager) isCharCountApprox() bool {
+	if p == nil || p.binaryMode {
+		return false
+	}
+	if p.rawTextSource != nil {
+		return !p.rawTextSource.FullyLoaded()
+	}
+	if p.state != nil && p.state.PreviewData != nil {
+		return p.state.PreviewData.TextTruncated
+	}
+	return false
+}
+
+func (p *PreviewPager) isLineCountApprox() bool {
+	if p == nil || p.binaryMode {
+		return false
+	}
+	if p.rawTextSource != nil {
+		return !p.rawTextSource.FullyLoaded()
+	}
+	if p.state != nil && p.state.PreviewData != nil {
+		return p.state.PreviewData.TextTruncated
+	}
+	return false
+}
+
+func (p *PreviewPager) headerCharCount(preview *statepkg.PreviewData) int {
+	if count := p.totalCharCount(); count > 0 {
+		return count
+	}
+	if preview != nil {
+		return preview.TextCharCount
+	}
+	return 0
+}
+
+func (p *PreviewPager) headerLineCount(preview *statepkg.PreviewData) int {
+	if p.rawTextSource != nil {
+		return p.rawTextSource.LineCount()
+	}
+	if preview != nil {
+		return preview.LineCount
+	}
+	return 0
 }
 
 func (p *PreviewPager) lineAt(idx int) string {
@@ -1105,16 +1325,105 @@ func (p *PreviewPager) headerLines() []string {
 	}
 	preview := p.state.PreviewData
 	fullPath := filepath.Join(p.state.CurrentPath, preview.Name)
-	size := formatSize(preview.Size)
-	mod := preview.Modified.Format("2006-01-02 15:04:05")
-	mode := preview.Mode.String()
 
 	lines := []string{textutil.SanitizeTerminalText(fullPath)}
 	if p.showInfo {
-		meta := fmt.Sprintf("%s  %s  %s", mode, size, mod)
-		lines = append(lines, textutil.SanitizeTerminalText(meta))
+		if info := p.infoLine(preview); info != "" {
+			lines = append(lines, info)
+		}
 	}
 	return lines
+}
+
+func (p *PreviewPager) infoLine(preview *statepkg.PreviewData) string {
+	segments := p.infoSegments(preview)
+	if len(segments) == 0 {
+		return ""
+	}
+	return textutil.SanitizeTerminalText(strings.Join(segments, "  •  "))
+}
+
+func (p *PreviewPager) infoSegments(preview *statepkg.PreviewData) []string {
+	if preview == nil {
+		return nil
+	}
+	meta := fmt.Sprintf("%s  %s  %s", preview.Mode.String(), formatSize(preview.Size), preview.Modified.Format("2006-01-02 15:04:05"))
+	segments := []string{meta}
+	segments = append(segments, p.detailInfoSegments(preview)...)
+	out := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		out = append(out, seg)
+	}
+	return out
+}
+
+func (p *PreviewPager) detailInfoSegments(preview *statepkg.PreviewData) []string {
+	kind := p.contentKind()
+	segments := []string{}
+	if label := contentKindLabel(kind); label != "" {
+		segments = append(segments, "type:"+label)
+	}
+	switch kind {
+	case pagerContentBinary:
+		if preview.BinaryInfo.TotalBytes > 0 {
+			segments = append(segments, fmt.Sprintf("bytes:%d", preview.BinaryInfo.TotalBytes))
+		}
+		if preview.LineCount > 0 {
+			segments = append(segments, fmt.Sprintf("rows:%d", preview.LineCount))
+		}
+		segments = append(segments, fmt.Sprintf("%d B/row", binaryPreviewLineWidth))
+	default:
+		if lineCount := p.headerLineCount(preview); lineCount > 0 {
+			lineSegment := fmt.Sprintf("lines:%d", lineCount)
+			if p.isLineCountApprox() {
+				lineSegment = fmt.Sprintf("lines:~%d", lineCount)
+			}
+			segments = append(segments, lineSegment)
+		}
+		if count := p.headerCharCount(preview); count > 0 {
+			label := fmt.Sprintf("chars:%d", count)
+			if p.isCharCountApprox() {
+				label = fmt.Sprintf("chars:~%d", count)
+			}
+			segments = append(segments, label)
+		}
+		if enc := formatEncodingLabel(preview.TextEncoding); enc != "" {
+			segments = append(segments, "encoding:"+enc)
+		}
+		if p.rawTextSource != nil {
+			if !p.rawTextSource.FullyLoaded() {
+				segments = append(segments, "streaming from disk")
+			}
+		} else if preview.TextTruncated {
+			segments = append(segments, "preview truncated")
+		}
+		if preview.HiddenFormattingDetected {
+			segments = append(segments, "hidden formatting detected")
+		}
+		if preview.FormattedUnavailableReason != "" {
+			segments = append(segments, preview.FormattedUnavailableReason)
+		}
+	}
+	return segments
+}
+
+func formatEncodingLabel(enc fsutil.UnicodeEncoding) string {
+	switch enc {
+	case fsutil.EncodingUnknown:
+		return "utf-8/ascii"
+	case fsutil.EncodingUTF8BOM:
+		return "utf-8 bom"
+	case fsutil.EncodingUTF16LE:
+		return "utf-16le"
+	case fsutil.EncodingUTF16BE:
+		return "utf-16be"
+	default:
+		return ""
+	}
 }
 
 func (p *PreviewPager) applyWrapSetting() {
