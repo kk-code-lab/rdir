@@ -448,27 +448,10 @@ func TestFilterPlusHidden_CursorDisappears_WithFilterAndNonHiddenSelection(t *te
 	}
 }
 
-func TestFilterPlusHidden_FuzzySearchChangesDisplayOrder(t *testing.T) {
-	// USER REPORT - FUZZY ORDER EDGE CASE:
-	// When fuzzy search reorders results, toggle hidden should select nearest
-	// visible file in DISPLAY ORDER (as shown to user), not in Files array order.
-	//
-	// Scenario:
-	// Files: [sanctuary, .safari, sandbox, .scaffold]
-	// Fuzzy "/sa": Matches all 4, sorted by fuzzy score:
-	//   sanctuary (score 90) -> index 0
-	//   sandbox (score 80)   -> index 2
-	//   .safari (score 70)   -> index 1
-	//   .scaffold (score 60) -> index 3
-	// FilteredIndices = [0, 2, 1, 3] (fuzzy sorted)
-	// Display order: [sanctuary(0), sandbox(2), .safari(1), .scaffold(3)]
-	//
-	// User selects .safari (SelectedIndex=1, but displayIdx=2 in fuzzy order)
-	// User presses . to toggle hide
-	// Expected: Cursor should select nearest visible in display order
-	//   -> Before .safari in display: sandbox(2)
-	//   -> After .safari in display: .scaffold(3) but it's also hidden
-	//   -> So should select sandbox(2)
+func TestFilterPlusHidden_FilterCursorPrefersPreviousVisible(t *testing.T) {
+	// Legacy regression guard: when the inline filter is active, toggling the
+	// hidden-files flag should keep the cursor on the closest still-visible entry
+	// using the display order (which now matches the directory order).
 
 	state := &AppState{
 		CurrentPath: "/test",
@@ -480,16 +463,16 @@ func TestFilterPlusHidden_FuzzySearchChangesDisplayOrder(t *testing.T) {
 		},
 		FilterActive: true,
 		FilterQuery:  "sa", // IMPORTANT: Need non-empty query to avoid recomputeFilter clearing FilteredIndices
-		// Fuzzy sorted by score: sanctuary(90), sandbox(80), .safari(70), .scaffold(60)
-		FilteredIndices: []int{0, 2, 1, 3},
+		// Filter results preserve directory order: sanctuary, .safari, sandbox, .scaffold
+		FilteredIndices: []int{0, 1, 2, 3},
 		FilterMatches: []FuzzyMatch{
 			{FileIndex: 0, Score: 90},
-			{FileIndex: 2, Score: 80},
 			{FileIndex: 1, Score: 70},
+			{FileIndex: 2, Score: 80},
 			{FileIndex: 3, Score: 60},
 		},
 		HideHiddenFiles: false,
-		SelectedIndex:   1, // .safari (but at displayIdx=2 in fuzzy order)
+		SelectedIndex:   1, // .safari (displayIdx=1 while visible)
 		ScrollOffset:    0,
 		ScreenHeight:    24,
 		ScreenWidth:     80,
@@ -500,7 +483,7 @@ func TestFilterPlusHidden_FuzzySearchChangesDisplayOrder(t *testing.T) {
 	t.Logf("=== Before Toggle ===")
 	t.Logf("SelectedIndex=%d, File=%s", state.SelectedIndex, state.Files[state.SelectedIndex].Name)
 	displayIdxBefore := state.getDisplaySelectedIndex()
-	t.Logf("displayIdx=%d in fuzzy sorted order", displayIdxBefore)
+	t.Logf("displayIdx=%d in directory order", displayIdxBefore)
 	displayFiles := state.getDisplayFiles()
 	for i, f := range displayFiles {
 		t.Logf("  [%d] %s (hidden=%v)", i, f.Name, f.IsHidden())
@@ -523,18 +506,16 @@ func TestFilterPlusHidden_FuzzySearchChangesDisplayOrder(t *testing.T) {
 	}
 
 	// Expected behavior:
-	// - .safari was at displayIdx=2 in fuzzy order
-	// - After hiding .safari, displayIdx should point to nearest visible
-	// - In fuzzy order: sanctuary(0), sandbox(2), .scaffold(3-hidden)
-	// - Nearest visible to displayIdx=2: sandbox(2) at displayIdx=1, or nothing after
-	// - Should select sandbox(2)
+	// - .safari sat between sanctuary and sandbox in display order
+	// - After hiding .safari, cursor should move to the nearest visible entry,
+	//   preferring the previous row if there is a tie.
 	currentFile := state.getCurrentFile()
 	if currentFile == nil {
 		t.Errorf("FAIL: currentFile is nil after toggle")
-	} else if currentFile.Name != "sandbox" {
-		t.Errorf("FAIL: Expected sandbox, got %s", currentFile.Name)
+	} else if currentFile.Name != "sanctuary" {
+		t.Errorf("FAIL: Expected sanctuary, got %s", currentFile.Name)
 	} else {
-		t.Logf("PASS: Cursor correctly selected sandbox")
+		t.Logf("PASS: Cursor correctly selected previous visible entry")
 	}
 }
 

@@ -91,7 +91,7 @@ type AppState struct {
 	FilterActive        bool
 	FilterQuery         string
 	FilteredIndices     []int        // Indices into Files array
-	FilterMatches       []FuzzyMatch // Sorted matches with scores (new fuzzy search)
+	FilterMatches       []FuzzyMatch // Match metadata aligned with FilteredIndices order
 	FilterSavedIndex    int          // Saved selection index before entering filter mode
 	FilterCaseSensitive bool
 	filterMatcher       *FuzzyMatcher

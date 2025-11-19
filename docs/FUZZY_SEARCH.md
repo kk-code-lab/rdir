@@ -4,10 +4,10 @@
 
 `rdir` uses the same fuzzy engine for two entry points:
 
-1. **Inline filter** (press `/`) – narrows the current directory listing.
-2. **Global search** (press `f`) – streams matches from the entire tree, optionally via an index.
+1. **Inline filter** (press `/`) – narrows the current directory listing while preserving its original ordering.
+2. **Global search** (press `f`) – streams matches from the entire tree, optionally via an index, and sorts them by score.
 
-Both flows share the `internal/search.FuzzyMatcher`, normalize every score to the `[0.0, 1.0]` range, and keep the high-score items at the top. No extra UI badge is rendered; the ordered list itself is the signal.
+Both flows share the `internal/search.FuzzyMatcher` and normalize scores to the `[0.0, 1.0]` range. Inline filtering treats the score as a visibility gate (no resorting). Global search still renders highest scores first.
 
 ---
 
@@ -22,8 +22,8 @@ Both flows share the `internal/search.FuzzyMatcher`, normalize every score to th
 `AppState.recomputeFilter()`:
 1. Reuses a single matcher instance stored on the state (`filterMatcher`).
 2. Runs `matchFilterTokens` for each visible file, calling `MatchDetailedFromRunes` so tokens reuse pre-folded rune slices.
-3. Accumulates `FilterMatches` (scores) and `FilteredIndices` (file positions).
-4. Sorts matches by score, ties by file index, and invalidates `displayFilesCache`.
+3. Accumulates `FilterMatches` (scores) and `FilteredIndices` (file positions) in the same order files appear in the directory listing.
+4. Leaves the order untouched and invalidates `displayFilesCache` so the renderer reflects the filtered subset.
 5. `retainSelectionAfterFilterChange` keeps the cursor near the previous file when the results shrink.
 
 ### Global search

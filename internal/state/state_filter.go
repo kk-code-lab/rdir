@@ -1,7 +1,6 @@
 package state
 
 import (
-	"sort"
 	"strings"
 	"unicode"
 
@@ -49,18 +48,6 @@ func (s *AppState) recomputeFilter() {
 			matches = append(matches, FuzzyMatch{FileIndex: idx, Score: score})
 			indices = append(indices, idx)
 		}
-	}
-
-	sort.Slice(matches, func(i, j int) bool {
-		if matches[i].Score == matches[j].Score {
-			return matches[i].FileIndex < matches[j].FileIndex
-		}
-		return matches[i].Score > matches[j].Score
-	})
-
-	indices = indices[:0]
-	for _, match := range matches {
-		indices = append(indices, match.FileIndex)
 	}
 
 	s.FilterMatches = matches
