@@ -407,3 +407,335 @@ func TestDirEntryLineSanitizesNames(t *testing.T) {
 		t.Fatalf("sanitized name should retain visible characters, got %q", line)
 	}
 }
+
+func TestStatusLineBinaryOmitsWrapAndFormat(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:     "blob.bin",
+		Size:     32,
+		Mode:     0o644,
+		Modified: time.Unix(0, 0),
+		BinaryInfo: statepkg.BinaryPreview{
+			Lines:      []string{"Binary preview (16 of 32 bytes)", "00000000"},
+			TotalBytes: 32,
+		},
+		LineCount: 4,
+	}
+	state := &statepkg.AppState{PreviewData: preview}
+	p := &PreviewPager{state: state, binaryMode: true}
+	status := p.statusLine(preview.LineCount, 2, int(preview.BinaryInfo.TotalBytes))
+	if strings.Contains(status, "wrap:") {
+		t.Fatalf("binary status should not mention wrap, got %q", status)
+	}
+	if strings.Contains(status, "fmt:") {
+		t.Fatalf("binary status should not mention fmt, got %q", status)
+	}
+	if !strings.Contains(status, "type:binary") {
+		t.Fatalf("binary status should label type, got %q", status)
+	}
+	if !strings.Contains(status, "bytes") {
+		t.Fatalf("binary status should show byte counts, got %q", status)
+	}
+	if !strings.Contains(status, "i info") {
+		t.Fatalf("help segment should include info toggle, got %q", status)
+	}
+}
+
+func TestStatusLineTextShowsWrapAndFormat(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:               "data.json",
+		TextLines:          []string{"{\"k\":1}"},
+		FormattedTextLines: []string{"{", "  \"k\": 1", "}"},
+		LineCount:          3,
+		TextCharCount:      12,
+	}
+	state := &statepkg.AppState{PreviewData: preview}
+	p := &PreviewPager{
+		state:          state,
+		wrapEnabled:    true,
+		formattedLines: preview.FormattedTextLines,
+		showFormatted:  true,
+	}
+	status := p.statusLine(len(preview.FormattedTextLines), 2, preview.TextCharCount)
+	if !strings.Contains(status, "wrap:on") {
+		t.Fatalf("text status should include wrap:on, got %q", status)
+	}
+	if !strings.Contains(status, "fmt:pretty") {
+		t.Fatalf("text status should include fmt:pretty, got %q", status)
+	}
+	if !strings.Contains(status, "f format") {
+		t.Fatalf("help segment should advertise format toggle, got %q", status)
+	}
+}
+
+func TestStatusLineMarksApproxChars(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:          "big.txt",
+		TextLines:     []string{"data"},
+		LineCount:     1,
+		TextCharCount: 1024,
+		TextTruncated: true,
+	}
+	state := &statepkg.AppState{PreviewData: preview}
+	p := &PreviewPager{state: state}
+	status := p.statusLine(preview.LineCount, 1, preview.TextCharCount)
+	if !strings.Contains(status, "~1024 chars") {
+		t.Fatalf("status should mark approximate char counts, got %q", status)
+	}
+}
+
+func TestHeaderLinesIncludeTypeMetadata(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:                     "notes.txt",
+		Size:                     2048,
+		Mode:                     0o644,
+		Modified:                 time.Unix(0, 0),
+		LineCount:                42,
+		TextCharCount:            100,
+		TextEncoding:             fsutil.EncodingUTF8BOM,
+		HiddenFormattingDetected: true,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	p := &PreviewPager{state: state, showInfo: true}
+	lines := p.headerLines()
+	if len(lines) < 2 {
+		t.Fatalf("expected info line to be present, got %v", lines)
+	}
+	info := lines[1]
+	if !strings.Contains(info, "type:text") {
+		t.Fatalf("info line should include type metadata, got %q", info)
+	}
+	if !strings.Contains(info, "lines:42") {
+		t.Fatalf("info line should include line count, got %q", info)
+	}
+	if !strings.Contains(info, "encoding:utf-8 bom") {
+		t.Fatalf("info line should include encoding, got %q", info)
+	}
+}
+
+func TestHeaderLinesIncludeApproxCharMetadata(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:          "huge.txt",
+		Size:          4096,
+		Mode:          0o644,
+		Modified:      time.Unix(0, 0),
+		LineCount:     10,
+		TextCharCount: 5000,
+		TextTruncated: true,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	p := &PreviewPager{state: state, showInfo: true}
+	lines := p.headerLines()
+	if len(lines) < 2 {
+		t.Fatalf("expected metadata line in header")
+	}
+	info := lines[1]
+	if !strings.Contains(info, "chars:~5000") {
+		t.Fatalf("info line should flag approximate char counts, got %q", info)
+	}
+}
+
+func TestInfoSegmentsTrackStreamingLineCounts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.txt")
+	var builder strings.Builder
+	totalLines := 40
+	for i := 0; i < totalLines; i++ {
+		fmt.Fprintf(&builder, "line %03d\n", i)
+	}
+	if err := os.WriteFile(path, []byte(builder.String()), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	sample := []string{"line 000", "line 001", "line 002", "line 003", "line 004"}
+	metas := make([]statepkg.TextLineMetadata, len(sample))
+	offset := int64(0)
+	for i, line := range sample {
+		metas[i] = statepkg.TextLineMetadata{
+			Offset:       offset,
+			Length:       len(line) + 1,
+			RuneCount:    len(line) + 1,
+			DisplayWidth: displayWidth(line + " \n"),
+		}
+		offset += int64(len(line) + 1)
+	}
+
+	preview := &statepkg.PreviewData{
+		Name:          filepath.Base(path),
+		Size:          int64(len(builder.String())),
+		Mode:          0o644,
+		Modified:      time.Unix(0, 0),
+		TextLines:     sample,
+		TextLineMeta:  metas,
+		TextTruncated: true,
+		TextBytesRead: offset,
+		TextEncoding:  fsutil.EncodingUnknown,
+		LineCount:     len(sample),
+		TextCharCount: lineCharCount(sample),
+	}
+	state := &statepkg.AppState{CurrentPath: dir, PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	segments := pager.detailInfoSegments(preview)
+	if !containsSegment(segments, "lines:~5") {
+		t.Fatalf("expected initial lines:~5, got %v", segments)
+	}
+	if !containsSegment(segments, "streaming from disk") {
+		t.Fatalf("expected streaming indicator, got %v", segments)
+	}
+
+	if err := pager.rawTextSource.EnsureAll(); err != nil {
+		t.Fatalf("EnsureAll: %v", err)
+	}
+	segments = pager.detailInfoSegments(preview)
+	if !containsSegment(segments, fmt.Sprintf("lines:%d", totalLines)) {
+		t.Fatalf("expected final lines:%d, got %v", totalLines, segments)
+	}
+	if containsSegment(segments, "streaming from disk") {
+		t.Fatalf("streaming indicator should be cleared after load, got %v", segments)
+	}
+}
+
+func containsSegment(segments []string, target string) bool {
+	for _, seg := range segments {
+		if seg == target {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPersistLoadedLinesUpdatesPreviewState(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "persist.txt")
+	var builder strings.Builder
+	totalLines := 25
+	for i := 0; i < totalLines; i++ {
+		fmt.Fprintf(&builder, "line %02d\n", i)
+	}
+	data := builder.String()
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	sample := []string{"line 00", "line 01"}
+	metas := []statepkg.TextLineMetadata{
+		{Offset: 0, Length: len("line 00\n"), RuneCount: len("line 00\n"), DisplayWidth: displayWidth("line 00 \n")},
+		{Offset: int64(len("line 00\n")), Length: len("line 01\n"), RuneCount: len("line 01\n"), DisplayWidth: displayWidth("line 01 \n")},
+	}
+	preview := &statepkg.PreviewData{
+		Name:          filepath.Base(path),
+		Size:          int64(len(data)),
+		Mode:          0o644,
+		Modified:      time.Unix(0, 0),
+		TextLines:     sample,
+		TextLineMeta:  metas,
+		TextTruncated: true,
+		TextBytesRead: int64(len("line 00\n")) + int64(len("line 01\n")),
+		TextEncoding:  fsutil.EncodingUnknown,
+		LineCount:     len(sample),
+		TextCharCount: lineCharCount(sample),
+	}
+	state := &statepkg.AppState{CurrentPath: dir, PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	if pager.rawTextSource == nil {
+		t.Fatalf("expected streaming text source")
+	}
+	if err := pager.rawTextSource.EnsureAll(); err != nil {
+		t.Fatalf("EnsureAll: %v", err)
+	}
+	pager.persistLoadedLines()
+	if preview.TextTruncated {
+		t.Fatalf("expected truncated flag cleared after full load")
+	}
+	if preview.TextCharCount != pager.rawTextSource.CharCount() {
+		t.Fatalf("char count mismatch: got %d want %d", preview.TextCharCount, pager.rawTextSource.CharCount())
+	}
+	if preview.LineCount != pager.rawTextSource.LineCount() {
+		t.Fatalf("line count mismatch: got %d want %d", preview.LineCount, pager.rawTextSource.LineCount())
+	}
+
+	// Simulate reopening the pager with the persisted preview data.
+	pager2, err := NewPreviewPager(state, nil, nil)
+	if err != nil {
+		t.Fatalf("reopen pager: %v", err)
+	}
+	if pager2.isLineCountApprox() {
+		t.Fatalf("line counts should be exact after persistence")
+	}
+	if pager2.isCharCountApprox() {
+		t.Fatalf("char counts should be exact after persistence")
+	}
+}
+
+func TestPersistLoadedLinesAllowsSubsequentStreaming(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stream.txt")
+	var builder strings.Builder
+	totalLines := 20000
+	for i := 0; i < totalLines; i++ {
+		fmt.Fprintf(&builder, "line %03d\n", i)
+	}
+	if err := os.WriteFile(path, []byte(builder.String()), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	const sampleCount = 5
+	sample := make([]string, sampleCount)
+	metas := make([]statepkg.TextLineMetadata, sampleCount)
+	var offset int64
+	for i := 0; i < sampleCount; i++ {
+		line := fmt.Sprintf("line %03d", i)
+		sample[i] = line
+		length := len(line) + 1
+		metas[i] = statepkg.TextLineMetadata{Offset: offset, Length: length, RuneCount: length, DisplayWidth: displayWidth(line)}
+		offset += int64(length)
+	}
+	preview := &statepkg.PreviewData{
+		Name:          filepath.Base(path),
+		Size:          int64(len(builder.String())),
+		Mode:          0o644,
+		Modified:      time.Unix(0, 0),
+		TextLines:     sample,
+		TextLineMeta:  metas,
+		TextTruncated: true,
+		TextBytesRead: offset,
+		TextEncoding:  fsutil.EncodingUnknown,
+		LineCount:     len(sample),
+		TextCharCount: lineCharCount(sample),
+	}
+	state := &statepkg.AppState{CurrentPath: dir, PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	if pager.rawTextSource == nil {
+		t.Fatalf("expected streaming source for truncated file")
+	}
+	if err := pager.rawTextSource.EnsureLine(20); err != nil {
+		t.Fatalf("EnsureLine: %v", err)
+	}
+	if pager.rawTextSource.FullyLoaded() {
+		t.Fatalf("test requires partial load")
+	}
+	pager.persistLoadedLines()
+	// Simulate closing pager; next run should resume streaming.
+	pager2, err := NewPreviewPager(state, nil, nil)
+	if err != nil {
+		t.Fatalf("reopen pager: %v", err)
+	}
+	if pager2.rawTextSource == nil {
+		t.Fatalf("expected streaming source after persistence")
+	}
+	if err := pager2.rawTextSource.EnsureAll(); err != nil {
+		t.Fatalf("EnsureAll second session: %v", err)
+	}
+	if count := pager2.rawTextSource.LineCount(); count != totalLines {
+		t.Fatalf("streaming stalled: got %d lines want %d", count, totalLines)
+	}
+}
