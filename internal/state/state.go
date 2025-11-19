@@ -83,6 +83,13 @@ type AppState struct {
 	HistoryIndex  int
 	ParentEntries []FileEntry // Entries from parent directory for sidebar
 
+	// Directory loading
+	DirectoryLoader          DirectoryLoader
+	DirectoryLoading         bool
+	DirectoryLoadingPath     string
+	activeDirectoryLoadToken int
+	directoryLoadSeq         int
+
 	// Selection & viewport
 	SelectedIndex int
 	ScrollOffset  int
@@ -133,6 +140,18 @@ type AppState struct {
 	PreviewPreferRaw     bool
 	previewCache         map[string]previewCacheEntry
 	previewScrollHistory map[string]previewScrollPosition
+	previewDebounceTimer *time.Timer
+	previewPendingToken  int
+	previewPendingPath   string
+	previewPendingReset  bool
+
+	PreviewLoader          PreviewLoader
+	PreviewLoading         bool
+	PreviewLoadingPath     string
+	activePreviewLoadToken int
+	previewLoadSeq         int
+	pendingPreviewReset    bool
+	PreviewLoadingStarted  time.Time
 
 	// Dimensions
 	ScreenWidth  int
@@ -167,6 +186,91 @@ type previewCacheEntry struct {
 type previewScrollPosition struct {
 	scroll int
 	wrap   int
+}
+
+func (s *AppState) nextDirectoryLoadToken() int {
+	s.directoryLoadSeq++
+	return s.directoryLoadSeq
+}
+
+func (s *AppState) ActiveDirectoryLoadToken() int {
+	return s.activeDirectoryLoadToken
+}
+
+func (s *AppState) setDirectoryLoadInFlight(token int, path string) {
+	s.activeDirectoryLoadToken = token
+	if token == 0 {
+		s.DirectoryLoading = false
+		s.DirectoryLoadingPath = ""
+		return
+	}
+	s.DirectoryLoading = true
+	s.DirectoryLoadingPath = path
+}
+
+func (s *AppState) clearDirectoryLoadingState() {
+	s.activeDirectoryLoadToken = 0
+	s.DirectoryLoading = false
+	s.DirectoryLoadingPath = ""
+}
+
+func (s *AppState) nextPreviewLoadToken() int {
+	s.previewLoadSeq++
+	return s.previewLoadSeq
+}
+
+func (s *AppState) ActivePreviewLoadToken() int {
+	return s.activePreviewLoadToken
+}
+
+func (s *AppState) setPreviewLoadInFlight(token int, path string, resetScroll bool) {
+	s.activePreviewLoadToken = token
+	if token == 0 {
+		s.PreviewLoading = false
+		s.PreviewLoadingPath = ""
+		s.pendingPreviewReset = false
+		s.PreviewLoadingStarted = time.Time{}
+		return
+	}
+	s.PreviewLoading = true
+	s.PreviewLoadingPath = path
+	s.pendingPreviewReset = resetScroll
+	s.PreviewLoadingStarted = time.Now()
+}
+
+func (s *AppState) clearPreviewLoadingState() {
+	s.activePreviewLoadToken = 0
+	s.PreviewLoading = false
+	s.PreviewLoadingPath = ""
+	s.pendingPreviewReset = false
+	s.PreviewLoadingStarted = time.Time{}
+}
+
+func (s *AppState) previewShouldResetScroll() bool {
+	return s.pendingPreviewReset
+}
+
+func (s *AppState) cancelPreviewDebounceTimer() {
+	if s.previewDebounceTimer != nil {
+		s.previewDebounceTimer.Stop()
+		s.previewDebounceTimer = nil
+	}
+}
+
+func (s *AppState) setPreviewPendingLoad(token int, path string, reset bool) {
+	s.previewPendingToken = token
+	s.previewPendingPath = path
+	s.previewPendingReset = reset
+}
+
+func (s *AppState) previewPendingLoad() (int, string, bool) {
+	return s.previewPendingToken, s.previewPendingPath, s.previewPendingReset
+}
+
+func (s *AppState) clearPreviewPendingLoad() {
+	s.previewPendingToken = 0
+	s.previewPendingPath = ""
+	s.previewPendingReset = false
 }
 
 // ===== HELPER METHODS =====

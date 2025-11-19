@@ -17,14 +17,22 @@ func LoadDirectory(state *AppState, path ...string) error {
 		dirPath = state.CurrentPath
 	}
 
-	entries, err := os.ReadDir(dirPath)
+	entries, err := readDirectoryEntries(dirPath)
 	if err != nil {
 		return fmt.Errorf("cannot read directory %s: %w", dirPath, err)
 	}
 
-	state.CurrentPath = dirPath
-	visibleEntries := make([]FileEntry, 0, len(entries))
+	applyDirectoryEntries(state, dirPath, entries)
+	return nil
+}
 
+func readDirectoryEntries(dirPath string) ([]FileEntry, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	visibleEntries := make([]FileEntry, 0, len(entries))
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {
@@ -62,7 +70,12 @@ func LoadDirectory(state *AppState, path ...string) error {
 		})
 	}
 
-	state.Files = visibleEntries
+	return visibleEntries, nil
+}
+
+func applyDirectoryEntries(state *AppState, dirPath string, entries []FileEntry) {
+	state.CurrentPath = dirPath
+	state.Files = entries
 
 	state.sortFiles()
 	state.refreshLowerNames()
@@ -70,6 +83,5 @@ func LoadDirectory(state *AppState, path ...string) error {
 	state.updateParentEntries()
 	state.PreviewData = nil
 	state.resetPreviewScroll()
-
-	return nil
+	state.clearDirectoryLoadingState()
 }

@@ -36,6 +36,8 @@ func NewApplication() (*Application, error) {
 	editorCmd, editorAvail := detectEditorCommand()
 
 	state := newInitialState(cwd, clipboardAvail, editorAvail)
+	state.DirectoryLoader = statepkg.NewAsyncDirectoryLoader()
+	state.PreviewLoader = statepkg.NewAsyncPreviewLoader()
 	w, h := screen.Size()
 	state.ScreenWidth = w
 	state.ScreenHeight = h
@@ -479,7 +481,13 @@ func (app *Application) processActions() bool {
 }
 
 func (app *Application) shouldAnimate() bool {
-	if app.state == nil || app.state.LastYankTime.IsZero() {
+	if app.state == nil {
+		return false
+	}
+	if app.state.PreviewLoading {
+		return true
+	}
+	if app.state.LastYankTime.IsZero() {
 		return false
 	}
 	return time.Since(app.state.LastYankTime) < 100*time.Millisecond
