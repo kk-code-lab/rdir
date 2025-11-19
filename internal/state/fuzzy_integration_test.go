@@ -78,7 +78,7 @@ func TestFuzzyIntegration_FilteringWithFuzzyMatch(t *testing.T) {
 	}
 }
 
-func TestFuzzyIntegration_ScoringOrder(t *testing.T) {
+func TestFuzzyIntegration_FilterPreservesOriginalOrder(t *testing.T) {
 	state := &AppState{
 		CurrentPath: "/test",
 		Files: []FileEntry{
@@ -98,26 +98,26 @@ func TestFuzzyIntegration_ScoringOrder(t *testing.T) {
 	_, _ = reducer.Reduce(state, FilterCharAction{Char: 'g'})
 	_, _ = reducer.Reduce(state, FilterCharAction{Char: 'o'})
 
-	if len(state.FilterMatches) < 3 {
-		t.Errorf("Expected at least 3 matches for 'go', got %d", len(state.FilterMatches))
+	expectedOrder := []string{"go.mod", "go.sum", "main.go", "gorgeous.txt"}
+	if len(state.FilterMatches) != len(expectedOrder) {
+		t.Fatalf("Expected %d matches for 'go', got %d", len(expectedOrder), len(state.FilterMatches))
 	}
 
-	// Verify scores are sorted (descending)
-	for i := 0; i < len(state.FilterMatches)-1; i++ {
-		if state.FilterMatches[i].Score < state.FilterMatches[i+1].Score {
-			t.Errorf("Scores not sorted: %.3f < %.3f",
-				state.FilterMatches[i].Score, state.FilterMatches[i+1].Score)
+	for i, expected := range expectedOrder {
+		fileName := state.Files[state.FilterMatches[i].FileIndex].Name
+		if fileName != expected {
+			t.Fatalf("Match %d should be %s, got %s", i, expected, fileName)
 		}
 	}
 
-	// go.mod and go.sum should score higher than main.go (prefix match vs scattered)
-	if len(state.FilterMatches) >= 2 {
-		first := state.Files[state.FilterMatches[0].FileIndex].Name
-		second := state.Files[state.FilterMatches[1].FileIndex].Name
+	if len(state.FilteredIndices) != len(state.FilterMatches) {
+		t.Fatalf("FilteredIndices (%d) and FilterMatches (%d) diverged", len(state.FilteredIndices), len(state.FilterMatches))
+	}
 
-		t.Logf("Top matches for 'go': 1) %s (%.3f), 2) %s (%.3f)",
-			first, state.FilterMatches[0].Score,
-			second, state.FilterMatches[1].Score)
+	for i, idx := range state.FilteredIndices {
+		if idx != state.FilterMatches[i].FileIndex {
+			t.Fatalf("Index %d mismatch: FilteredIndices has %d, FilterMatches has %d", i, idx, state.FilterMatches[i].FileIndex)
+		}
 	}
 }
 

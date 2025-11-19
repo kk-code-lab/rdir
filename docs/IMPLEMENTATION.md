@@ -24,7 +24,7 @@ Centralized state container:
 - `FilterActive`: Filter mode enabled
 - `FilterQuery`: Search query string
 - `FilteredIndices`: Indices of matching files
-- `FilterMatches`: `[]search.FuzzyMatch` with normalized scores used for ordering
+- `FilterMatches`: `[]search.FuzzyMatch` storing normalized scores (aligned with `FilteredIndices`)
 - `FilterSavedIndex` / `FilterCaseSensitive`: Remember selection before entering filter and toggle case-sensitivity automatically when users type uppercase characters
 - `PreviewData`: Cached preview info
 - `ParentEntries`: Parent directory listing for sidebar
@@ -120,7 +120,7 @@ Minimal entry point that calls `internal.NewApplication()`
 - Queries are tokenized on whitespace; every token must match the filename (order-agnostic, all tokens must be present)
 - Case sensitivity flips on automatically once you type an uppercase letter (per token history)
 - Characters stream straight into the reducer, which recomputes `FilteredIndices`/`FilterMatches` and keeps selection stable when the result set shrinks
-- Results stay sorted by normalized score; the list itself is the only indicator (no preview percentages)
+- Results keep the underlying directory order; fuzzy scores only gate visibility (no preview percentages)
 - Filter state resets automatically when changing directories so the new view starts unfiltered
 
 Scoring favors tight, word-aligned matches with small gaps. Each token runs through the shared `FuzzyMatcher`, gaps incur penalties, and the final score is the average across all tokens so multi-word queries remain predictable.

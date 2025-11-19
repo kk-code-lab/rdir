@@ -262,8 +262,9 @@ func TestFilterClearFallbackSelection(t *testing.T) {
 }
 
 func TestNavigateDownInFuzzyResults(t *testing.T) {
-	// Bug: Press "/" → Type "r" → Press down
-	// Should select FIRST file with "r", not second
+	// Regression: Press "/" → type "r" → press down
+	// Selection should start on the first matching file (in directory order)
+	// and advance to the next matching file when navigating down.
 	state := &AppState{
 		CurrentPath: "/test",
 		Files: []FileEntry{
@@ -303,7 +304,7 @@ func TestNavigateDownInFuzzyResults(t *testing.T) {
 		t.Logf("  Display[%d]: %s", i, f.Name)
 	}
 
-	// Step 3: After typing "r", first match should be selected
+	// Step 3: After typing "r", first file containing the rune should be selected
 	file := state.getCurrentFile()
 	if file == nil {
 		t.Error("getCurrentFile() returned nil after typing 'r'")
@@ -312,9 +313,9 @@ func TestNavigateDownInFuzzyResults(t *testing.T) {
 
 	t.Logf("After typing 'r', selected file: %s", file.Name)
 
-	// After FilterCharAction, first match should be selected
-	if file.Name != "REFACTORING.md" {
-		t.Errorf("After typing 'r', expected first match (REFACTORING.md), got %s", file.Name)
+	// After FilterCharAction, first match (directory order) should be selected
+	if file.Name != "FUZZY_SEARCH.md" {
+		t.Errorf("After typing 'r', expected first match (FUZZY_SEARCH.md), got %s", file.Name)
 	}
 
 	// Step 4: Press down
@@ -334,9 +335,9 @@ func TestNavigateDownInFuzzyResults(t *testing.T) {
 
 	t.Logf("  Selected file: %s", file.Name)
 
-	// Should move to second match (rdir)
-	if file.Name != "rdir" {
-		t.Errorf("After pressing down, expected second match (rdir), got %s", file.Name)
+	// Should move to the next matching file in the list
+	if file.Name != "REFACTORING.md" {
+		t.Errorf("After pressing down, expected next match (REFACTORING.md), got %s", file.Name)
 	}
 }
 
