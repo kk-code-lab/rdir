@@ -458,7 +458,10 @@ func (p *PreviewPager) searchStreaming(needle []byte) ([]searchHit, map[int][]te
 			for _, sp := range spans {
 				hits = append(hits, searchHit{line: i, span: sp})
 				if len(hits) >= searchMaxHits {
-					limited = !src.FullyLoaded() || i+1 < src.LineCount()
+					limited = true
+					if !src.FullyLoaded() || i+1 < src.LineCount() {
+						limited = true
+					}
 					return hits, highlights, limited, nil
 				}
 			}
@@ -494,7 +497,7 @@ func (p *PreviewPager) searchStatic(needle []byte) ([]searchHit, map[int][]textS
 	for i := 0; i < limit; i++ {
 		line := p.lineAt(i)
 		if remaining == 0 {
-			limited = limited || i+1 < total
+			limited = true
 			break
 		}
 		spans := literalMatchSpans(line, needle, remaining, caseInsensitive)
@@ -506,9 +509,7 @@ func (p *PreviewPager) searchStatic(needle []byte) ([]searchHit, map[int][]textS
 			hits = append(hits, searchHit{line: i, span: sp})
 			remaining--
 			if remaining == 0 {
-				if i+1 < total {
-					limited = true
-				}
+				limited = true
 				break
 			}
 		}

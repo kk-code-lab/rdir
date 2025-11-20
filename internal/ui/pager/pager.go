@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -319,8 +320,9 @@ func (p *PreviewPager) Run() error {
 	resizeEvents := p.startResizeWatcher(done)
 	var keyEvents <-chan keyEvent
 	var keyErrs <-chan error
-	if resizeEvents != nil {
-		keyEvents, keyErrs, p.stopKeyReader = p.startKeyReader(done)
+	keyEvents, keyErrs, p.stopKeyReader = p.startKeyReader(done)
+	if keyEvents == nil {
+		keyEvents, keyErrs, p.stopKeyReader = p.startLocalKeyReader(done)
 	}
 
 	p.updateSize()
@@ -339,10 +341,13 @@ func (p *PreviewPager) Run() error {
 				p.stopKeyReader()
 			}
 			keyEvents, keyErrs, p.stopKeyReader = p.startKeyReader(done)
+			if keyEvents == nil {
+				keyEvents, keyErrs, p.stopKeyReader = p.startLocalKeyReader(done)
+			}
 			p.restartKeys = false
 		}
 
-		if resizeEvents == nil || keyEvents == nil {
+		if resizeEvents == nil && keyEvents == nil {
 			updated := false
 			if p.statusTimer != nil {
 				select {
@@ -468,6 +473,88 @@ func (p *PreviewPager) startResizeWatcher(done <-chan struct{}) <-chan struct{} 
 		}
 	}()
 	return resizeCh
+}
+
+// startLocalKeyReader provides a minimal key reader when platform-specific
+// implementations are unavailable (e.g., stub builds). It runs readKeyEvent in a
+// goroutine and feeds a channel that can participate in the main select loop.
+func (p *PreviewPager) startLocalKeyReader(done <-chan struct{}) (<-chan keyEvent, <-chan error, func()) {
+	if p == nil {
+		return nil, nil, nil
+	}
+
+	input := p.input
+	closeInput := false
+
+	if tty := fallbackTTYPath(); tty != "" {
+		if file, err := os.OpenFile(tty, os.O_RDONLY, 0); err == nil {
+			input = file
+			closeInput = true
+		}
+	}
+	if input == nil {
+		return nil, nil, nil
+	}
+
+	reader := bufio.NewReader(input)
+	events := make(chan keyEvent, 1)
+	errCh := make(chan error, 1)
+
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			if closeInput {
+				_ = input.Close()
+			}
+		})
+	}
+
+	go func() {
+		defer close(events)
+		defer close(errCh)
+		defer stop()
+
+		origReader := p.reader
+		p.reader = reader
+		defer func() {
+			p.reader = origReader
+		}()
+
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			ev, err := p.readKeyEvent()
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				return
+			}
+			select {
+			case <-done:
+				return
+			case events <- ev:
+			}
+		}
+	}()
+
+	go func() {
+		<-done
+		stop()
+	}()
+
+	return events, errCh, stop
+}
+
+func fallbackTTYPath() string {
+	if runtime.GOOS == "windows" {
+		return "CONIN$"
+	}
+	return "/dev/tty"
 }
 
 func (p *PreviewPager) initTerminal() error {
