@@ -117,6 +117,7 @@ type PreviewPager struct {
 	rawTextSource   *textPagerSource
 	preloadLines    int
 	showInfo        bool
+	showHelp        bool
 	showFormatted   bool
 	statusMessage   string
 	statusStyle     string
@@ -545,6 +546,10 @@ func (p *PreviewPager) render() error {
 
 	p.ensureRowMetrics()
 
+	if p.showHelp {
+		return p.renderHelpOverlay()
+	}
+
 	header := p.headerLines()
 	headerRows := len(header)
 	if headerRows >= p.height {
@@ -625,6 +630,40 @@ func (p *PreviewPager) render() error {
 
 	status := p.statusLine(totalLines, contentRows, p.totalCharCount())
 	p.drawStatus(status)
+
+	if p.writer != nil {
+		return p.writer.Flush()
+	}
+	return nil
+}
+
+func (p *PreviewPager) renderHelpOverlay() error {
+	p.writeString("\x1b[?25l")
+	p.writeString("\x1b[2J")
+	p.writeString("\x1b[H")
+
+	row := 1
+	p.drawStyledRow(row, " Pager shortcuts ", true, headerBarStyle)
+	row++
+
+	helpLines := p.helpOverlayLines()
+	maxRow := p.height - 1
+	if maxRow < row {
+		maxRow = row
+	}
+	for _, line := range helpLines {
+		if row >= maxRow {
+			break
+		}
+		p.drawRow(row, line, false)
+		row++
+	}
+	for row < maxRow {
+		p.drawRow(row, "", false)
+		row++
+	}
+
+	p.drawStatus("j/k/PgUp/PgDn scroll  ·  q/Esc/← close")
 
 	if p.writer != nil {
 		return p.writer.Flush()
@@ -837,6 +876,17 @@ func (p *PreviewPager) clampScroll(totalLines, visible int) {
 
 func (p *PreviewPager) handleKey(ev keyEvent) bool {
 	p.lastErr = nil
+
+	if p.showHelp {
+		switch ev.kind {
+		case keyToggleHelp, keyQuit, keyEscape, keyLeft:
+			p.showHelp = false
+		case keyCtrlC:
+			return true
+		}
+		return false
+	}
+
 	contentRows := p.height - (len(p.headerLines()) + 1) - 1
 	if contentRows < 1 {
 		contentRows = 1
@@ -857,6 +907,8 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 	switch ev.kind {
 	case keyQuit, keyEscape, keyCtrlC, keyLeft:
 		return true
+	case keyToggleHelp:
+		p.showHelp = !p.showHelp
 	case keyOpenEditor:
 		if err := p.openInEditor(); err != nil {
 			p.lastErr = err
@@ -1211,27 +1263,124 @@ func (p *PreviewPager) statusBadges(kind pagerContentKind) []string {
 	return badges
 }
 
-func (p *PreviewPager) helpSegments() []string {
-	segments := []string{
-		"↑↓/PgUp/PgDn scroll",
-		"Shift+↑/↓ ±10",
-		"Home/End jump",
-		"←/Esc/q exit",
+type helpEntry struct {
+	keys string
+	desc string
+}
+
+type helpSection struct {
+	title   string
+	entries []helpEntry
+}
+
+func (p *PreviewPager) helpOverlayLines() []string {
+	width := p.width
+	if width <= 0 {
+		width = 80
+	}
+	available := width
+	if available > 2 {
+		available -= 2
+	}
+	lines := []string{}
+	useSeparator := width >= 60
+	separator := helpSeparator(available)
+	for _, section := range p.helpSections() {
+		if len(section.entries) == 0 {
+			continue
+		}
+		if len(lines) > 0 {
+			if useSeparator && separator != "" {
+				lines = append(lines, separator)
+			} else {
+				lines = append(lines, "")
+			}
+		}
+		lines = append(lines, section.title+":")
+		lines = append(lines, formatHelpEntries(section.entries, available)...)
+	}
+	return lines
+}
+
+func helpSeparator(width int) string {
+	if width < 4 {
+		return ""
+	}
+	maxWidth := width
+	if maxWidth > 60 {
+		maxWidth = 60
+	}
+	return strings.Repeat("-", maxWidth)
+}
+
+func formatHelpEntries(entries []helpEntry, width int) []string {
+	maxKeys := 0
+	for _, entry := range entries {
+		if w := displayWidth(entry.keys); w > maxKeys {
+			maxKeys = w
+		}
+	}
+	padding := maxKeys + 2
+	if padding < 2 {
+		padding = 2
+	}
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		line := fmt.Sprintf("  %-*s %s", padding, entry.keys, entry.desc)
+		if width > 0 && displayWidth(line) > width {
+			line = truncateToWidth(line, width)
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func (p *PreviewPager) helpSections() []helpSection {
+	nav := []helpEntry{
+		{keys: "↑/↓ or j/k", desc: "Scroll one line"},
+		{keys: "Shift+↑/↓", desc: "Jump ±10 lines"},
+		{keys: "PgUp / b", desc: "Page up"},
+		{keys: "PgDn / space", desc: "Page down"},
+		{keys: "Home/End or g/G", desc: "Jump to start/end"},
+	}
+
+	view := []helpEntry{
+		{keys: "?", desc: "Toggle this help"},
+		{keys: "i", desc: "Toggle info line"},
 	}
 	if !p.binaryMode {
-		segments = append(segments, "w/→ wrap")
+		view = append(view, helpEntry{keys: "w or →", desc: "Toggle wrap"})
 	}
 	if len(p.formattedLines) > 0 {
-		segments = append(segments, "f format")
+		view = append(view, helpEntry{keys: "f", desc: "Toggle formatted view"})
 	}
+
+	actions := []helpEntry{}
 	if p.clipboardAvailable() {
-		segments = append(segments, "c copy view", "C copy all")
+		actions = append(actions,
+			helpEntry{keys: "c", desc: "Copy visible lines"},
+			helpEntry{keys: "C", desc: "Copy entire file"},
+		)
 	}
-	segments = append(segments, "i info")
 	if p.canOpenEditor() {
-		segments = append(segments, "e edit")
+		actions = append(actions, helpEntry{keys: "e", desc: "Open in editor"})
 	}
-	return segments
+	actions = append(actions, helpEntry{keys: "Ctrl+C", desc: "Quit immediately"})
+
+	exit := []helpEntry{
+		{keys: "← / q / x / Esc", desc: "Exit pager"},
+	}
+
+	return []helpSection{
+		{title: "Navigation", entries: nav},
+		{title: "View", entries: view},
+		{title: "Actions", entries: actions},
+		{title: "Exit", entries: exit},
+	}
+}
+
+func (p *PreviewPager) helpSegments() []string {
+	return []string{"? help"}
 }
 
 func (p *PreviewPager) clipboardAvailable() bool {
@@ -2158,6 +2307,7 @@ const (
 	keyToggleWrap
 	keySpace
 	keyCtrlC
+	keyToggleHelp
 	keyToggleInfo
 	keyToggleFormat
 	keyOpenEditor
@@ -2183,10 +2333,14 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 	switch b {
 	case 0x1b:
 		return p.parseEscapeSequence()
+	case '?':
+		return keyEvent{kind: keyToggleHelp}, nil
 	case 'k', 'K':
 		return keyEvent{kind: keyUp}, nil
 	case 'j', 'J':
 		return keyEvent{kind: keyDown}, nil
+	case 'h', 'H':
+		return keyEvent{kind: keyToggleHelp}, nil
 	case 'q', 'Q':
 		return keyEvent{kind: keyQuit}, nil
 	case 'x', 'X':
