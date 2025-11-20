@@ -546,8 +546,8 @@ func TestHelpSegmentsCompactFooter(t *testing.T) {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
 	segments := pager.helpSegments()
-	if len(segments) != 1 || !containsSegment(segments, "? help") {
-		t.Fatalf("footer help should be compact and include only '? help', got %v", segments)
+	if len(segments) < 2 || !containsSegment(segments, "? help") || !containsSegment(segments, "/ search") {
+		t.Fatalf("footer help should advertise help and search, got %v", segments)
 	}
 
 	stateNoClipboard := &statepkg.AppState{
@@ -558,8 +558,344 @@ func TestHelpSegmentsCompactFooter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
-	if !containsSegment(pagerNoClipboard.helpSegments(), "? help") {
+	if !containsSegment(pagerNoClipboard.helpSegments(), "/ search") {
 		t.Fatalf("footer help should still include help hint without clipboard")
+	}
+}
+
+func TestExecuteSearchBuildsHighlights(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name: "notes.txt",
+		TextLines: []string{
+			"hello world",
+			"second hello",
+			"nomatch",
+		},
+		LineCount: 3,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.width = 40
+	pager.executeSearch("hello")
+
+	if got := len(pager.searchHits); got != 2 {
+		t.Fatalf("expected 2 search hits, got %d", got)
+	}
+	spans, focus := pager.visibleHighlights(1, 0, 0)
+	if len(spans) != 1 || spans[0].start != 7 || spans[0].end != 12 {
+		t.Fatalf("unexpected highlight spans for line 1: %+v", spans)
+	}
+	if focus != nil {
+		t.Fatalf("focus should not be on line 1")
+	}
+	highlighted := applySearchHighlights(pager.lineAt(1), spans, nil)
+	if !strings.Contains(highlighted, searchHighlightOn) || !strings.Contains(highlighted, searchHighlightOff) {
+		t.Fatalf("highlight codes should wrap match, got %q", highlighted)
+	}
+	if status := pager.searchStatusSegment(); status != "/hello 1/2" {
+		t.Fatalf("search status segment mismatch, got %q", status)
+	}
+}
+
+func TestSearchNavigationAdjustsWrapOffsets(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "wrap.txt",
+		TextLines: []string{"aaaaabbbbbccccc"},
+		LineCount: 1,
+	}
+	state := &statepkg.AppState{
+		CurrentPath: "/tmp",
+		PreviewData: preview,
+		PreviewWrap: true,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.width = 5
+	pager.height = 4
+	pager.wrapEnabled = true
+
+	pager.executeSearch("cc")
+	if len(pager.searchHits) == 0 {
+		t.Fatalf("expected search hit to be recorded")
+	}
+
+	pager.focusSearchHit(pager.searchCursor)
+	if pager.state.PreviewScrollOffset != 0 {
+		t.Fatalf("expected scroll offset to stay at first line, got %d", pager.state.PreviewScrollOffset)
+	}
+	if pager.state.PreviewWrapOffset != 1 {
+		t.Fatalf("expected wrap offset to center hit, got %d", pager.state.PreviewWrapOffset)
+	}
+}
+
+func TestSearchStatusPlaceholderWhenActive(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "notes.txt",
+		TextLines: []string{"sample"},
+		LineCount: 1,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	pager.enterSearchMode()
+	if seg := pager.searchStatusSegment(); seg != "/_" {
+		t.Fatalf("expected placeholder search segment, got %q", seg)
+	}
+
+	pager.appendSearchRune('a')
+	if seg := pager.searchStatusSegment(); seg != "/a_" {
+		t.Fatalf("expected search segment to reflect input, got %q", seg)
+	}
+}
+
+func TestSearchNavigationFinalizesPendingInput(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name: "demo.txt",
+		TextLines: []string{
+			"foo",
+			"bar foo",
+		},
+		LineCount: 2,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.height = 8
+	pager.width = 10
+	pager.enterSearchMode()
+	pager.searchInput = []rune("foo")
+	pager.searchQuery = ""
+
+	pager.handleSearchModeEvent(keyEvent{kind: keyDown})
+	if pager.searchQuery != "foo" {
+		t.Fatalf("expected search query to be finalized before navigation, got %q", pager.searchQuery)
+	}
+	if len(pager.searchHits) != 2 {
+		t.Fatalf("expected search hits after navigation, got %d", len(pager.searchHits))
+	}
+	if pager.searchCursor != 1 {
+		t.Fatalf("expected cursor to advance to second hit, got %d", pager.searchCursor)
+	}
+}
+
+func TestSearchEscapeClearsQueryAndHighlights(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "demo.txt",
+		TextLines: []string{"foo bar"},
+		LineCount: 1,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	pager.enterSearchMode()
+	pager.searchInput = []rune("foo")
+	pager.finalizeSearchInput()
+	if len(pager.searchHits) == 0 {
+		t.Fatalf("expected hits after finalizing search input")
+	}
+
+	pager.handleSearchModeEvent(keyEvent{kind: keyEscape})
+
+	if pager.searchMode {
+		t.Fatalf("expected search mode to be disabled after escape")
+	}
+	if pager.searchQuery != "" {
+		t.Fatalf("expected search query to clear, got %q", pager.searchQuery)
+	}
+	if len(pager.searchHits) != 0 || len(pager.searchHighlights) != 0 {
+		t.Fatalf("expected search results to clear after escape")
+	}
+}
+
+func TestSearchInitialCursorRespectsScrollPosition(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name: "demo.txt",
+		TextLines: []string{
+			"hit-one",
+			"nope",
+			"hit-two",
+			"nope",
+			"hit-three",
+		},
+		LineCount: 5,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	state.PreviewScrollOffset = 2
+	pager.executeSearch("hit")
+	if pager.searchCursor < 0 || pager.searchCursor >= len(pager.searchHits) {
+		t.Fatalf("search cursor not set")
+	}
+	if pager.searchHits[pager.searchCursor].line != 2 {
+		t.Fatalf("expected cursor to start at first hit at/after scroll, got line %d", pager.searchHits[pager.searchCursor].line)
+	}
+
+	state.PreviewScrollOffset = 10
+	pager.executeSearch("hit")
+	if pager.searchHits[pager.searchCursor].line != 0 {
+		t.Fatalf("expected cursor to wrap to first hit when none after scroll, got line %d", pager.searchHits[pager.searchCursor].line)
+	}
+}
+
+func TestSearchInitialCursorWrapAwareWithinLine(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name: "wrap-line",
+		TextLines: []string{
+			"hit---hit",
+		},
+		LineCount: 1,
+	}
+	state := &statepkg.AppState{
+		CurrentPath: "/tmp",
+		PreviewData: preview,
+		PreviewWrap: true,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.width = 6
+	pager.height = 10
+	pager.wrapEnabled = true
+	state.PreviewScrollOffset = 0
+	state.PreviewWrapOffset = 1 // second wrapped row; should pick second hit
+
+	pager.executeSearch("hit")
+	if len(pager.searchHits) != 2 {
+		t.Fatalf("expected two hits, got %d", len(pager.searchHits))
+	}
+	if pager.searchCursor < 0 || pager.searchCursor >= len(pager.searchHits) {
+		t.Fatalf("search cursor not set")
+	}
+	if pager.searchHits[pager.searchCursor].span.start != 6 {
+		t.Fatalf("expected cursor to choose hit in current wrapped row, got start %d", pager.searchHits[pager.searchCursor].span.start)
+	}
+}
+
+func TestSearchSmartCase(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name: "case.txt",
+		TextLines: []string{
+			"Hit Upper",
+			"hit lower",
+		},
+		LineCount: 2,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	pager.executeSearch("hit")
+	if len(pager.searchHits) != 2 {
+		t.Fatalf("expected case-insensitive matches when query has no uppercase, got %d", len(pager.searchHits))
+	}
+
+	pager.executeSearch("Hit")
+	if len(pager.searchHits) != 1 || pager.searchHits[0].line != 0 {
+		t.Fatalf("expected case-sensitive match when query has uppercase")
+	}
+}
+
+func TestSearchStatusShowsCountsDuringActiveMode(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name: "notes.txt",
+		TextLines: []string{
+			"hello",
+			"hello again",
+		},
+		LineCount: 2,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	pager.executeSearch("hello")
+	pager.enterSearchMode()
+	pager.searchInput = []rune("hello")
+
+	seg := pager.searchStatusSegment()
+	if seg != "/hello_ 1/2" {
+		t.Fatalf("expected active search to show counts, got %q", seg)
+	}
+
+	pager.searchInput = []rune("hel")
+	seg = pager.searchStatusSegment()
+	if seg != "/hel_" {
+		t.Fatalf("expected counts to hide when input diverges, got %q", seg)
+	}
+}
+
+func TestSearchModeConsumesCommandKeys(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "demo.txt",
+		TextLines: []string{"wrap toggle should not fire"},
+		LineCount: 1,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.wrapEnabled = false
+	pager.handleKey(keyEvent{kind: keyStartSearch, ch: '/'})
+
+	if !pager.searchMode {
+		t.Fatalf("expected search mode after '/'")
+	}
+
+	pager.handleKey(keyEvent{kind: keyToggleWrap, ch: 'w'})
+	if pager.wrapEnabled {
+		t.Fatalf("wrap toggle should be ignored during search input")
+	}
+	pager.handleKey(keyEvent{kind: keyUp, ch: 'k'})
+	pager.handleKey(keyEvent{kind: keySearchNext, ch: 'n'})
+
+	if got := string(pager.searchInput); got != "wkn" {
+		t.Fatalf("expected search input to collect typed keys, got %q", got)
+	}
+}
+
+func TestFocusedHighlightUsesDistinctStyle(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "demo.txt",
+		TextLines: []string{"foo foo"},
+		LineCount: 1,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.executeSearch("foo")
+	if len(pager.searchHits) != 2 {
+		t.Fatalf("expected two hits, got %d", len(pager.searchHits))
+	}
+
+	spans, focus := pager.visibleHighlights(0, 0, 0)
+	highlighted := applySearchHighlights(pager.lineAt(0), spans, focus)
+	if !strings.Contains(highlighted, searchHighlightFocusOn) || !strings.Contains(highlighted, searchHighlightFocusOff) {
+		t.Fatalf("focused span should use distinct style, got %q", highlighted)
 	}
 }
 
