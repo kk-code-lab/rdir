@@ -11,6 +11,9 @@
   - [x] Navigation: maintain hit list + cursor; jumps update `PreviewScrollOffset`/`PreviewWrapOffset` to center the hit.
   - [ ] Performance/limits: cap buffered hits (e.g., 10k) and buffered lines (e.g., 20k); debounce query changes; fallback to pure Go `bytes.Index` when SIMD unavailable. (Optional tuning remains.)
 
+- [ ] **UTF-16 pager streaming**
+  Extend `textPagerSource` to stream UTF-16 LE/BE previews instead of falling back to the truncated buffer only. Needs proper UTF-16 decoding, byte-offset aware line metadata, and copy-all support that loads the full file without re-decoding the head buffer.
+
 - [ ] **Window resize on Windows pager**  
   Unix pagers now redraw immediately when the terminal resizes (SIGWINCH + `select`). Windows still requires a keypress because we never consume `WINDOW_BUFFER_SIZE_EVENT`. Implement a Windows-specific key reader that uses `ReadConsoleInput`/`golang.org/x/sys/windows` to listen for both `KEY_EVENT` and `WINDOW_BUFFER_SIZE_EVENT`, toggles raw mode via `SetConsoleMode`, and pushes synthetic resize events into the pager loop so `p.updateSize()`/`render()` fire without waiting for input.
 
