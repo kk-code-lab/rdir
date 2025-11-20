@@ -154,6 +154,7 @@ type PreviewPager struct {
 	searchLimited    bool
 	searchErr        error
 	searchTimer      *time.Timer
+	searchFocused    bool
 }
 
 var pagerCommand = exec.Command

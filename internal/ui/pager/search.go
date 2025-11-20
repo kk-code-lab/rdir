@@ -346,6 +346,7 @@ func (p *PreviewPager) clearSearchResults() {
 	p.searchCursor = -1
 	p.searchLimited = false
 	p.searchErr = nil
+	p.searchFocused = false
 }
 
 func (p *PreviewPager) onSearchInputChanged() {
@@ -407,6 +408,7 @@ func (p *PreviewPager) finalizeSearchInput() {
 func (p *PreviewPager) executeSearch(query string) {
 	p.clearSearchResults()
 	p.searchQuery = query
+	p.searchFocused = false
 	if p.binaryMode || strings.TrimSpace(query) == "" {
 		return
 	}
@@ -525,6 +527,14 @@ func (p *PreviewPager) moveSearchCursor(delta int) {
 	if p.searchCursor < 0 || p.searchCursor >= len(p.searchHits) {
 		p.searchCursor = 0
 	}
+	currentHit := p.searchHits[p.searchCursor]
+	if !p.searchFocused {
+		if !p.hitVisible(currentHit) {
+			p.focusSearchHit(p.searchCursor)
+			return
+		}
+		p.searchFocused = true
+	}
 	p.searchCursor = (p.searchCursor + delta) % len(p.searchHits)
 	if p.searchCursor < 0 {
 		p.searchCursor += len(p.searchHits)
@@ -537,6 +547,7 @@ func (p *PreviewPager) focusSearchHit(idx int) {
 		return
 	}
 	hit := p.searchHits[idx]
+	p.searchFocused = true
 	if p.rawTextSource != nil {
 		_ = p.rawTextSource.EnsureLine(hit.line)
 	}
@@ -606,9 +617,53 @@ func (p *PreviewPager) hitRowRange(hit searchHit) (int, int) {
 	return start, end
 }
 
+func (p *PreviewPager) hitVisible(hit searchHit) bool {
+	if p == nil || p.state == nil {
+		return false
+	}
+
+	headerRows := len(p.headerLines())
+	if headerRows >= p.height {
+		headerRows = p.height - 1
+		if headerRows < 0 {
+			headerRows = 0
+		}
+	}
+	contentRows := p.height - headerRows - 1
+	if contentRows < 1 {
+		contentRows = 1
+	}
+
+	if p.wrapEnabled && p.width > 0 {
+		p.ensureRowMetrics()
+		startRow := p.currentRowNumber()
+		endRow := startRow + contentRows - 1
+		hitStart, hitEnd := p.hitRowRange(hit)
+		if hitStart > endRow || hitEnd < startRow {
+			return false
+		}
+		return true
+	}
+
+	startLine := p.state.PreviewScrollOffset
+	if startLine < 0 {
+		startLine = 0
+	}
+	endLine := startLine + contentRows - 1
+	total := p.lineCount()
+	if total <= 0 {
+		return false
+	}
+	if endLine >= total {
+		endLine = total - 1
+	}
+	return hit.line >= startLine && hit.line <= endLine
+}
+
 func (p *PreviewPager) setInitialSearchCursor() {
 	if len(p.searchHits) == 0 {
 		p.searchCursor = -1
+		p.searchFocused = false
 		return
 	}
 
@@ -639,6 +694,7 @@ func (p *PreviewPager) setInitialSearchCursor() {
 		best = 0
 	}
 	p.searchCursor = best
+	p.searchFocused = false
 }
 
 func (p *PreviewPager) focusedHit() *searchHit {
