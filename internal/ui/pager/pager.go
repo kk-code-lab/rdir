@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
@@ -28,6 +29,8 @@ const (
 	binaryPagerMaxChunks   = 8
 	headerBarStyle         = "\x1b[48;5;238m\x1b[97m"
 	statusBarStyle         = "\x1b[48;5;236m\x1b[97m"
+	statusSuccessStyle     = "\x1b[48;5;22m\x1b[97m"
+	statusErrorStyle       = "\x1b[48;5;52m\x1b[97m"
 	shiftScrollLines       = 10
 )
 
@@ -115,21 +118,29 @@ type PreviewPager struct {
 	preloadLines    int
 	showInfo        bool
 	showFormatted   bool
+	statusMessage   string
+	statusStyle     string
+	statusExpiry    time.Time
+	statusTimer     *time.Timer
 	lastErr         error
 	restartKeys     bool
+	clipboardCmd    []string
+	clipboardFunc   func(string) error
 }
 
 var pagerCommand = exec.Command
+var clipboardCommand = exec.Command
 
-func NewPreviewPager(state *statepkg.AppState, editorCmd []string, reducer *statepkg.StateReducer) (*PreviewPager, error) {
+func NewPreviewPager(state *statepkg.AppState, editorCmd []string, reducer *statepkg.StateReducer, clipboardCmd []string) (*PreviewPager, error) {
 	if state == nil || state.PreviewData == nil {
 		return nil, errors.New("preview data unavailable")
 	}
 	pager := &PreviewPager{
-		state:       state,
-		wrapEnabled: state.PreviewWrap,
-		editorCmd:   append([]string(nil), editorCmd...),
-		reducer:     reducer,
+		state:        state,
+		wrapEnabled:  state.PreviewWrap,
+		editorCmd:    append([]string(nil), editorCmd...),
+		reducer:      reducer,
+		clipboardCmd: append([]string(nil), clipboardCmd...),
 	}
 	pager.prepareContent()
 	return pager, nil
@@ -301,6 +312,15 @@ func (p *PreviewPager) Run() error {
 		}
 
 		if resizeEvents == nil || keyEvents == nil {
+			cleared := false
+			if p.statusTimer != nil {
+				select {
+				case <-p.statusTimer.C:
+					p.clearStatusMessage()
+					cleared = true
+				default:
+				}
+			}
 			event, err := p.readKeyEvent()
 			if err != nil {
 				return err
@@ -308,7 +328,7 @@ func (p *PreviewPager) Run() error {
 			if done := p.handleKey(event); done {
 				return p.lastErr
 			}
-			needsRender = true
+			needsRender = true || cleared
 			continue
 		}
 
@@ -325,6 +345,9 @@ func (p *PreviewPager) Run() error {
 				return err
 			}
 			return nil
+		case <-p.statusTimerC():
+			p.clearStatusMessage()
+			needsRender = true
 		}
 	}
 }
@@ -446,6 +469,9 @@ func (p *PreviewPager) cleanupTerminal() {
 	}
 	if p.rawTextSource != nil {
 		p.rawTextSource.Close()
+	}
+	if p.statusTimer != nil {
+		p.statusTimer.Stop()
 	}
 	if p.input != nil && p.restoreTerm != nil {
 		_ = term.Restore(int(p.input.Fd()), p.restoreTerm)
@@ -740,7 +766,11 @@ func (p *PreviewPager) drawStatus(text string) {
 	if p.width > 0 && displayWidth(display) > p.width {
 		display = truncateToWidth(display, p.width)
 	}
-	p.drawStyledRow(p.height, display, false, statusBarStyle)
+	style := statusBarStyle
+	if strings.TrimSpace(p.statusMessage) != "" && p.statusStyle != "" {
+		style = p.statusStyle
+	}
+	p.drawStyledRow(p.height, display, false, style)
 }
 
 func (p *PreviewPager) clampScroll(totalLines, visible int) {
@@ -899,6 +929,10 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		p.showInfo = !p.showInfo
 	case keyToggleFormat:
 		p.toggleFormatView()
+	case keyCopyVisible:
+		p.recordCopyResult(p.copyVisibleToClipboard(), "copied view")
+	case keyCopyAll:
+		p.recordCopyResult(p.copyAllToClipboard(), "copied all")
 	}
 
 	p.clampScroll(totalLines, contentRows)
@@ -1054,15 +1088,27 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 	segments = append(segments, p.statusBadges(kind)...)
 	segments = filterEmptyStrings(segments)
 
-	status := strings.Join(segments, "  ")
+	base := strings.Join(segments, "  ")
 	help := strings.Join(p.helpSegments(), "  ")
-	if help != "" {
-		if status != "" {
-			status += "  "
+
+	if msg := strings.TrimSpace(p.statusMessage); msg != "" {
+		msg = textutil.SanitizeTerminalText(msg)
+		if base != "" {
+			msg += "  " + base
 		}
-		status += help
+		if help != "" {
+			msg += "  " + help
+		}
+		return msg
 	}
-	return status
+
+	if help != "" {
+		if base != "" {
+			base += "  "
+		}
+		base += help
+	}
+	return base
 }
 
 func (p *PreviewPager) positionSegment(totalLines, visible int, approx bool) string {
@@ -1178,11 +1224,306 @@ func (p *PreviewPager) helpSegments() []string {
 	if len(p.formattedLines) > 0 {
 		segments = append(segments, "f format")
 	}
+	if p.clipboardAvailable() {
+		segments = append(segments, "c copy view", "C copy all")
+	}
 	segments = append(segments, "i info")
 	if p.canOpenEditor() {
 		segments = append(segments, "e edit")
 	}
 	return segments
+}
+
+func (p *PreviewPager) clipboardAvailable() bool {
+	if p == nil {
+		return false
+	}
+	if p.state == nil || !p.state.ClipboardAvailable {
+		return false
+	}
+	if p.clipboardFunc != nil {
+		return true
+	}
+	return len(p.clipboardCmd) > 0
+}
+
+func (p *PreviewPager) recordCopyResult(err error, successMsg string) {
+	if err != nil {
+		p.setStatusMessage(err.Error(), statusErrorStyle)
+		if p.state != nil {
+			p.state.LastError = err
+		}
+		return
+	}
+	p.setStatusMessage(successMsg, statusSuccessStyle)
+	if p.state != nil {
+		p.state.LastYankTime = time.Now()
+	}
+}
+
+func (p *PreviewPager) setStatusMessage(msg string, style string) {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		p.statusMessage = ""
+		p.statusStyle = ""
+		p.stopStatusTimer()
+		return
+	}
+	p.statusMessage = textutil.SanitizeTerminalText(msg)
+	p.statusStyle = style
+	p.startStatusTimer(1500 * time.Millisecond)
+}
+
+func (p *PreviewPager) copyVisibleToClipboard() error {
+	lines := p.visibleContentLines()
+	return p.copyLinesToClipboard(lines)
+}
+
+func (p *PreviewPager) copyAllToClipboard() error {
+	lines, err := p.allLinesForClipboard()
+	if err != nil {
+		return err
+	}
+	return p.copyLinesToClipboard(lines)
+}
+
+func (p *PreviewPager) visibleContentLines() []string {
+	if p == nil {
+		return nil
+	}
+	if p.state == nil {
+		return nil
+	}
+	width := p.width
+	if width <= 0 {
+		width = 1
+	}
+	height := p.height
+	if height <= 0 {
+		height = 1
+	}
+	headerRows := len(p.headerLines())
+	if headerRows >= height {
+		headerRows = height - 1
+		if headerRows < 0 {
+			headerRows = 0
+		}
+	}
+
+	contentRows := height - headerRows - 1
+	if contentRows < 1 {
+		contentRows = 1
+	}
+
+	totalLines := p.lineCount()
+	p.clampScroll(totalLines, contentRows)
+
+	start := p.state.PreviewScrollOffset
+	if start < 0 {
+		start = 0
+	}
+	if totalLines > 0 && start > totalLines {
+		start = totalLines
+	}
+	skipRows := 0
+	if p.wrapEnabled {
+		skipRows = p.state.PreviewWrapOffset
+	}
+
+	rowsRemaining := contentRows
+	lines := []string{}
+	for i := start; i < totalLines && rowsRemaining > 0; i++ {
+		text := lineForClipboard(p.lineAt(i))
+		if p.wrapEnabled {
+			segments := wrapLineSegments(text, width)
+			if skipRows > 0 {
+				if skipRows >= len(segments) {
+					skipRows = 0
+					continue
+				}
+				segments = segments[skipRows:]
+				skipRows = 0
+			}
+			for _, segment := range segments {
+				lines = append(lines, segment)
+				rowsRemaining--
+				if rowsRemaining == 0 {
+					break
+				}
+			}
+			continue
+		}
+
+		if width > 0 {
+			text = truncateToWidth(text, width)
+		}
+		lines = append(lines, text)
+		rowsRemaining--
+	}
+	return lines
+}
+
+func (p *PreviewPager) allLinesForClipboard() ([]string, error) {
+	if p == nil {
+		return nil, errors.New("pager unavailable")
+	}
+	if !p.showFormatted && p.rawTextSource != nil {
+		if err := p.rawTextSource.EnsureAll(); err != nil {
+			return nil, err
+		}
+	}
+	total := p.lineCount()
+	if total < 0 {
+		total = 0
+	}
+	lines := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		lines = append(lines, lineForClipboard(p.lineAt(i)))
+	}
+	return lines, nil
+}
+
+func (p *PreviewPager) copyLinesToClipboard(lines []string) error {
+	if !p.clipboardAvailable() {
+		return errors.New("clipboard unavailable")
+	}
+	content := strings.Join(lines, "\n")
+	if p.clipboardFunc != nil {
+		return p.clipboardFunc(content)
+	}
+	if len(p.clipboardCmd) == 0 {
+		return errors.New("clipboard unavailable")
+	}
+	cmd := clipboardCommand(p.clipboardCmd[0], p.clipboardCmd[1:]...)
+	if cmd.Stdin == nil {
+		cmd.Stdin = strings.NewReader(content)
+	}
+	if cmd.Stdout == nil {
+		cmd.Stdout = io.Discard
+	}
+	if cmd.Stderr == nil {
+		cmd.Stderr = io.Discard
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("clipboard command %q failed: %w", p.clipboardCmd[0], err)
+	}
+	return nil
+}
+
+func wrapLineSegments(text string, width int) []string {
+	if width <= 0 {
+		return []string{text}
+	}
+	if text == "" {
+		return []string{""}
+	}
+
+	out := []string{}
+	for len(text) > 0 {
+		consumed := 0
+		index := 0
+		for index < len(text) {
+			ru, size := utf8.DecodeRuneInString(text[index:])
+			if size <= 0 {
+				index++
+				break
+			}
+			w := runewidth.RuneWidth(ru)
+			if w <= 0 {
+				w = 1
+			}
+			if consumed+w > width {
+				if consumed == 0 {
+					index += size
+				}
+				break
+			}
+			consumed += w
+			index += size
+			if consumed >= width {
+				break
+			}
+		}
+		if index <= 0 {
+			index = len(text)
+		}
+		out = append(out, text[:index])
+		text = text[index:]
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
+func lineForClipboard(text string) string {
+	if text == "" {
+		return ""
+	}
+	stripped := stripANSICodes(text)
+	return textutil.SanitizeTerminalText(stripped)
+}
+
+func stripANSICodes(text string) string {
+	if text == "" {
+		return ""
+	}
+	var b strings.Builder
+	for i := 0; i < len(text); {
+		if text[i] == '\x1b' && i+1 < len(text) && text[i+1] == '[' {
+			j := i + 2
+			for j < len(text) && text[j] != 'm' {
+				j++
+			}
+			if j < len(text) {
+				j++
+			}
+			i = j
+			continue
+		}
+		ru, size := utf8.DecodeRuneInString(text[i:])
+		if size <= 0 {
+			i++
+			continue
+		}
+		b.WriteRune(ru)
+		i += size
+	}
+	return b.String()
+}
+
+func (p *PreviewPager) startStatusTimer(d time.Duration) {
+	if p.statusTimer != nil {
+		if !p.statusTimer.Stop() {
+			select {
+			case <-p.statusTimer.C:
+			default:
+			}
+		}
+	}
+	p.statusExpiry = time.Now().Add(d)
+	p.statusTimer = time.NewTimer(d)
+}
+
+func (p *PreviewPager) stopStatusTimer() {
+	if p.statusTimer != nil {
+		p.statusTimer.Stop()
+		p.statusTimer = nil
+	}
+	p.statusExpiry = time.Time{}
+}
+
+func (p *PreviewPager) statusTimerC() <-chan time.Time {
+	if p.statusTimer == nil {
+		return nil
+	}
+	return p.statusTimer.C
+}
+
+func (p *PreviewPager) clearStatusMessage() {
+	p.statusMessage = ""
+	p.statusStyle = ""
+	p.stopStatusTimer()
 }
 
 func filterEmptyStrings(values []string) []string {
@@ -1822,6 +2163,8 @@ const (
 	keyOpenEditor
 	keyShiftUp
 	keyShiftDown
+	keyCopyVisible
+	keyCopyAll
 )
 
 type keyEvent struct {
@@ -1856,6 +2199,10 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keyToggleFormat}, nil
 	case 'e', 'E':
 		return keyEvent{kind: keyOpenEditor}, nil
+	case 'c':
+		return keyEvent{kind: keyCopyVisible}, nil
+	case 'C':
+		return keyEvent{kind: keyCopyAll}, nil
 	case ' ':
 		return keyEvent{kind: keySpace}, nil
 	case 'b', 'B':

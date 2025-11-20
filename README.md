@@ -19,6 +19,7 @@ rdir
 - **↑/↓**: Navigate files
 - **Enter**: Enter directory
 - **→**: Open file in pager
+- **c/C (pager)**: Copy visible view/all content to clipboard
 - **f (pager)**: Toggle formatted/raw preview (pretty JSON/Markdown when available; falls back to raw for truncated/large files)
 - **←/Backspace**: Go to parent
 - **/**: Fuzzy search

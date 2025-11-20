@@ -220,7 +220,7 @@ func TestPreviewPagerToggleFormatSwitchesViews(t *testing.T) {
 		PreviewData: preview,
 		CurrentPath: ".",
 	}
-	pager, err := NewPreviewPager(state, nil, nil)
+	pager, err := NewPreviewPager(state, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
@@ -302,6 +302,69 @@ func TestReadKeyEventEdit(t *testing.T) {
 	}
 	if ev.kind != keyOpenEditor {
 		t.Fatalf("expected keyOpenEditor for upper, got %v", ev.kind)
+	}
+}
+
+func TestReadKeyEventCopy(t *testing.T) {
+	t.Parallel()
+	p := &PreviewPager{reader: bufio.NewReader(strings.NewReader("cC"))}
+
+	ev, err := p.readKeyEvent()
+	if err != nil {
+		t.Fatalf("readKeyEvent: %v", err)
+	}
+	if ev.kind != keyCopyVisible {
+		t.Fatalf("expected keyCopyVisible, got %v", ev.kind)
+	}
+
+	ev, err = p.readKeyEvent()
+	if err != nil {
+		t.Fatalf("readKeyEvent upper: %v", err)
+	}
+	if ev.kind != keyCopyAll {
+		t.Fatalf("expected keyCopyAll, got %v", ev.kind)
+	}
+}
+
+func TestCopyVisibleToClipboardCopiesViewport(t *testing.T) {
+	t.Parallel()
+	preview := &statepkg.PreviewData{
+		Name: "file.txt",
+		TextLines: []string{
+			"first line",
+			"second line",
+			"third line",
+			"fourth line",
+		},
+	}
+	state := &statepkg.AppState{
+		CurrentPath:         "/tmp",
+		PreviewData:         preview,
+		ClipboardAvailable:  true,
+		PreviewScrollOffset: 0,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, []string{"clip"})
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.height = 5 // 1 header + 3 content + 1 status
+	pager.width = 20 // no truncation
+	var copied string
+	pager.clipboardFunc = func(content string) error {
+		copied = content
+		return nil
+	}
+
+	if done := pager.handleKey(keyEvent{kind: keyCopyVisible}); done {
+		t.Fatalf("copy action should not exit pager")
+	}
+
+	want := "first line\nsecond line\nthird line"
+	if copied != want {
+		t.Fatalf("copied visible content mismatch:\nwant=%q\ngot =%q", want, copied)
+	}
+	if state.LastYankTime.IsZero() {
+		t.Fatalf("copy should record LastYankTime")
 	}
 }
 
@@ -467,6 +530,82 @@ func TestStatusLineTextShowsWrapAndFormat(t *testing.T) {
 	}
 }
 
+func TestHelpSegmentsIncludeClipboardHints(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "notes.txt",
+		TextLines: []string{"hi"},
+		LineCount: 1,
+	}
+
+	stateWithClipboard := &statepkg.AppState{
+		PreviewData:        preview,
+		ClipboardAvailable: true,
+	}
+	pager, err := NewPreviewPager(stateWithClipboard, nil, nil, []string{"clip"})
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	segments := pager.helpSegments()
+	if !containsSegment(segments, "c copy view") {
+		t.Fatalf("expected clipboard hint to appear when available, got %v", segments)
+	}
+
+	stateNoClipboard := &statepkg.AppState{
+		PreviewData:        preview,
+		ClipboardAvailable: false,
+	}
+	pagerNoClipboard, err := NewPreviewPager(stateNoClipboard, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	if containsSegment(pagerNoClipboard.helpSegments(), "c copy view") {
+		t.Fatalf("clipboard hint should be hidden when unavailable")
+	}
+}
+
+func TestStatusLinePrioritizesStatusMessage(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:          "notes.txt",
+		TextLines:     []string{"hi"},
+		LineCount:     1,
+		TextCharCount: 2,
+	}
+	state := &statepkg.AppState{PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.statusMessage = "copied view"
+	line := pager.statusLine(1, 1, 2)
+	if !strings.HasPrefix(line, "copied view") {
+		t.Fatalf("status message should be first, got %q", line)
+	}
+}
+
+func TestRecordCopyResultSetsStatusStyle(t *testing.T) {
+	state := &statepkg.AppState{PreviewData: &statepkg.PreviewData{Name: "x.txt", TextLines: []string{"x"}}}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	pager.recordCopyResult(nil, "ok")
+	if pager.statusStyle != statusSuccessStyle {
+		t.Fatalf("expected success style, got %q", pager.statusStyle)
+	}
+
+	sentinel := errors.New("boom")
+	pager.recordCopyResult(sentinel, "nope")
+	if pager.statusStyle != statusErrorStyle {
+		t.Fatalf("expected error style, got %q", pager.statusStyle)
+	}
+
+	pager.clearStatusMessage()
+	if pager.statusStyle != "" || pager.statusMessage != "" {
+		t.Fatalf("expected status state to clear, got style=%q msg=%q", pager.statusStyle, pager.statusMessage)
+	}
+}
+
 func TestStatusLineMarksApproxChars(t *testing.T) {
 	preview := &statepkg.PreviewData{
 		Name:          "big.txt",
@@ -573,7 +712,7 @@ func TestInfoSegmentsTrackStreamingLineCounts(t *testing.T) {
 		TextCharCount: lineCharCount(sample),
 	}
 	state := &statepkg.AppState{CurrentPath: dir, PreviewData: preview}
-	pager, err := NewPreviewPager(state, nil, nil)
+	pager, err := NewPreviewPager(state, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
@@ -639,7 +778,7 @@ func TestPersistLoadedLinesUpdatesPreviewState(t *testing.T) {
 		TextCharCount: lineCharCount(sample),
 	}
 	state := &statepkg.AppState{CurrentPath: dir, PreviewData: preview}
-	pager, err := NewPreviewPager(state, nil, nil)
+	pager, err := NewPreviewPager(state, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
@@ -661,7 +800,7 @@ func TestPersistLoadedLinesUpdatesPreviewState(t *testing.T) {
 	}
 
 	// Simulate reopening the pager with the persisted preview data.
-	pager2, err := NewPreviewPager(state, nil, nil)
+	pager2, err := NewPreviewPager(state, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("reopen pager: %v", err)
 	}
@@ -710,7 +849,7 @@ func TestPersistLoadedLinesAllowsSubsequentStreaming(t *testing.T) {
 		TextCharCount: lineCharCount(sample),
 	}
 	state := &statepkg.AppState{CurrentPath: dir, PreviewData: preview}
-	pager, err := NewPreviewPager(state, nil, nil)
+	pager, err := NewPreviewPager(state, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
@@ -725,7 +864,7 @@ func TestPersistLoadedLinesAllowsSubsequentStreaming(t *testing.T) {
 	}
 	pager.persistLoadedLines()
 	// Simulate closing pager; next run should resume streaming.
-	pager2, err := NewPreviewPager(state, nil, nil)
+	pager2, err := NewPreviewPager(state, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("reopen pager: %v", err)
 	}
@@ -737,5 +876,117 @@ func TestPersistLoadedLinesAllowsSubsequentStreaming(t *testing.T) {
 	}
 	if count := pager2.rawTextSource.LineCount(); count != totalLines {
 		t.Fatalf("streaming stalled: got %d lines want %d", count, totalLines)
+	}
+}
+
+func TestCopyAllStreamsFullFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "copy.txt")
+	var builder strings.Builder
+	totalLines := 6
+	for i := 0; i < totalLines; i++ {
+		fmt.Fprintf(&builder, "line %02d\n", i)
+	}
+	data := builder.String()
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	sample := []string{"line 00", "line 01"}
+	metas := make([]statepkg.TextLineMetadata, len(sample))
+	var offset int64
+	for i, line := range sample {
+		metas[i] = statepkg.TextLineMetadata{
+			Offset:       offset,
+			Length:       len(line) + 1,
+			RuneCount:    len(line) + 1,
+			DisplayWidth: displayWidth(line + " \n"),
+		}
+		offset += int64(len(line) + 1)
+	}
+
+	preview := &statepkg.PreviewData{
+		Name:          filepath.Base(path),
+		Size:          int64(len(data)),
+		Mode:          0o644,
+		Modified:      time.Unix(0, 0),
+		TextLines:     sample,
+		TextLineMeta:  metas,
+		TextBytesRead: offset,
+		TextTruncated: true,
+		TextEncoding:  fsutil.EncodingUnknown,
+		LineCount:     len(sample),
+		TextCharCount: lineCharCount(sample),
+	}
+	state := &statepkg.AppState{
+		CurrentPath:        dir,
+		PreviewData:        preview,
+		ClipboardAvailable: true,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, []string{"clip"})
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	if pager.rawTextSource == nil {
+		t.Fatalf("expected streaming source")
+	}
+	pager.width = 80
+	pager.height = 10
+	var copied string
+	pager.clipboardFunc = func(content string) error {
+		copied = content
+		return nil
+	}
+
+	if done := pager.handleKey(keyEvent{kind: keyCopyAll}); done {
+		t.Fatalf("copy action should not exit pager")
+	}
+
+	if !strings.Contains(copied, "line 05") {
+		t.Fatalf("expected full file to be copied, got %q", copied)
+	}
+	if state.LastYankTime.IsZero() {
+		t.Fatalf("copy should record LastYankTime")
+	}
+}
+
+func TestCopyVisibleStripsANSIFromFormatted(t *testing.T) {
+	t.Parallel()
+	preview := &statepkg.PreviewData{
+		Name:              "doc.md",
+		TextLines:         []string{"# Heading"},
+		FormattedSegments: [][]statepkg.StyledTextSegment{{{Text: "# Heading", Style: statepkg.TextStyleHeading}}},
+	}
+	state := &statepkg.AppState{
+		CurrentPath:        "/tmp",
+		PreviewData:        preview,
+		ClipboardAvailable: true,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, []string{"clip"})
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.width = 40
+	pager.height = 4
+
+	var copied string
+	pager.clipboardFunc = func(content string) error {
+		copied = content
+		return nil
+	}
+
+	if done := pager.handleKey(keyEvent{kind: keyCopyVisible}); done {
+		t.Fatalf("copy action should not exit pager")
+	}
+
+	if strings.Contains(copied, "\x1b") {
+		t.Fatalf("copied content should strip ANSI, got %q", copied)
+	}
+	if strings.Contains(copied, "?[") {
+		t.Fatalf("copied content should not include sanitized escape markers, got %q", copied)
+	}
+	if strings.TrimSpace(copied) != "# Heading" {
+		t.Fatalf("unexpected copied content: %q", copied)
 	}
 }
