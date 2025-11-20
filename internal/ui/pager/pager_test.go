@@ -688,6 +688,53 @@ func TestSearchNavigationFinalizesPendingInput(t *testing.T) {
 	}
 }
 
+func TestSearchNavigationStartsAtFirstOffscreenHit(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name: "jump.txt",
+		TextLines: []string{
+			"lead 0",
+			"lead 1",
+			"lead 2",
+			"lead 3",
+			"lead 4",
+			"first hit",
+			"lead 6",
+			"lead 7",
+			"second hit",
+			"lead 9",
+		},
+		LineCount: 10,
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.height = 6
+	pager.width = 20
+
+	pager.executeSearch("hit")
+	if len(pager.searchHits) != 2 {
+		t.Fatalf("expected two hits, got %d", len(pager.searchHits))
+	}
+	if pager.hitVisible(pager.searchHits[0]) {
+		t.Fatalf("first hit should be offscreen at start")
+	}
+
+	pager.moveSearchCursor(1) // first down should center the first hit, not skip it
+	if pager.searchCursor != 0 {
+		t.Fatalf("expected cursor to stay on first hit after initial jump, got %d", pager.searchCursor)
+	}
+	if !pager.hitVisible(pager.searchHits[0]) {
+		t.Fatalf("first hit should become visible after jump")
+	}
+
+	pager.moveSearchCursor(1) // second down should advance
+	if pager.searchCursor != 1 {
+		t.Fatalf("expected cursor to advance to second hit, got %d", pager.searchCursor)
+	}
+}
+
 func TestSearchEscapeClearsQueryAndHighlights(t *testing.T) {
 	preview := &statepkg.PreviewData{
 		Name:      "demo.txt",
