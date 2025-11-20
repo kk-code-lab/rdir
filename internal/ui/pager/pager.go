@@ -24,14 +24,21 @@ import (
 )
 
 const (
-	binaryPreviewLineWidth = 16
-	binaryPagerChunkSize   = 64 * 1024
-	binaryPagerMaxChunks   = 8
-	headerBarStyle         = "\x1b[48;5;238m\x1b[97m"
-	statusBarStyle         = "\x1b[48;5;236m\x1b[97m"
-	statusSuccessStyle     = "\x1b[48;5;22m\x1b[97m"
-	statusErrorStyle       = "\x1b[48;5;52m\x1b[97m"
-	shiftScrollLines       = 10
+	binaryPreviewLineWidth  = 16
+	binaryPagerChunkSize    = 64 * 1024
+	binaryPagerMaxChunks    = 8
+	headerBarStyle          = "\x1b[48;5;238m\x1b[97m"
+	statusBarStyle          = "\x1b[48;5;236m\x1b[97m"
+	statusSuccessStyle      = "\x1b[48;5;22m\x1b[97m"
+	statusErrorStyle        = "\x1b[48;5;52m\x1b[97m"
+	shiftScrollLines        = 10
+	searchHighlightOn       = "\x1b[38;5;16;48;5;255m"
+	searchHighlightOff      = "\x1b[39;49m"
+	searchHighlightFocusOn  = "\x1b[38;5;16;48;5;178m"
+	searchHighlightFocusOff = "\x1b[39;49m"
+	searchDebounceDelay     = 140 * time.Millisecond
+	searchMaxHits           = 10000
+	searchMaxLines          = 20000
 )
 
 type pagerContentKind int
@@ -82,51 +89,70 @@ func contentKindLabel(kind pagerContentKind) string {
 	}
 }
 
+type textSpan struct {
+	start int
+	end   int
+}
+
+type searchHit struct {
+	line int
+	span textSpan
+}
+
 var termGetSize = term.GetSize
 
 type PreviewPager struct {
-	state           *statepkg.AppState
-	editorCmd       []string
-	reducer         *statepkg.StateReducer
-	input           *os.File
-	outputFile      *os.File
-	output          io.Writer
-	reader          *bufio.Reader
-	writer          *bufio.Writer
-	restoreTerm     *term.State
-	stopKeyReader   func()
-	width           int
-	height          int
-	wrapEnabled     bool
-	lines           []string
-	lineWidths      []int
-	rawLines        []string
-	rawLineWidths   []int
-	rawSanitized    []string
-	rawSanitizedWid []int
-	formattedLines  []string
-	formattedWidths []int
-	formattedRules  []bool
-	formattedStyles []string
-	rowSpans        []int
-	rowPrefix       []int
-	rowMetricsWidth int
-	charCount       int
-	binaryMode      bool
-	binarySource    *binaryPagerSource
-	rawTextSource   *textPagerSource
-	preloadLines    int
-	showInfo        bool
-	showHelp        bool
-	showFormatted   bool
-	statusMessage   string
-	statusStyle     string
-	statusExpiry    time.Time
-	statusTimer     *time.Timer
-	lastErr         error
-	restartKeys     bool
-	clipboardCmd    []string
-	clipboardFunc   func(string) error
+	state            *statepkg.AppState
+	editorCmd        []string
+	reducer          *statepkg.StateReducer
+	input            *os.File
+	outputFile       *os.File
+	output           io.Writer
+	reader           *bufio.Reader
+	writer           *bufio.Writer
+	restoreTerm      *term.State
+	stopKeyReader    func()
+	width            int
+	height           int
+	wrapEnabled      bool
+	lines            []string
+	lineWidths       []int
+	rawLines         []string
+	rawLineWidths    []int
+	rawSanitized     []string
+	rawSanitizedWid  []int
+	formattedLines   []string
+	formattedWidths  []int
+	formattedRules   []bool
+	formattedStyles  []string
+	rowSpans         []int
+	rowPrefix        []int
+	rowMetricsWidth  int
+	charCount        int
+	binaryMode       bool
+	binarySource     *binaryPagerSource
+	rawTextSource    *textPagerSource
+	preloadLines     int
+	showInfo         bool
+	showHelp         bool
+	showFormatted    bool
+	statusMessage    string
+	statusStyle      string
+	statusExpiry     time.Time
+	statusTimer      *time.Timer
+	lastErr          error
+	restartKeys      bool
+	clipboardCmd     []string
+	clipboardFunc    func(string) error
+	searchMode       bool
+	searchInput      []rune
+	searchQuery      string
+	searchHits       []searchHit
+	searchCursor     int
+	searchHighlights map[int][]textSpan
+	searchLimited    bool
+	searchErr        error
+	searchTimer      *time.Timer
 }
 
 var pagerCommand = exec.Command
@@ -142,6 +168,7 @@ func NewPreviewPager(state *statepkg.AppState, editorCmd []string, reducer *stat
 		editorCmd:    append([]string(nil), editorCmd...),
 		reducer:      reducer,
 		clipboardCmd: append([]string(nil), clipboardCmd...),
+		searchCursor: -1,
 	}
 	pager.prepareContent()
 	return pager, nil
@@ -274,6 +301,9 @@ func (p *PreviewPager) toggleFormatView() {
 	p.updateDisplayLines()
 	p.rowSpans = nil
 	p.rowPrefix = nil
+	if p.searchQuery != "" {
+		p.executeSearch(p.searchQuery)
+	}
 }
 
 func (p *PreviewPager) Run() error {
@@ -313,12 +343,20 @@ func (p *PreviewPager) Run() error {
 		}
 
 		if resizeEvents == nil || keyEvents == nil {
-			cleared := false
+			updated := false
 			if p.statusTimer != nil {
 				select {
 				case <-p.statusTimer.C:
 					p.clearStatusMessage()
-					cleared = true
+					updated = true
+				default:
+				}
+			}
+			if ch := p.searchTimerC(); ch != nil {
+				select {
+				case <-ch:
+					p.runPendingSearch()
+					updated = true
 				default:
 				}
 			}
@@ -329,7 +367,7 @@ func (p *PreviewPager) Run() error {
 			if done := p.handleKey(event); done {
 				return p.lastErr
 			}
-			needsRender = true || cleared
+			needsRender = true || updated
 			continue
 		}
 
@@ -348,6 +386,9 @@ func (p *PreviewPager) Run() error {
 			return nil
 		case <-p.statusTimerC():
 			p.clearStatusMessage()
+			needsRender = true
+		case <-p.searchTimerC():
+			p.runPendingSearch()
 			needsRender = true
 		}
 	}
@@ -473,6 +514,9 @@ func (p *PreviewPager) cleanupTerminal() {
 	}
 	if p.statusTimer != nil {
 		p.statusTimer.Stop()
+	}
+	if p.searchTimer != nil {
+		p.searchTimer.Stop()
 	}
 	if p.input != nil && p.restoreTerm != nil {
 		_ = term.Restore(int(p.input.Fd()), p.restoreTerm)
@@ -607,11 +651,28 @@ func (p *PreviewPager) render() error {
 
 	for i := start; i < totalLines && row <= contentRowLimit; i++ {
 		text := p.lineAt(i)
+		displayText := text
 		currentSkip := skipRows
 		if p.wrapEnabled && currentSkip > 0 {
-			text = p.trimWrappedPrefix(text, currentSkip)
+			displayText = p.trimWrappedPrefix(displayText, currentSkip)
 		}
-		p.drawRow(row, text, false)
+		if !p.wrapEnabled && p.width > 0 {
+			displayText = truncateToWidth(displayText, p.width)
+		}
+		if !p.binaryMode {
+			dropCols := 0
+			if p.wrapEnabled && p.width > 0 && currentSkip > 0 {
+				dropCols = currentSkip * p.width
+			}
+			widthLimit := 0
+			if !p.wrapEnabled && p.width > 0 {
+				widthLimit = p.width
+			}
+			if spans, focus := p.visibleHighlights(i, dropCols, widthLimit); len(spans) > 0 {
+				displayText = applySearchHighlights(displayText, spans, focus)
+			}
+		}
+		p.drawRow(row, displayText, false)
 		rowsUsed := p.rowSpanForIndex(i)
 		if currentSkip > 0 {
 			rowsUsed -= currentSkip
@@ -904,6 +965,12 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		p.ensureRowMetrics()
 	}
 
+	if p.searchMode {
+		p.handleSearchModeEvent(ev)
+		p.clampScroll(totalLines, contentRows)
+		return false
+	}
+
 	switch ev.kind {
 	case keyQuit, keyEscape, keyCtrlC, keyLeft:
 		return true
@@ -977,6 +1044,16 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		} else {
 			p.state.PreviewScrollOffset += contentRows
 		}
+	case keyEnter:
+		if p.searchQuery != "" && !p.searchMode && len(p.searchHits) > 0 {
+			p.focusSearchHit(p.searchCursor)
+			break
+		}
+		if p.wrapEnabled {
+			p.scrollRows(totalLines, contentRows)
+		} else {
+			p.state.PreviewScrollOffset += contentRows
+		}
 	case keyToggleInfo:
 		p.showInfo = !p.showInfo
 	case keyToggleFormat:
@@ -985,10 +1062,78 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		p.recordCopyResult(p.copyVisibleToClipboard(), "copied view")
 	case keyCopyAll:
 		p.recordCopyResult(p.copyAllToClipboard(), "copied all")
+	case keyStartSearch:
+		if p.binaryMode {
+			p.setStatusMessage("search unavailable in binary preview", statusErrorStyle)
+			break
+		}
+		p.enterSearchMode()
+	case keySearchNext:
+		if p.searchQuery != "" || p.searchMode {
+			p.moveSearchCursor(1)
+		}
+	case keySearchPrev:
+		if p.searchQuery != "" || p.searchMode {
+			p.moveSearchCursor(-1)
+		}
+	case keyBackspace:
+		if p.searchMode {
+			p.backspaceSearch()
+		}
+	case keyRune:
+		if p.searchMode {
+			p.appendSearchRune(ev.ch)
+		}
 	}
 
 	p.clampScroll(totalLines, contentRows)
 	return false
+}
+
+func (p *PreviewPager) handleSearchModeEvent(ev keyEvent) {
+	switch ev.kind {
+	case keyEscape:
+		p.cancelSearch()
+		return
+	case keyLeft:
+		if len(p.searchInput) > 0 {
+			p.searchInput = nil
+			p.onSearchInputChanged()
+			return
+		}
+		p.cancelSearch()
+		return
+	case keyEnter:
+		p.finalizeSearchInput()
+		p.exitSearchMode()
+		if len(p.searchHits) > 0 {
+			p.focusSearchHit(p.searchCursor)
+		}
+		return
+	case keyBackspace:
+		p.backspaceSearch()
+		return
+	}
+
+	switch ev.kind {
+	case keySearchNext, keyDown:
+		if ev.ch == 0 {
+			p.finalizeSearchInput()
+			p.moveSearchCursor(1)
+			return
+		}
+	case keySearchPrev, keyUp:
+		if ev.ch == 0 {
+			p.finalizeSearchInput()
+			p.moveSearchCursor(-1)
+			return
+		}
+	}
+
+	if ev.ch != 0 && ev.kind != keyStartSearch {
+		p.appendSearchRune(ev.ch)
+		return
+	}
 }
 
 func (p *PreviewPager) canOpenEditor() bool {
@@ -1138,6 +1283,9 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		segments = append(segments, count)
 	}
 	segments = append(segments, p.statusBadges(kind)...)
+	if search := p.searchStatusSegment(); search != "" {
+		segments = append([]string{search}, segments...)
+	}
 	segments = filterEmptyStrings(segments)
 
 	base := strings.Join(segments, "  ")
@@ -1263,6 +1411,57 @@ func (p *PreviewPager) statusBadges(kind pagerContentKind) []string {
 	return badges
 }
 
+func (p *PreviewPager) searchStatusSegment() string {
+	if p == nil || p.binaryMode {
+		return ""
+	}
+	displayRaw := p.searchQuery
+	if p.searchMode {
+		displayRaw = string(p.searchInput)
+	}
+	trimmed := strings.TrimSpace(displayRaw)
+	if trimmed == "" {
+		if p.searchMode {
+			return "/_"
+		}
+		return ""
+	}
+
+	safeQuery := textutil.SanitizeTerminalText(trimmed)
+	segment := "/" + safeQuery
+	if p.searchMode {
+		segment += "_"
+	}
+
+	activeQuery := strings.TrimSpace(p.searchQuery)
+	useResults := activeQuery != "" && strings.EqualFold(activeQuery, trimmed)
+	if !useResults {
+		return segment
+	}
+
+	if p.searchErr != nil {
+		return segment + " !"
+	}
+
+	total := len(p.searchHits)
+	if total == 0 {
+		if p.searchLimited {
+			return segment + " 0/0+"
+		}
+		return segment + " 0/0"
+	}
+
+	cursor := p.searchCursor
+	if cursor < 0 || cursor >= total {
+		cursor = 0
+	}
+	segment += fmt.Sprintf(" %d/%d", cursor+1, total)
+	if p.searchLimited {
+		segment += "+"
+	}
+	return segment
+}
+
 type helpEntry struct {
 	keys string
 	desc string
@@ -1371,16 +1570,34 @@ func (p *PreviewPager) helpSections() []helpSection {
 		{keys: "← / q / x / Esc", desc: "Exit pager"},
 	}
 
-	return []helpSection{
+	search := []helpEntry{}
+	if !p.binaryMode {
+		search = append(search,
+			helpEntry{keys: "/", desc: "Enter search"},
+			helpEntry{keys: "n / N", desc: "Jump to next/prev hit"},
+		)
+	}
+
+	sections := []helpSection{
 		{title: "Navigation", entries: nav},
 		{title: "View", entries: view},
-		{title: "Actions", entries: actions},
-		{title: "Exit", entries: exit},
 	}
+	if len(search) > 0 {
+		sections = append(sections, helpSection{title: "Search", entries: search})
+	}
+	sections = append(sections,
+		helpSection{title: "Actions", entries: actions},
+		helpSection{title: "Exit", entries: exit},
+	)
+	return sections
 }
 
 func (p *PreviewPager) helpSegments() []string {
-	return []string{"? help"}
+	segments := []string{"? help"}
+	if !p.binaryMode {
+		segments = append(segments, "/ search")
+	}
+	return segments
 }
 
 func (p *PreviewPager) clipboardAvailable() bool {
@@ -2315,10 +2532,17 @@ const (
 	keyShiftDown
 	keyCopyVisible
 	keyCopyAll
+	keyStartSearch
+	keySearchNext
+	keySearchPrev
+	keyEnter
+	keyBackspace
+	keyRune
 )
 
 type keyEvent struct {
 	kind keyKind
+	ch   rune
 }
 
 func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
@@ -2334,46 +2558,56 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 	case 0x1b:
 		return p.parseEscapeSequence()
 	case '?':
-		return keyEvent{kind: keyToggleHelp}, nil
+		return keyEvent{kind: keyToggleHelp, ch: rune(b)}, nil
 	case 'k', 'K':
-		return keyEvent{kind: keyUp}, nil
+		return keyEvent{kind: keyUp, ch: rune(b)}, nil
 	case 'j', 'J':
-		return keyEvent{kind: keyDown}, nil
+		return keyEvent{kind: keyDown, ch: rune(b)}, nil
 	case 'h', 'H':
-		return keyEvent{kind: keyToggleHelp}, nil
+		return keyEvent{kind: keyToggleHelp, ch: rune(b)}, nil
 	case 'q', 'Q':
-		return keyEvent{kind: keyQuit}, nil
+		return keyEvent{kind: keyQuit, ch: rune(b)}, nil
 	case 'x', 'X':
-		return keyEvent{kind: keyQuit}, nil
+		return keyEvent{kind: keyQuit, ch: rune(b)}, nil
 	case 'w', 'W':
-		return keyEvent{kind: keyToggleWrap}, nil
+		return keyEvent{kind: keyToggleWrap, ch: rune(b)}, nil
 	case 'i', 'I':
-		return keyEvent{kind: keyToggleInfo}, nil
+		return keyEvent{kind: keyToggleInfo, ch: rune(b)}, nil
 	case 'f', 'F':
-		return keyEvent{kind: keyToggleFormat}, nil
+		return keyEvent{kind: keyToggleFormat, ch: rune(b)}, nil
 	case 'e', 'E':
-		return keyEvent{kind: keyOpenEditor}, nil
+		return keyEvent{kind: keyOpenEditor, ch: rune(b)}, nil
 	case 'c':
-		return keyEvent{kind: keyCopyVisible}, nil
+		return keyEvent{kind: keyCopyVisible, ch: rune(b)}, nil
 	case 'C':
-		return keyEvent{kind: keyCopyAll}, nil
+		return keyEvent{kind: keyCopyAll, ch: rune(b)}, nil
+	case '/':
+		return keyEvent{kind: keyStartSearch, ch: rune(b)}, nil
+	case 'n':
+		return keyEvent{kind: keySearchNext, ch: rune(b)}, nil
+	case 'N':
+		return keyEvent{kind: keySearchPrev, ch: rune(b)}, nil
 	case ' ':
-		return keyEvent{kind: keySpace}, nil
+		return keyEvent{kind: keySpace, ch: rune(b)}, nil
 	case 'b', 'B':
-		return keyEvent{kind: keyPageUp}, nil
+		return keyEvent{kind: keyPageUp, ch: rune(b)}, nil
 	case 'g':
-		return keyEvent{kind: keyHome}, nil
+		return keyEvent{kind: keyHome, ch: rune(b)}, nil
 	case 'G':
-		return keyEvent{kind: keyEnd}, nil
+		return keyEvent{kind: keyEnd, ch: rune(b)}, nil
+	case '\r', '\n':
+		return keyEvent{kind: keyEnter}, nil
+	case 0x7f, 0x08:
+		return keyEvent{kind: keyBackspace}, nil
 	case 0x03:
 		return keyEvent{kind: keyCtrlC}, nil
 	default:
-		if b == '\r' || b == '\n' {
-			return keyEvent{kind: keySpace}, nil
-		}
 	}
 
 	if b < utf8.RuneSelf {
+		if b >= 0x20 {
+			return keyEvent{kind: keyRune, ch: rune(b)}, nil
+		}
 		return keyEvent{kind: keyUnknown}, nil
 	}
 
@@ -2384,6 +2618,10 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 			break
 		}
 		buf = append(buf, next)
+	}
+	r, _ := utf8.DecodeRune(buf)
+	if r != utf8.RuneError {
+		return keyEvent{kind: keyRune, ch: r}, nil
 	}
 	return keyEvent{kind: keyUnknown}, nil
 }
