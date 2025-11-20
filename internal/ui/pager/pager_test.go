@@ -498,8 +498,8 @@ func TestStatusLineBinaryOmitsWrapAndFormat(t *testing.T) {
 	if !strings.Contains(status, "bytes") {
 		t.Fatalf("binary status should show byte counts, got %q", status)
 	}
-	if !strings.Contains(status, "i info") {
-		t.Fatalf("help segment should include info toggle, got %q", status)
+	if !strings.Contains(status, "? help") {
+		t.Fatalf("help segment should advertise help toggle, got %q", status)
 	}
 }
 
@@ -525,12 +525,12 @@ func TestStatusLineTextShowsWrapAndFormat(t *testing.T) {
 	if !strings.Contains(status, "fmt:pretty") {
 		t.Fatalf("text status should include fmt:pretty, got %q", status)
 	}
-	if !strings.Contains(status, "f format") {
-		t.Fatalf("help segment should advertise format toggle, got %q", status)
+	if !strings.Contains(status, "? help") {
+		t.Fatalf("help segment should advertise help toggle, got %q", status)
 	}
 }
 
-func TestHelpSegmentsIncludeClipboardHints(t *testing.T) {
+func TestHelpSegmentsCompactFooter(t *testing.T) {
 	preview := &statepkg.PreviewData{
 		Name:      "notes.txt",
 		TextLines: []string{"hi"},
@@ -546,8 +546,8 @@ func TestHelpSegmentsIncludeClipboardHints(t *testing.T) {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
 	segments := pager.helpSegments()
-	if !containsSegment(segments, "c copy view") {
-		t.Fatalf("expected clipboard hint to appear when available, got %v", segments)
+	if len(segments) != 1 || !containsSegment(segments, "? help") {
+		t.Fatalf("footer help should be compact and include only '? help', got %v", segments)
 	}
 
 	stateNoClipboard := &statepkg.AppState{
@@ -558,8 +558,103 @@ func TestHelpSegmentsIncludeClipboardHints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
-	if containsSegment(pagerNoClipboard.helpSegments(), "c copy view") {
-		t.Fatalf("clipboard hint should be hidden when unavailable")
+	if !containsSegment(pagerNoClipboard.helpSegments(), "? help") {
+		t.Fatalf("footer help should still include help hint without clipboard")
+	}
+}
+
+func TestHelpToggleClosesOverlayBeforeExit(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "notes.txt",
+		TextLines: []string{"hi"},
+		LineCount: 1,
+	}
+	state := &statepkg.AppState{PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	if done := pager.handleKey(keyEvent{kind: keyToggleHelp}); done {
+		t.Fatalf("help toggle should not exit pager")
+	}
+	if !pager.showHelp {
+		t.Fatalf("expected help overlay to be visible after '?'")
+	}
+
+	if done := pager.handleKey(keyEvent{kind: keyQuit}); done {
+		t.Fatalf("quit should close help overlay first")
+	}
+	if pager.showHelp {
+		t.Fatalf("help overlay should close on quit key")
+	}
+
+	if done := pager.handleKey(keyEvent{kind: keyQuit}); !done {
+		t.Fatalf("pager should exit after quit when help overlay is closed")
+	}
+}
+
+func TestReadKeyEventAcceptsHelpAlias(t *testing.T) {
+	p := &PreviewPager{
+		reader: bufio.NewReader(strings.NewReader("h")),
+	}
+	ev, err := p.readKeyEvent()
+	if err != nil {
+		t.Fatalf("readKeyEvent: %v", err)
+	}
+	if ev.kind != keyToggleHelp {
+		t.Fatalf("expected help alias to map to toggle, got %v", ev.kind)
+	}
+}
+
+func TestHelpOverlayReflectsContext(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "notes.txt",
+		TextLines: []string{"hi"},
+		LineCount: 1,
+	}
+
+	state := &statepkg.AppState{
+		PreviewData:        preview,
+		ClipboardAvailable: true,
+		EditorAvailable:    true,
+	}
+
+	pager, err := NewPreviewPager(state, []string{"vim"}, nil, []string{"pbcopy"})
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.width = 80
+
+	lines := pager.helpOverlayLines()
+	if !containsLineWith(lines, "Copy visible lines") {
+		t.Fatalf("clipboard hint should appear in help overlay, got %v", lines)
+	}
+	if !containsLineWith(lines, "Open in editor") {
+		t.Fatalf("editor hint should appear in help overlay, got %v", lines)
+	}
+
+	pager.binaryMode = true
+	pager.formattedLines = nil
+
+	lines = pager.helpOverlayLines()
+	if containsLineWith(lines, "wrap") {
+		t.Fatalf("wrap hint should be hidden in binary mode help, got %v", lines)
+	}
+	if containsLineWith(lines, "formatted") {
+		t.Fatalf("formatted hint should be hidden without formatted lines, got %v", lines)
+	}
+
+	pager.width = 40
+	lines = pager.helpOverlayLines()
+	if containsLineWith(lines, "---") {
+		t.Fatalf("narrow help overlay should not include separators, got %v", lines)
+	}
+
+	pager.width = 80
+	lines = pager.helpOverlayLines()
+	if !containsLineWith(lines, "---") {
+		t.Fatalf("wide help overlay should include separators, got %v", lines)
 	}
 }
 
@@ -740,6 +835,15 @@ func TestInfoSegmentsTrackStreamingLineCounts(t *testing.T) {
 func containsSegment(segments []string, target string) bool {
 	for _, seg := range segments {
 		if seg == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsLineWith(lines []string, target string) bool {
+	for _, line := range lines {
+		if strings.Contains(line, target) {
 			return true
 		}
 	}
