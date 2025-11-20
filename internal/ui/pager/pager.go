@@ -32,6 +32,9 @@ const (
 	statusBarStyle          = "\x1b[48;5;236m\x1b[97m"
 	statusSuccessStyle      = "\x1b[48;5;22m\x1b[97m"
 	statusErrorStyle        = "\x1b[48;5;52m\x1b[97m"
+	statusWarnStyle         = "\x1b[48;5;178m\x1b[30m"
+	clipboardWarnBytes      = int64(16 * 1024 * 1024)
+	clipboardHardLimitBytes = int64(128 * 1024 * 1024)
 	shiftScrollLines        = 10
 	searchHighlightOn       = "\x1b[38;5;16;48;5;255m"
 	searchHighlightOff      = "\x1b[39;49m"
@@ -1147,9 +1150,13 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 	case keyToggleFormat:
 		p.toggleFormatView()
 	case keyCopyVisible:
-		p.recordCopyResult(p.copyVisibleToClipboard(), "copied view")
+		p.recordCopyResult(p.copyVisibleToClipboard(), "copied view", "")
 	case keyCopyAll:
-		p.recordCopyResult(p.copyAllToClipboard(), "copied all")
+		msg, style, err := p.copyAllToClipboard()
+		if msg == "" {
+			msg = "copied all"
+		}
+		p.recordCopyResult(err, msg, style)
 	case keyStartSearch:
 		if p.binaryMode {
 			p.setStatusMessage("search unavailable in binary preview", statusErrorStyle)
@@ -1701,7 +1708,7 @@ func (p *PreviewPager) clipboardAvailable() bool {
 	return len(p.clipboardCmd) > 0
 }
 
-func (p *PreviewPager) recordCopyResult(err error, successMsg string) {
+func (p *PreviewPager) recordCopyResult(err error, successMsg string, style string) {
 	if err != nil {
 		p.setStatusMessage(err.Error(), statusErrorStyle)
 		if p.state != nil {
@@ -1709,7 +1716,10 @@ func (p *PreviewPager) recordCopyResult(err error, successMsg string) {
 		}
 		return
 	}
-	p.setStatusMessage(successMsg, statusSuccessStyle)
+	if style == "" {
+		style = statusSuccessStyle
+	}
+	p.setStatusMessage(successMsg, style)
 	if p.state != nil {
 		p.state.LastYankTime = time.Now()
 	}
@@ -1733,12 +1743,49 @@ func (p *PreviewPager) copyVisibleToClipboard() error {
 	return p.copyLinesToClipboard(lines)
 }
 
-func (p *PreviewPager) copyAllToClipboard() error {
-	lines, err := p.allLinesForClipboard()
-	if err != nil {
-		return err
+func (p *PreviewPager) copyAllToClipboard() (string, string, error) {
+	if !p.clipboardAvailable() {
+		return "", "", errors.New("clipboard unavailable")
 	}
-	return p.copyLinesToClipboard(lines)
+
+	size := p.clipboardByteSize()
+	if size > 0 && size >= clipboardHardLimitBytes {
+		return "", "", fmt.Errorf("copy canceled: %s exceeds clipboard limit (%s)", formatSize(size), formatSize(clipboardHardLimitBytes))
+	}
+
+	if !p.showFormatted && p.rawTextSource != nil {
+		if err := p.rawTextSource.EnsureAll(); err != nil {
+			return "", "", err
+		}
+	}
+
+	warn := size > 0 && size >= clipboardWarnBytes
+	if warn {
+		p.setStatusMessage(fmt.Sprintf("copying %s; this may be slow", formatSize(size)), statusWarnStyle)
+	}
+
+	if p.clipboardFunc != nil {
+		var builder strings.Builder
+		if err := p.writeAllLines(&builder); err != nil {
+			return "", "", err
+		}
+		if err := p.clipboardFunc(builder.String()); err != nil {
+			return "", "", err
+		}
+	} else {
+		if err := p.streamAllLinesToClipboard(); err != nil {
+			return "", "", err
+		}
+	}
+
+	msg := "copied all"
+	if size > 0 {
+		msg = fmt.Sprintf("%s (%s)", msg, formatSize(size))
+	}
+	if warn {
+		return msg, statusWarnStyle, nil
+	}
+	return msg, "", nil
 }
 
 func (p *PreviewPager) visibleContentLines() []string {
@@ -1817,26 +1864,6 @@ func (p *PreviewPager) visibleContentLines() []string {
 	return lines
 }
 
-func (p *PreviewPager) allLinesForClipboard() ([]string, error) {
-	if p == nil {
-		return nil, errors.New("pager unavailable")
-	}
-	if !p.showFormatted && p.rawTextSource != nil {
-		if err := p.rawTextSource.EnsureAll(); err != nil {
-			return nil, err
-		}
-	}
-	total := p.lineCount()
-	if total < 0 {
-		total = 0
-	}
-	lines := make([]string, 0, total)
-	for i := 0; i < total; i++ {
-		lines = append(lines, lineForClipboard(p.lineAt(i)))
-	}
-	return lines, nil
-}
-
 func (p *PreviewPager) copyLinesToClipboard(lines []string) error {
 	if !p.clipboardAvailable() {
 		return errors.New("clipboard unavailable")
@@ -1862,6 +1889,71 @@ func (p *PreviewPager) copyLinesToClipboard(lines []string) error {
 		return fmt.Errorf("clipboard command %q failed: %w", p.clipboardCmd[0], err)
 	}
 	return nil
+}
+
+func (p *PreviewPager) writeAllLines(w io.Writer) error {
+	if p == nil {
+		return errors.New("pager unavailable")
+	}
+	total := p.lineCount()
+	if total < 0 {
+		total = 0
+	}
+	bufw := bufio.NewWriter(w)
+	for i := 0; i < total; i++ {
+		if _, err := bufw.WriteString(lineForClipboard(p.lineAt(i))); err != nil {
+			return err
+		}
+		if i+1 < total {
+			if err := bufw.WriteByte('\n'); err != nil {
+				return err
+			}
+		}
+	}
+	if err := bufw.Flush(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *PreviewPager) streamAllLinesToClipboard() error {
+	if len(p.clipboardCmd) == 0 {
+		return errors.New("clipboard unavailable")
+	}
+	cmd := clipboardCommand(p.clipboardCmd[0], p.clipboardCmd[1:]...)
+	reader, writer := io.Pipe()
+	cmd.Stdin = reader
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	writeErrCh := make(chan error, 1)
+	go func() {
+		err := p.writeAllLines(writer)
+		_ = writer.CloseWithError(err)
+		writeErrCh <- err
+	}()
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("clipboard command %q failed: %w", p.clipboardCmd[0], err)
+	}
+	if err := <-writeErrCh; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *PreviewPager) clipboardByteSize() int64 {
+	if p == nil || p.state == nil || p.state.PreviewData == nil {
+		return 0
+	}
+	// Prefer the stat size when available; fall back to binary source totals.
+	if p.state.PreviewData.Size > 0 {
+		return p.state.PreviewData.Size
+	}
+	if p.binarySource != nil && p.binarySource.totalBytes > 0 {
+		return p.binarySource.totalBytes
+	}
+	return 0
 }
 
 func wrapLineSegments(text string, width int) []string {

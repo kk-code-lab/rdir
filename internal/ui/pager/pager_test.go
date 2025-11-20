@@ -1131,13 +1131,13 @@ func TestRecordCopyResultSetsStatusStyle(t *testing.T) {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
 
-	pager.recordCopyResult(nil, "ok")
+	pager.recordCopyResult(nil, "ok", "")
 	if pager.statusStyle != statusSuccessStyle {
 		t.Fatalf("expected success style, got %q", pager.statusStyle)
 	}
 
 	sentinel := errors.New("boom")
-	pager.recordCopyResult(sentinel, "nope")
+	pager.recordCopyResult(sentinel, "nope", "")
 	if pager.statusStyle != statusErrorStyle {
 		t.Fatalf("expected error style, got %q", pager.statusStyle)
 	}
@@ -1499,6 +1499,96 @@ func TestCopyAllStreamsFullFile(t *testing.T) {
 	}
 	if state.LastYankTime.IsZero() {
 		t.Fatalf("copy should record LastYankTime")
+	}
+}
+
+func TestCopyAllWarnsOnLargeFile(t *testing.T) {
+	t.Parallel()
+	preview := &statepkg.PreviewData{
+		Name:          "big.txt",
+		Size:          clipboardWarnBytes + 1,
+		TextLines:     []string{"large"},
+		LineCount:     1,
+		TextCharCount: 5,
+	}
+	state := &statepkg.AppState{
+		CurrentPath:        "/tmp",
+		PreviewData:        preview,
+		ClipboardAvailable: true,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, []string{"clip"})
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	var copied string
+	pager.clipboardFunc = func(content string) error {
+		copied = content
+		return nil
+	}
+
+	msg, style, err := pager.copyAllToClipboard()
+	if err != nil {
+		t.Fatalf("copyAllToClipboard: %v", err)
+	}
+	pager.recordCopyResult(err, msg, style)
+
+	if style != statusWarnStyle {
+		t.Fatalf("expected warning style, got %q", style)
+	}
+	if pager.statusStyle != statusWarnStyle {
+		t.Fatalf("expected status bar warning style, got %q", pager.statusStyle)
+	}
+	if state.LastYankTime.IsZero() {
+		t.Fatalf("copy should record LastYankTime")
+	}
+	if copied == "" {
+		t.Fatalf("expected clipboard content to be set")
+	}
+	if msg == "" || !strings.Contains(msg, "copied all") {
+		t.Fatalf("expected copy message, got %q", msg)
+	}
+}
+
+func TestCopyAllBlocksHardLimit(t *testing.T) {
+	t.Parallel()
+	preview := &statepkg.PreviewData{
+		Name:          "huge.txt",
+		Size:          clipboardHardLimitBytes + 1,
+		TextLines:     []string{"line"},
+		LineCount:     1,
+		TextCharCount: 4,
+	}
+	state := &statepkg.AppState{
+		CurrentPath:        "/tmp",
+		PreviewData:        preview,
+		ClipboardAvailable: true,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, []string{"clip"})
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	called := false
+	pager.clipboardFunc = func(content string) error {
+		called = true
+		return nil
+	}
+
+	msg, style, err := pager.copyAllToClipboard()
+	if err == nil {
+		t.Fatalf("expected copy to fail due to size limit")
+	}
+	if !strings.Contains(err.Error(), "clipboard limit") {
+		t.Fatalf("expected clipboard limit error, got %v", err)
+	}
+	if called {
+		t.Fatalf("clipboard should not be invoked when over limit")
+	}
+	pager.recordCopyResult(err, msg, style)
+	if pager.statusStyle != statusErrorStyle {
+		t.Fatalf("expected error style, got %q", pager.statusStyle)
+	}
+	if !state.LastYankTime.IsZero() {
+		t.Fatalf("expected LastYankTime to remain zero on failure")
 	}
 }
 
