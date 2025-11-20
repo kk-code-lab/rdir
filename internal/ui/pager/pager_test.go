@@ -815,6 +815,70 @@ func TestSearchSmartCase(t *testing.T) {
 	}
 }
 
+func TestSearchStaticMarksLimitedWhenCapHitInSingleLine(t *testing.T) {
+	longLine := strings.Repeat("a", searchMaxHits+5)
+	preview := &statepkg.PreviewData{
+		Name:          "static.txt",
+		TextLines:     []string{longLine},
+		LineCount:     1,
+		TextCharCount: len(longLine),
+	}
+	state := &statepkg.AppState{CurrentPath: "/tmp", PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	pager.executeSearch("a")
+	if len(pager.searchHits) != searchMaxHits {
+		t.Fatalf("expected to collect max hits, got %d", len(pager.searchHits))
+	}
+	if !pager.searchLimited {
+		t.Fatalf("search should report limited results after cap hit on single line")
+	}
+}
+
+func TestSearchStreamingMarksLimitedWhenCapHit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stream-cap.txt")
+	longLine := strings.Repeat("a", searchMaxHits+5)
+	if err := os.WriteFile(path, []byte(longLine), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	meta := statepkg.TextLineMetadata{
+		Offset:       0,
+		Length:       len(longLine),
+		RuneCount:    len(longLine),
+		DisplayWidth: displayWidth(longLine),
+	}
+	preview := &statepkg.PreviewData{
+		Name:          filepath.Base(path),
+		TextLines:     []string{longLine},
+		TextLineMeta:  []statepkg.TextLineMetadata{meta},
+		TextBytesRead: int64(len(longLine)),
+		TextTruncated: true,
+		TextEncoding:  fsutil.EncodingUnknown,
+		LineCount:     1,
+		TextCharCount: len(longLine),
+	}
+	state := &statepkg.AppState{CurrentPath: dir, PreviewData: preview}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	if pager.rawTextSource == nil {
+		t.Fatalf("expected streaming source for truncated preview")
+	}
+
+	pager.executeSearch("a")
+	if len(pager.searchHits) != searchMaxHits {
+		t.Fatalf("expected to collect max hits, got %d", len(pager.searchHits))
+	}
+	if !pager.searchLimited {
+		t.Fatalf("streaming search should report limited results after cap hit")
+	}
+}
+
 func TestSearchStatusShowsCountsDuringActiveMode(t *testing.T) {
 	preview := &statepkg.PreviewData{
 		Name: "notes.txt",
