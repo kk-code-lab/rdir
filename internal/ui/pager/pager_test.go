@@ -480,7 +480,7 @@ func TestStatusLineBinaryOmitsWrapAndFormat(t *testing.T) {
 		Mode:     0o644,
 		Modified: time.Unix(0, 0),
 		BinaryInfo: statepkg.BinaryPreview{
-			Lines:      []string{"Binary preview (16 of 32 bytes)", "00000000"},
+			Lines:      []string{"00000000"},
 			TotalBytes: 32,
 		},
 		LineCount: 4,

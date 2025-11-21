@@ -260,13 +260,8 @@ func (r *Renderer) drawBinaryPreviewLine(line string, startX, panelWidth int, mo
 		}
 	}
 
-	padding := previewInnerPadding
-	if panelWidth <= padding*2 {
-		padding = 0
-	}
-
-	drawStart := startX + padding
-	maxWidth := panelWidth - padding*2
+	drawStart := startX
+	maxWidth := panelWidth
 	if maxWidth <= 0 {
 		return true
 	}

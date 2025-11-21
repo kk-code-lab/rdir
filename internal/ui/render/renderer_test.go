@@ -189,7 +189,6 @@ func binaryPreviewState() *statepkg.AppState {
 			IsDir: false,
 			BinaryInfo: statepkg.BinaryPreview{
 				Lines: []string{
-					"Binary preview (16 of 16 bytes)",
 					"00000000  CF FA ED FE 0C 00 00 01  00 00 00 00 01 00 00 00  |................|",
 				},
 			},
