@@ -13,6 +13,7 @@ import (
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	searchpkg "github.com/kk-code-lab/rdir/internal/search"
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
+	unicodeenc "golang.org/x/text/encoding/unicode"
 )
 
 const (
@@ -175,6 +176,107 @@ func buildTextPreview(content []byte, truncated bool, encoding fsutil.UnicodeEnc
 
 	remainder := append([]byte(nil), tail...)
 	return lines, meta, charCount, remainder
+}
+
+func buildUTF16Preview(content []byte, encoding fsutil.UnicodeEncoding, truncated bool) ([]string, []TextLineMetadata, int, []byte) {
+	if len(content) == 0 {
+		return nil, nil, 0, nil
+	}
+
+	data := content
+	offset := int64(0)
+	if len(data) >= 2 && (encoding == fsutil.EncodingUTF16LE || encoding == fsutil.EncodingUTF16BE) {
+		data = data[2:]
+		offset = 2
+	}
+
+	lines := make([]string, 0, 128)
+	meta := make([]TextLineMetadata, 0, 128)
+	charCount := 0
+	lineStart := 0
+
+	for lineStart+1 < len(data) {
+		lfIndex := -1
+		for i := lineStart; i+1 < len(data); i += 2 {
+			if isUTF16LF(data[i], data[i+1], encoding) {
+				lfIndex = i
+				break
+			}
+		}
+		if lfIndex == -1 {
+			break
+		}
+		lineBytes := data[lineStart:lfIndex]
+		if len(lineBytes) >= 2 && isUTF16CR(lineBytes[len(lineBytes)-2], lineBytes[len(lineBytes)-1], encoding) {
+			lineBytes = lineBytes[:len(lineBytes)-2]
+		}
+		expanded, runes, width := expandUTF16Line(lineBytes, encoding)
+		startOffset := offset + int64(lineStart)
+		meta = append(meta, TextLineMetadata{
+			Offset:       startOffset,
+			Length:       len(lineBytes),
+			RuneCount:    runes,
+			DisplayWidth: width,
+		})
+		lines = append(lines, expanded)
+		charCount += runes
+		lineStart = lfIndex + 2
+	}
+
+	tail := data[lineStart:]
+	if !truncated && len(tail) > 0 {
+		if len(tail) >= 2 && isUTF16CR(tail[len(tail)-2], tail[len(tail)-1], encoding) {
+			tail = tail[:len(tail)-2]
+		}
+		expanded, runes, width := expandUTF16Line(tail, encoding)
+		startOffset := offset + int64(lineStart)
+		meta = append(meta, TextLineMetadata{
+			Offset:       startOffset,
+			Length:       len(tail),
+			RuneCount:    runes,
+			DisplayWidth: width,
+		})
+		lines = append(lines, expanded)
+		charCount += runes
+		return lines, meta, charCount, nil
+	}
+
+	remainder := append([]byte(nil), tail...)
+	return lines, meta, charCount, remainder
+}
+
+func isUTF16LF(lo, hi byte, enc fsutil.UnicodeEncoding) bool {
+	if enc == fsutil.EncodingUTF16BE {
+		return lo == 0x00 && hi == 0x0A
+	}
+	return lo == 0x0A && hi == 0x00
+}
+
+func isUTF16CR(lo, hi byte, enc fsutil.UnicodeEncoding) bool {
+	if enc == fsutil.EncodingUTF16BE {
+		return lo == 0x00 && hi == 0x0D
+	}
+	return lo == 0x0D && hi == 0x00
+}
+
+func expandUTF16Line(lineBytes []byte, enc fsutil.UnicodeEncoding) (string, int, int) {
+	if len(lineBytes) == 0 {
+		return "", 0, 0
+	}
+	endian := unicodeenc.LittleEndian
+	if enc == fsutil.EncodingUTF16BE {
+		endian = unicodeenc.BigEndian
+	}
+	decoder := unicodeenc.UTF16(endian, unicodeenc.IgnoreBOM).NewDecoder()
+	utf8Bytes, err := decoder.Bytes(lineBytes)
+	if err != nil {
+		utf8Bytes = lineBytes
+	}
+	text := string(utf8Bytes)
+	expanded := textutil.ExpandTabs(text, textutil.DefaultTabWidth)
+	runes := utf8.RuneCountInString(expanded)
+	width := textutil.DisplayWidth(expanded)
+	return expanded, runes, width
 }
 
 func textLineMetadataFromLines(lines []string) []TextLineMetadata {

@@ -41,8 +41,11 @@ const (
 	searchHighlightFocusOn  = "\x1b[38;5;16;48;5;178m"
 	searchHighlightFocusOff = "\x1b[39;49m"
 	searchDebounceDelay     = 140 * time.Millisecond
-	searchMaxHits           = 10000
-	searchMaxLines          = 20000
+)
+
+var (
+	searchMaxHits  = 10000
+	searchMaxLines = 20000
 )
 
 type pagerContentKind int

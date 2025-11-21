@@ -1,8 +1,6 @@
 package state
 
 import (
-	"strings"
-
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 )
@@ -21,17 +19,19 @@ func (textPreviewFormatter) Format(ctx previewFormatContext, preview *PreviewDat
 	preview.FormattedTextLineMeta = nil
 	truncated := ctx.info.Size() > int64(len(ctx.content))
 	if encoding == fsutil.EncodingUTF16LE || encoding == fsutil.EncodingUTF16BE {
-		textContent := fsutil.NormalizeTextContent(ctx.content)
-		lines := strings.Split(textContent, "\n")
-		expanded, charCount := expandPreviewTextLines(lines)
-		preview.TextLines = expanded
-		preview.TextLineMeta = textLineMetadataFromLines(expanded)
-		preview.HiddenFormattingDetected = containsFormattingRunes(expanded)
-		preview.LineCount = len(expanded)
+		lines, meta, charCount, remainder := buildUTF16Preview(ctx.content, encoding, truncated)
+		preview.TextLines = lines
+		preview.TextLineMeta = meta
+		preview.HiddenFormattingDetected = containsFormattingRunes(lines)
+		preview.LineCount = len(lines)
 		preview.TextCharCount = charCount
 		preview.TextTruncated = truncated
 		preview.TextBytesRead = int64(len(ctx.content))
-		preview.TextRemainder = nil
+		if len(remainder) > 0 {
+			preview.TextRemainder = remainder
+		} else {
+			preview.TextRemainder = nil
+		}
 		preview.BinaryInfo = BinaryPreview{}
 		return
 	}

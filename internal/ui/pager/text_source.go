@@ -11,6 +11,7 @@ import (
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
+	"golang.org/x/text/encoding/unicode"
 )
 
 const (
@@ -45,9 +46,6 @@ type textLineRecord struct {
 func newTextPagerSource(path string, preview *statepkg.PreviewData) (*textPagerSource, error) {
 	if preview == nil {
 		return nil, errors.New("missing preview data")
-	}
-	if preview.TextEncoding == fsutil.EncodingUTF16LE || preview.TextEncoding == fsutil.EncodingUTF16BE {
-		return nil, errors.New("streaming not supported for UTF-16 content")
 	}
 
 	source := &textPagerSource{
@@ -191,6 +189,9 @@ func (s *textPagerSource) readChunk() error {
 	if s == nil || s.eof {
 		return io.EOF
 	}
+	if s.encoding == fsutil.EncodingUTF16LE || s.encoding == fsutil.EncodingUTF16BE {
+		return s.readChunkUTF16()
+	}
 	if s.file == nil {
 		file, err := os.Open(s.path)
 		if err != nil {
@@ -263,8 +264,134 @@ func (s *textPagerSource) readChunk() error {
 	return nil
 }
 
+func (s *textPagerSource) readChunkUTF16() error {
+	if s == nil || s.eof {
+		return io.EOF
+	}
+	if s.file == nil {
+		file, err := os.Open(s.path)
+		if err != nil {
+			return err
+		}
+		s.file = file
+	}
+
+	buf := make([]byte, s.chunkSize)
+	offset := s.nextOffset
+	n, err := s.file.ReadAt(buf, offset)
+	if err != nil && err != io.EOF {
+		return err
+	}
+	if n == 0 {
+		s.eof = true
+		if len(s.partialLine) > 0 {
+			s.appendLineUTF16(s.partialLine, s.partialOffset)
+			s.partialLine = nil
+		}
+		return io.EOF
+	}
+
+	s.nextOffset += int64(n)
+	data := buf[:n]
+	dataOffset := offset
+
+	if len(s.partialLine) > 0 {
+		data = append(s.partialLine, data...)
+		dataOffset = s.partialOffset
+		s.partialLine = nil
+	}
+
+	// Ensure even length; keep trailing byte for next chunk if odd.
+	if len(data)%2 == 1 {
+		s.partialLine = append([]byte(nil), data[len(data)-1])
+		s.partialOffset = dataOffset + int64(len(data)-1)
+		data = data[:len(data)-1]
+	}
+
+	if !s.bomHandled {
+		if s.encoding == fsutil.EncodingUTF16LE || s.encoding == fsutil.EncodingUTF16BE {
+			if len(data) >= 2 {
+				dataOffset += 2
+				data = data[2:]
+				s.bomHandled = true
+			}
+		}
+	}
+
+	lineStart := 0
+	for lineStart+1 < len(data) {
+		// find LF
+		lfIndex := -1
+		for i := lineStart; i+1 < len(data); i += 2 {
+			if isUTF16LF(data[i], data[i+1], s.encoding) {
+				lfIndex = i
+				break
+			}
+		}
+		if lfIndex == -1 {
+			break
+		}
+
+		lineBytes := data[lineStart:lfIndex]
+		// trim trailing CR if present
+		if len(lineBytes) >= 2 && isUTF16CR(lineBytes[len(lineBytes)-2], lineBytes[len(lineBytes)-1], s.encoding) {
+			lineBytes = lineBytes[:len(lineBytes)-2]
+		}
+		startOffset := dataOffset + int64(lineStart)
+		s.appendLineUTF16(lineBytes, startOffset)
+		lineStart = lfIndex + 2
+	}
+
+	if lineStart < len(data) {
+		s.partialLine = append([]byte(nil), data[lineStart:]...)
+		s.partialOffset = dataOffset + int64(lineStart)
+	} else {
+		s.partialLine = nil
+	}
+
+	if err == io.EOF {
+		s.eof = true
+		if len(s.partialLine) > 0 {
+			s.appendLineUTF16(s.partialLine, s.partialOffset)
+			s.partialLine = nil
+		}
+		return io.EOF
+	}
+
+	return nil
+}
+
 func (s *textPagerSource) appendLine(lineBytes []byte, start int64) {
 	text := string(lineBytes)
+	expanded := textutil.ExpandTabs(text, textutil.DefaultTabWidth)
+	runes := utf8.RuneCountInString(expanded)
+	width := textutil.DisplayWidth(expanded)
+	record := textLineRecord{
+		offset:       start,
+		length:       len(lineBytes),
+		runeCount:    runes,
+		displayWidth: width,
+	}
+	s.lines = append(s.lines, record)
+	s.charCount += runes
+	s.cacheLine(len(s.lines)-1, expanded)
+}
+
+func (s *textPagerSource) appendLineUTF16(lineBytes []byte, start int64) {
+	if len(lineBytes) == 0 {
+		s.appendLine(lineBytes, start)
+		return
+	}
+	endian := unicode.LittleEndian
+	if s.encoding == fsutil.EncodingUTF16BE {
+		endian = unicode.BigEndian
+	}
+	decoder := unicode.UTF16(endian, unicode.IgnoreBOM).NewDecoder()
+	utf8Bytes, err := decoder.Bytes(lineBytes)
+	if err != nil {
+		utf8Bytes = lineBytes
+	}
+	text := string(utf8Bytes)
 	expanded := textutil.ExpandTabs(text, textutil.DefaultTabWidth)
 	runes := utf8.RuneCountInString(expanded)
 	width := textutil.DisplayWidth(expanded)
@@ -297,6 +424,17 @@ func (s *textPagerSource) readLineText(idx int) (string, error) {
 	if err != nil && err != io.EOF {
 		return "", err
 	}
+	if s.encoding == fsutil.EncodingUTF16LE || s.encoding == fsutil.EncodingUTF16BE {
+		endian := unicode.LittleEndian
+		if s.encoding == fsutil.EncodingUTF16BE {
+			endian = unicode.BigEndian
+		}
+		decoder := unicode.UTF16(endian, unicode.IgnoreBOM).NewDecoder()
+		utf8Bytes, decErr := decoder.Bytes(buf[:n])
+		if decErr == nil {
+			return textutil.ExpandTabs(string(utf8Bytes), textutil.DefaultTabWidth), nil
+		}
+	}
 	return textutil.ExpandTabs(string(buf[:n]), textutil.DefaultTabWidth), nil
 }
 
@@ -317,4 +455,18 @@ func (s *textPagerSource) cacheLine(idx int, text string) {
 		s.cacheOrder = s.cacheOrder[1:]
 		delete(s.cache, evict)
 	}
+}
+
+func isUTF16LF(lo, hi byte, enc fsutil.UnicodeEncoding) bool {
+	if enc == fsutil.EncodingUTF16BE {
+		return lo == 0x00 && hi == 0x0A
+	}
+	return lo == 0x0A && hi == 0x00
+}
+
+func isUTF16CR(lo, hi byte, enc fsutil.UnicodeEncoding) bool {
+	if enc == fsutil.EncodingUTF16BE {
+		return lo == 0x00 && hi == 0x0D
+	}
+	return lo == 0x0D && hi == 0x00
 }
