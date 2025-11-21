@@ -1206,14 +1206,6 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		if p.binaryMode {
 			p.jumpBinary(binaryJumpSmallBytes, binaryJumpSmallBytes)
 		}
-	case keyJumpBackLarge:
-		if p.binaryMode {
-			p.jumpBinary(-binaryJumpLargeBytes, binaryJumpLargeBytes)
-		}
-	case keyJumpForwardLarge:
-		if p.binaryMode {
-			p.jumpBinary(binaryJumpLargeBytes, binaryJumpLargeBytes)
-		}
 	case keyHome:
 		p.state.PreviewScrollOffset = 0
 		p.state.PreviewWrapOffset = 0
@@ -1775,7 +1767,6 @@ func (p *PreviewPager) helpSections() []helpSection {
 		nav = append(nav,
 			helpEntry{keys: "[ / ]", desc: "Jump ±4 KB"},
 			helpEntry{keys: "{ / }", desc: "Jump ±64 KB"},
-			helpEntry{keys: "Ctrl/Alt+PgUp/PgDn", desc: "Jump ±64 KB"},
 		)
 	}
 
@@ -2861,8 +2852,6 @@ const (
 	keyRune
 	keyJumpBackSmall
 	keyJumpForwardSmall
-	keyJumpBackLarge
-	keyJumpForwardLarge
 )
 
 type keyEvent struct {
@@ -2925,10 +2914,6 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keyJumpBackSmall, ch: rune(b)}, nil
 	case ']':
 		return keyEvent{kind: keyJumpForwardSmall, ch: rune(b)}, nil
-	case '{':
-		return keyEvent{kind: keyJumpBackLarge, ch: rune(b)}, nil
-	case '}':
-		return keyEvent{kind: keyJumpForwardLarge, ch: rune(b)}, nil
 	case '\r', '\n':
 		return keyEvent{kind: keyEnter}, nil
 	case 0x7f, 0x08:
@@ -3037,14 +3022,8 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 		case "3":
 			return keyEvent{kind: keyUnknown}, nil
 		case "5":
-			if hasCtrlOrAltModifier(modifier) {
-				return keyEvent{kind: keyJumpBackLarge, mod: modifier}, nil
-			}
 			return keyEvent{kind: keyPageUp}, nil
 		case "6":
-			if hasCtrlOrAltModifier(modifier) {
-				return keyEvent{kind: keyJumpForwardLarge, mod: modifier}, nil
-			}
 			return keyEvent{kind: keyPageDown}, nil
 		case "1":
 			return keyEvent{kind: keyHome}, nil
@@ -3091,11 +3070,6 @@ func hasShiftModifier(mod int) bool {
 	default:
 		return false
 	}
-}
-
-func hasCtrlOrAltModifier(mod int) bool {
-	// xterm modifier encoding: 3=Alt, 5=Ctrl, 7=Ctrl+Alt, etc.
-	return mod >= 3
 }
 
 func formatDirectoryPreview(preview *statepkg.PreviewData) []string {

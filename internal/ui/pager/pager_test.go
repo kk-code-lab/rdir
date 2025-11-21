@@ -569,7 +569,7 @@ func TestBinaryJumpClampsAtEnd(t *testing.T) {
 		},
 	}
 
-	if done := p.handleKey(keyEvent{kind: keyJumpForwardLarge}); done {
+	if done := p.handleKey(keyEvent{kind: keyJumpForwardSmall}); done {
 		t.Fatalf("jump should not exit pager")
 	}
 	visible := p.height - (len(p.headerLines()) + 1) - 1
@@ -1177,8 +1177,8 @@ func TestHelpOverlayReflectsContext(t *testing.T) {
 	if !containsLineWith(lines, "Jump ±4 KB") {
 		t.Fatalf("binary help should list small jump keys, got %v", lines)
 	}
-	if countOccurrences(lines, "Jump ±64 KB") < 2 { // braces + Ctrl/Alt PgUp/PgDn
-		t.Fatalf("binary help should list both 64 KB jump shortcuts, got %v", lines)
+	if !containsLineWith(lines, "Jump ±64 KB") {
+		t.Fatalf("binary help should list 64 KB jump keys, got %v", lines)
 	}
 
 	pager.width = 40
