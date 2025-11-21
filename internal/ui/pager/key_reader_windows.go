@@ -162,8 +162,14 @@ func translateWindowsKey(ev *keyEventRecord) (keyEvent, bool) {
 	case windows.VK_RIGHT:
 		return keyEvent{kind: keyRight}, true
 	case windows.VK_PRIOR: // PageUp
+		if ev.ControlKeyState&(windows.LEFT_CTRL_PRESSED|windows.RIGHT_CTRL_PRESSED|windows.LEFT_ALT_PRESSED|windows.RIGHT_ALT_PRESSED) != 0 {
+			return keyEvent{kind: keyJumpBackLarge}, true
+		}
 		return keyEvent{kind: keyPageUp}, true
 	case windows.VK_NEXT: // PageDown
+		if ev.ControlKeyState&(windows.LEFT_CTRL_PRESSED|windows.RIGHT_CTRL_PRESSED|windows.LEFT_ALT_PRESSED|windows.RIGHT_ALT_PRESSED) != 0 {
+			return keyEvent{kind: keyJumpForwardLarge}, true
+		}
 		return keyEvent{kind: keyPageDown}, true
 	case windows.VK_HOME:
 		return keyEvent{kind: keyHome}, true
@@ -232,6 +238,10 @@ func runeToPagerKey(ch rune) (keyEvent, bool) {
 		return keyEvent{kind: keyHome, ch: ch}, true
 	case 'G':
 		return keyEvent{kind: keyEnd, ch: ch}, true
+	case '{':
+		return keyEvent{kind: keyJumpBackSmall, ch: ch}, true
+	case '}':
+		return keyEvent{kind: keyJumpForwardSmall, ch: ch}, true
 	case '\b':
 		return keyEvent{kind: keyBackspace}, true
 	case '\r', '\n':

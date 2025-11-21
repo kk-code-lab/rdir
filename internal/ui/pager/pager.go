@@ -33,6 +33,8 @@ const (
 	statusSuccessStyle      = "\x1b[48;5;22m\x1b[97m"
 	statusErrorStyle        = "\x1b[48;5;52m\x1b[97m"
 	statusWarnStyle         = "\x1b[48;5;178m\x1b[30m"
+	binaryJumpSmallBytes    = 4 * 1024
+	binaryJumpLargeBytes    = 64 * 1024
 	clipboardWarnBytes      = int64(16 * 1024 * 1024)
 	clipboardHardLimitBytes = int64(128 * 1024 * 1024)
 	shiftScrollLines        = 10
@@ -1029,6 +1031,87 @@ func (p *PreviewPager) clampScroll(totalLines, visible int) {
 	}
 }
 
+func (p *PreviewPager) jumpBinary(deltaBytes int64, stepBytes int64) {
+	if p == nil || !p.binaryMode || p.state == nil {
+		return
+	}
+	bytesPerLine := binaryPreviewLineWidth
+	if p.binarySource != nil && p.binarySource.bytesPerLine > 0 {
+		bytesPerLine = p.binarySource.bytesPerLine
+	}
+	totalBytes := int64(0)
+	if p.binarySource != nil && p.binarySource.totalBytes > 0 {
+		totalBytes = p.binarySource.totalBytes
+	} else if p.state.PreviewData != nil {
+		totalBytes = p.state.PreviewData.BinaryInfo.TotalBytes
+		if totalBytes == 0 {
+			totalBytes = p.state.PreviewData.Size
+		}
+	}
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	currentOffset := int64(p.state.PreviewScrollOffset) * int64(bytesPerLine)
+	target := currentOffset + deltaBytes
+
+	maxOffset := totalBytes - int64(bytesPerLine)
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	clamped := false
+	if target < 0 {
+		target = 0
+		clamped = true
+	}
+	if totalBytes > 0 && target > maxOffset {
+		target = maxOffset
+		clamped = true
+	}
+
+	newLine := int(target / int64(bytesPerLine))
+	if newLine < 0 {
+		newLine = 0
+	}
+	p.state.PreviewScrollOffset = newLine
+	p.state.PreviewWrapOffset = 0
+
+	applied := target - currentOffset
+	if applied != 0 || clamped {
+		percent := p.binaryProgressPercent(target, totalBytes)
+		var direction string
+		if applied > 0 {
+			direction = "+"
+		} else if applied < 0 {
+			direction = "-"
+		} else {
+			direction = ""
+		}
+		step := stepBytes
+		if step < 0 {
+			step = -step
+		}
+		sizeLabel := fmt.Sprintf("%.0f KB", float64(step)/1024.0)
+		msg := fmt.Sprintf("jumped %s%s → %s (%d%%)", direction, sizeLabel, formatHexOffset(target), percent)
+		if clamped && applied == 0 {
+			msg = "at file boundary"
+		}
+		p.setStatusMessage(msg, "")
+	}
+}
+
+func (p *PreviewPager) binaryProgressPercent(offset, total int64) int {
+	if total <= 0 {
+		return 0
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		offset = total - 1
+	}
+	return int((offset * 100) / total)
+}
+
 func (p *PreviewPager) handleKey(ev keyEvent) bool {
 	p.lastErr = nil
 
@@ -1114,6 +1197,22 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 			p.scrollRows(totalLines, contentRows)
 		} else {
 			p.state.PreviewScrollOffset += contentRows
+		}
+	case keyJumpBackSmall:
+		if p.binaryMode {
+			p.jumpBinary(-binaryJumpSmallBytes, binaryJumpSmallBytes)
+		}
+	case keyJumpForwardSmall:
+		if p.binaryMode {
+			p.jumpBinary(binaryJumpSmallBytes, binaryJumpSmallBytes)
+		}
+	case keyJumpBackLarge:
+		if p.binaryMode {
+			p.jumpBinary(-binaryJumpLargeBytes, binaryJumpLargeBytes)
+		}
+	case keyJumpForwardLarge:
+		if p.binaryMode {
+			p.jumpBinary(binaryJumpLargeBytes, binaryJumpLargeBytes)
 		}
 	case keyHome:
 		p.state.PreviewScrollOffset = 0
@@ -1380,6 +1479,9 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 	if count := p.countSegment(kind, charCount, charApprox); count != "" {
 		segments = append(segments, count)
 	}
+	if offset := p.binaryOffsetSegment(); offset != "" {
+		segments = append(segments, offset)
+	}
 	segments = append(segments, p.statusBadges(kind)...)
 	if search := p.searchStatusSegment(); search != "" {
 		segments = append([]string{search}, segments...)
@@ -1469,6 +1571,35 @@ func (p *PreviewPager) countSegment(kind pagerContentKind, charCount int, approx
 		return fmt.Sprintf("%s%d bytes", prefix, charCount)
 	}
 	return fmt.Sprintf("%s%d chars", prefix, charCount)
+}
+
+func (p *PreviewPager) binaryOffsetSegment() string {
+	if p == nil || !p.binaryMode || p.state == nil {
+		return ""
+	}
+	bytesPerLine := binaryPreviewLineWidth
+	totalBytes := int64(0)
+	if p.binarySource != nil {
+		if p.binarySource.bytesPerLine > 0 {
+			bytesPerLine = p.binarySource.bytesPerLine
+		}
+		totalBytes = p.binarySource.totalBytes
+	}
+	if totalBytes == 0 && p.state.PreviewData != nil {
+		totalBytes = p.state.PreviewData.BinaryInfo.TotalBytes
+		if totalBytes == 0 {
+			totalBytes = p.state.PreviewData.Size
+		}
+	}
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	offset := int64(p.state.PreviewScrollOffset) * int64(bytesPerLine)
+	if totalBytes <= 0 {
+		return fmt.Sprintf("offset: %s", formatHexOffset(offset))
+	}
+	percent := p.binaryProgressPercent(offset, totalBytes)
+	return fmt.Sprintf("offset: %s/%s  pos: %d%%", formatHexOffset(offset), formatHexOffset(totalBytes), percent)
 }
 
 func (p *PreviewPager) statusBadges(kind pagerContentKind) []string {
@@ -2721,11 +2852,16 @@ const (
 	keyEnter
 	keyBackspace
 	keyRune
+	keyJumpBackSmall
+	keyJumpForwardSmall
+	keyJumpBackLarge
+	keyJumpForwardLarge
 )
 
 type keyEvent struct {
 	kind keyKind
 	ch   rune
+	mod  int
 }
 
 func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
@@ -2778,6 +2914,10 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keyHome, ch: rune(b)}, nil
 	case 'G':
 		return keyEvent{kind: keyEnd, ch: rune(b)}, nil
+	case '{':
+		return keyEvent{kind: keyJumpBackSmall, ch: rune(b)}, nil
+	case '}':
+		return keyEvent{kind: keyJumpForwardSmall, ch: rune(b)}, nil
 	case '\r', '\n':
 		return keyEvent{kind: keyEnter}, nil
 	case 0x7f, 0x08:
@@ -2865,29 +3005,35 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 	switch final {
 	case 'A':
 		if hasShiftModifier(modifier) {
-			return keyEvent{kind: keyShiftUp}, nil
+			return keyEvent{kind: keyShiftUp, mod: modifier}, nil
 		}
-		return keyEvent{kind: keyUp}, nil
+		return keyEvent{kind: keyUp, mod: modifier}, nil
 	case 'B':
 		if hasShiftModifier(modifier) {
-			return keyEvent{kind: keyShiftDown}, nil
+			return keyEvent{kind: keyShiftDown, mod: modifier}, nil
 		}
-		return keyEvent{kind: keyDown}, nil
+		return keyEvent{kind: keyDown, mod: modifier}, nil
 	case 'C':
-		return keyEvent{kind: keyRight}, nil
+		return keyEvent{kind: keyRight, mod: modifier}, nil
 	case 'D':
-		return keyEvent{kind: keyLeft}, nil
+		return keyEvent{kind: keyLeft, mod: modifier}, nil
 	case 'H':
-		return keyEvent{kind: keyHome}, nil
+		return keyEvent{kind: keyHome, mod: modifier}, nil
 	case 'F':
-		return keyEvent{kind: keyEnd}, nil
+		return keyEvent{kind: keyEnd, mod: modifier}, nil
 	case '~':
 		switch params {
 		case "3":
 			return keyEvent{kind: keyUnknown}, nil
 		case "5":
+			if hasCtrlOrAltModifier(modifier) {
+				return keyEvent{kind: keyJumpBackLarge, mod: modifier}, nil
+			}
 			return keyEvent{kind: keyPageUp}, nil
 		case "6":
+			if hasCtrlOrAltModifier(modifier) {
+				return keyEvent{kind: keyJumpForwardLarge, mod: modifier}, nil
+			}
 			return keyEvent{kind: keyPageDown}, nil
 		case "1":
 			return keyEvent{kind: keyHome}, nil
@@ -2936,6 +3082,11 @@ func hasShiftModifier(mod int) bool {
 	}
 }
 
+func hasCtrlOrAltModifier(mod int) bool {
+	// xterm modifier encoding: 3=Alt, 5=Ctrl, 7=Ctrl+Alt, etc.
+	return mod >= 3
+}
+
 func formatDirectoryPreview(preview *statepkg.PreviewData) []string {
 	if preview == nil || len(preview.DirEntries) == 0 {
 		return []string{"(directory is empty)"}
@@ -2973,6 +3124,23 @@ func formatSize(size int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(size)/float64(div), "KMGTPE"[exp])
+}
+
+func formatHexOffset(offset int64) string {
+	if offset < 0 {
+		offset = 0
+	}
+	s := fmt.Sprintf("%08X", offset)
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/4 + 2)
+	b.WriteString("0x")
+	for i, ch := range s {
+		if i > 0 && (len(s)-i)%4 == 0 {
+			b.WriteByte('_')
+		}
+		b.WriteRune(ch)
+	}
+	return b.String()
 }
 
 func truncateToWidth(text string, width int) string {
