@@ -1260,10 +1260,6 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		}
 		p.recordCopyResult(err, msg, style)
 	case keyStartSearch:
-		if p.binaryMode {
-			p.setStatusMessage("search unavailable in binary preview", statusErrorStyle)
-			break
-		}
 		p.enterSearchMode()
 	case keySearchNext:
 		if p.searchQuery != "" || p.searchMode {
@@ -1641,7 +1637,7 @@ func (p *PreviewPager) statusBadges(kind pagerContentKind) []string {
 }
 
 func (p *PreviewPager) searchStatusSegment() string {
-	if p == nil || p.binaryMode {
+	if p == nil {
 		return ""
 	}
 	displayRaw := p.searchQuery
@@ -1805,12 +1801,9 @@ func (p *PreviewPager) helpSections() []helpSection {
 		{keys: "← / q / x / Esc", desc: "Exit pager"},
 	}
 
-	search := []helpEntry{}
-	if !p.binaryMode {
-		search = append(search,
-			helpEntry{keys: "/", desc: "Enter search"},
-			helpEntry{keys: "n / N", desc: "Jump to next/prev hit"},
-		)
+	search := []helpEntry{
+		{keys: "/", desc: "Enter search"},
+		{keys: "n / N", desc: "Jump to next/prev hit"},
 	}
 
 	sections := []helpSection{
@@ -1829,9 +1822,7 @@ func (p *PreviewPager) helpSections() []helpSection {
 
 func (p *PreviewPager) helpSegments() []string {
 	segments := []string{"? help"}
-	if !p.binaryMode {
-		segments = append(segments, "/ search")
-	}
+	segments = append(segments, "/ search")
 	return segments
 }
 

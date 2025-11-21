@@ -511,6 +511,32 @@ func TestStatusLineBinaryOmitsWrapAndFormat(t *testing.T) {
 	}
 }
 
+func TestBinarySearchEntersMode(t *testing.T) {
+	t.Parallel()
+	state := &statepkg.AppState{
+		PreviewData: &statepkg.PreviewData{
+			Name: "blob.bin",
+			Size: 64,
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: 64,
+			},
+		},
+	}
+	p := &PreviewPager{
+		state:      state,
+		binaryMode: true,
+		height:     20,
+		width:      80,
+	}
+
+	if done := p.handleKey(keyEvent{kind: keyStartSearch}); done {
+		t.Fatalf("entering search should not exit pager")
+	}
+	if !p.searchMode {
+		t.Fatalf("expected searchMode to be enabled in binary mode")
+	}
+}
+
 func TestBinaryJumpSmallForward(t *testing.T) {
 	t.Parallel()
 	total := int64(128 * 1024)
@@ -582,6 +608,53 @@ func TestBinaryJumpClampsAtEnd(t *testing.T) {
 	}
 	if p.state.PreviewScrollOffset != maxStart {
 		t.Fatalf("expected clamp to last visible page start %d, got %d", maxStart, p.state.PreviewScrollOffset)
+	}
+}
+
+func TestBinarySearchFindsHexPattern(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := make([]byte, 64)
+	for i := 0; i < len(data); i++ {
+		data[i] = byte(i)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	p := &PreviewPager{
+		state:      state,
+		binaryMode: true,
+		height:     20,
+		width:      80,
+		binarySource: &binaryPagerSource{
+			path:         path,
+			totalBytes:   int64(len(data)),
+			bytesPerLine: binaryPreviewLineWidth,
+			chunkSize:    binaryPagerChunkSize,
+		},
+	}
+
+	p.executeSearch(":000102")
+	if len(p.searchHits) == 0 {
+		t.Fatalf("expected at least one hex search hit")
+	}
+	if p.searchHits[0].line != 0 {
+		t.Fatalf("expected hit on first line, got line %d", p.searchHits[0].line)
+	}
+	if _, ok := p.searchHighlights[0]; !ok {
+		t.Fatalf("expected highlights on first line")
 	}
 }
 
@@ -1179,6 +1252,9 @@ func TestHelpOverlayReflectsContext(t *testing.T) {
 	}
 	if !containsLineWith(lines, "Jump ±64 KB") {
 		t.Fatalf("binary help should list 64 KB jump keys, got %v", lines)
+	}
+	if !containsLineWith(lines, "Enter search") {
+		t.Fatalf("binary help should list search shortcuts, got %v", lines)
 	}
 
 	pager.width = 40

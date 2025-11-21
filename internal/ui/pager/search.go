@@ -3,7 +3,9 @@ package pager
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 	"unicode"
@@ -198,6 +200,52 @@ func (p *PreviewPager) visibleHighlights(lineIdx int, drop int, widthLimit int) 
 	return adjusted, focus
 }
 
+func hexSpanForByte(byteIdx int, bytesPerLine int) textSpan {
+	if byteIdx < 0 {
+		byteIdx = 0
+	}
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	if byteIdx >= bytesPerLine {
+		byteIdx = bytesPerLine - 1
+	}
+	const hexOffsetCol = 10 // "00000000  "
+	col := hexOffsetCol + byteIdx*3
+	if byteIdx > 7 {
+		col++
+	}
+	return textSpan{start: col, end: col + 2}
+}
+
+func parseBinaryNeedle(query string) ([]byte, error) {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return nil, nil
+	}
+	if strings.HasPrefix(trimmed, ":") {
+		hex := strings.TrimSpace(trimmed[1:])
+		hex = strings.ReplaceAll(hex, " ", "")
+		if len(hex)%2 != 0 {
+			return nil, errors.New("hex pattern must have even length")
+		}
+		if len(hex) == 0 {
+			return nil, nil
+		}
+		buf := make([]byte, len(hex)/2)
+		for i := 0; i < len(hex); i += 2 {
+			var b byte
+			_, err := fmt.Sscanf(hex[i:i+2], "%02X", &b)
+			if err != nil {
+				return nil, errors.New("invalid hex pattern")
+			}
+			buf[i/2] = b
+		}
+		return buf, nil
+	}
+	return []byte(trimmed), nil
+}
+
 func applySearchHighlights(text string, spans []textSpan, focus *textSpan) string {
 	if text == "" || len(spans) == 0 {
 		return text
@@ -298,7 +346,7 @@ func highlightOffForStyle(style string) string {
 }
 
 func (p *PreviewPager) enterSearchMode() {
-	if p == nil || p.binaryMode {
+	if p == nil {
 		return
 	}
 	p.searchMode = true
@@ -409,11 +457,22 @@ func (p *PreviewPager) executeSearch(query string) {
 	p.clearSearchResults()
 	p.searchQuery = query
 	p.searchFocused = false
-	if p.binaryMode || strings.TrimSpace(query) == "" {
+	if strings.TrimSpace(query) == "" {
 		return
 	}
 
-	hits, highlights, limited, err := p.collectSearchMatches(query)
+	var (
+		hits       []searchHit
+		highlights map[int][]textSpan
+		limited    bool
+		err        error
+	)
+
+	if p.binaryMode {
+		hits, highlights, limited, err = p.collectBinarySearchMatches(query)
+	} else {
+		hits, highlights, limited, err = p.collectSearchMatches(query)
+	}
 	if err != nil {
 		p.searchErr = err
 		return
@@ -433,6 +492,108 @@ func (p *PreviewPager) collectSearchMatches(query string) ([]searchHit, map[int]
 		return p.searchStreaming(needle)
 	}
 	return p.searchStatic(needle)
+}
+
+func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, map[int][]textSpan, bool, error) {
+	if p == nil || p.state == nil || p.binarySource == nil {
+		return nil, nil, false, errors.New("binary source unavailable")
+	}
+
+	needle, err := parseBinaryNeedle(query)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if len(needle) == 0 {
+		return nil, nil, false, nil
+	}
+
+	bytesPerLine := p.binarySource.bytesPerLine
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	totalBytes := p.binarySource.totalBytes
+	if totalBytes <= 0 && p.state.PreviewData != nil {
+		totalBytes = p.state.PreviewData.Size
+	}
+	if totalBytes <= 0 {
+		return nil, nil, false, nil
+	}
+
+	maxLines := searchMaxLines
+	totalLines := int((totalBytes + int64(bytesPerLine) - 1) / int64(bytesPerLine))
+	if totalLines < maxLines {
+		maxLines = totalLines
+	}
+	bytesToScan := int64(maxLines) * int64(bytesPerLine)
+	if bytesToScan > totalBytes {
+		bytesToScan = totalBytes
+	}
+
+	bufSize := p.binarySource.chunkSize
+	if bufSize < bytesPerLine {
+		bufSize = bytesPerLine * 64
+	}
+	overlap := len(needle) - 1
+	window := make([]byte, bufSize+overlap)
+
+	file := p.binarySource.file
+	if file == nil {
+		f, openErr := os.Open(p.binarySource.path)
+		if openErr != nil {
+			return nil, nil, false, openErr
+		}
+		file = f
+		defer func() { _ = file.Close() }()
+	}
+
+	hits := []searchHit{}
+	highlights := make(map[int][]textSpan)
+	limited := totalBytes > bytesToScan
+
+	var tail []byte
+	for offset := int64(0); offset < bytesToScan && len(hits) < searchMaxHits; {
+		readSize := bufSize
+		if int64(readSize) > bytesToScan-offset {
+			readSize = int(bytesToScan - offset)
+		}
+		n, err := file.ReadAt(window[:readSize], offset)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return hits, highlights, limited, err
+		}
+		if n == 0 {
+			break
+		}
+		chunk := append(tail, window[:n]...)
+
+		searchFrom := 0
+		for len(hits) < searchMaxHits {
+			idx := bytes.Index(chunk[searchFrom:], needle)
+			if idx == -1 {
+				break
+			}
+			abs := offset - int64(len(tail)) + int64(searchFrom+idx)
+			line := int(abs / int64(bytesPerLine))
+			col := int(abs % int64(bytesPerLine))
+			sp := hexSpanForByte(col, bytesPerLine)
+			highlights[line] = append(highlights[line], sp)
+			hits = append(hits, searchHit{line: line, span: sp})
+			searchFrom += idx + 1
+		}
+
+		if len(hits) >= searchMaxHits {
+			limited = true
+			break
+		}
+
+		// carry overlap
+		if overlap > n {
+			overlap = n
+		}
+		tail = append([]byte(nil), chunk[len(chunk)-overlap:]...)
+		offset += int64(n)
+	}
+
+	return hits, highlights, limited, nil
 }
 
 func (p *PreviewPager) searchStreaming(needle []byte) ([]searchHit, map[int][]textSpan, bool, error) {
