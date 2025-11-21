@@ -1387,16 +1387,6 @@ func containsLineWith(lines []string, target string) bool {
 	return false
 }
 
-func countOccurrences(lines []string, target string) int {
-	count := 0
-	for _, line := range lines {
-		if strings.Contains(line, target) {
-			count++
-		}
-	}
-	return count
-}
-
 func cleanupPagerSources(t *testing.T, p *PreviewPager) {
 	t.Helper()
 	if p == nil {
