@@ -1206,6 +1206,14 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		if p.binaryMode {
 			p.jumpBinary(binaryJumpSmallBytes, binaryJumpSmallBytes)
 		}
+	case keyJumpBackLarge:
+		if p.binaryMode {
+			p.jumpBinary(-binaryJumpLargeBytes, binaryJumpLargeBytes)
+		}
+	case keyJumpForwardLarge:
+		if p.binaryMode {
+			p.jumpBinary(binaryJumpLargeBytes, binaryJumpLargeBytes)
+		}
 	case keyHome:
 		p.state.PreviewScrollOffset = 0
 		p.state.PreviewWrapOffset = 0
@@ -2852,6 +2860,8 @@ const (
 	keyRune
 	keyJumpBackSmall
 	keyJumpForwardSmall
+	keyJumpBackLarge
+	keyJumpForwardLarge
 )
 
 type keyEvent struct {
@@ -2914,6 +2924,10 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keyJumpBackSmall, ch: rune(b)}, nil
 	case ']':
 		return keyEvent{kind: keyJumpForwardSmall, ch: rune(b)}, nil
+	case '{':
+		return keyEvent{kind: keyJumpBackLarge, ch: rune(b)}, nil
+	case '}':
+		return keyEvent{kind: keyJumpForwardLarge, ch: rune(b)}, nil
 	case '\r', '\n':
 		return keyEvent{kind: keyEnter}, nil
 	case 0x7f, 0x08:
