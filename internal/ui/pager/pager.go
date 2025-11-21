@@ -1773,7 +1773,8 @@ func (p *PreviewPager) helpSections() []helpSection {
 	}
 	if p.binaryMode {
 		nav = append(nav,
-			helpEntry{keys: "{ / }", desc: "Jump ±4 KB"},
+			helpEntry{keys: "[ / ]", desc: "Jump ±4 KB"},
+			helpEntry{keys: "{ / }", desc: "Jump ±64 KB"},
 			helpEntry{keys: "Ctrl/Alt+PgUp/PgDn", desc: "Jump ±64 KB"},
 		)
 	}
@@ -2920,10 +2921,14 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keyHome, ch: rune(b)}, nil
 	case 'G':
 		return keyEvent{kind: keyEnd, ch: rune(b)}, nil
-	case '{':
+	case '[':
 		return keyEvent{kind: keyJumpBackSmall, ch: rune(b)}, nil
-	case '}':
+	case ']':
 		return keyEvent{kind: keyJumpForwardSmall, ch: rune(b)}, nil
+	case '{':
+		return keyEvent{kind: keyJumpBackLarge, ch: rune(b)}, nil
+	case '}':
+		return keyEvent{kind: keyJumpForwardLarge, ch: rune(b)}, nil
 	case '\r', '\n':
 		return keyEvent{kind: keyEnter}, nil
 	case 0x7f, 0x08:

@@ -238,10 +238,14 @@ func runeToPagerKey(ch rune) (keyEvent, bool) {
 		return keyEvent{kind: keyHome, ch: ch}, true
 	case 'G':
 		return keyEvent{kind: keyEnd, ch: ch}, true
-	case '{':
+	case '[':
 		return keyEvent{kind: keyJumpBackSmall, ch: ch}, true
-	case '}':
+	case ']':
 		return keyEvent{kind: keyJumpForwardSmall, ch: ch}, true
+	case '{':
+		return keyEvent{kind: keyJumpBackLarge, ch: ch}, true
+	case '}':
+		return keyEvent{kind: keyJumpForwardLarge, ch: ch}, true
 	case '\b':
 		return keyEvent{kind: keyBackspace}, true
 	case '\r', '\n':
