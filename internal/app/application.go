@@ -33,8 +33,9 @@ type Application struct {
 	editorCmd      []string
 
 	// Mouse state
-	lastClickTime time.Time
-	lastClickKey  string
+	lastClickTime    time.Time
+	lastClickKey     string
+	lastMouseButtons tcell.ButtonMask
 }
 
 // Close cleans up resources.

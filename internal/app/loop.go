@@ -295,10 +295,13 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 		return true
 	}
 
+	buttons := ev.Buttons()
+	defer func() { app.lastMouseButtons = buttons }()
+
 	layout, layoutReady := app.renderer.LastLayout()
 
 	// Mouse wheel scrolls the main list regardless of button 1.
-	if ev.Buttons()&tcell.WheelUp != 0 {
+	if buttons&tcell.WheelUp != 0 {
 		if app.state != nil && app.state.GlobalSearchActive {
 			app.actionCh <- statepkg.GlobalSearchNavigateAction{Direction: "up"}
 		} else {
@@ -306,7 +309,7 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 		}
 		return true
 	}
-	if ev.Buttons()&tcell.WheelDown != 0 {
+	if buttons&tcell.WheelDown != 0 {
 		if app.state != nil && app.state.GlobalSearchActive {
 			app.actionCh <- statepkg.GlobalSearchNavigateAction{Direction: "down"}
 		} else {
@@ -315,9 +318,16 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 		return true
 	}
 
-	if ev.Buttons()&tcell.Button1 == 0 {
+	if buttons&tcell.Button1 == 0 {
 		return true
 	}
+
+	if app.lastMouseButtons&tcell.Button1 != 0 {
+		// Ignore drag/motion events while the primary button stays pressed to
+		// avoid treating scroll + hold as repeated clicks.
+		return true
+	}
+
 	if app.state.PreviewFullScreen {
 		return true
 	}
