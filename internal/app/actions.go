@@ -112,6 +112,16 @@ func (app *Application) handleOpenPager() bool {
 	}
 
 	filePath := filepath.Join(app.state.CurrentPath, file.Name)
+
+	// Ensure preview is current before entering fullscreen pager (fast key bursts).
+	if err := app.reducer.EnsurePreviewCurrent(app.state); err != nil {
+		app.state.LastError = err
+	}
+
+	// After EnsurePreviewCurrent, bail if preview still mismatches selection.
+	if app.state.PreviewPath != "" && app.state.PreviewPath != filePath {
+		return true
+	}
 	if err := app.openFileInPager(filePath); err != nil {
 		app.state.LastError = err
 	}
