@@ -104,8 +104,10 @@ type textSpan struct {
 }
 
 type searchHit struct {
-	line int
-	span textSpan
+	line      int
+	span      textSpan
+	len       int
+	startByte int
 }
 
 var termGetSize = term.GetSize
@@ -755,18 +757,16 @@ func (p *PreviewPager) render() error {
 		if !p.wrapEnabled && p.width > 0 {
 			displayText = truncateToWidth(displayText, p.width)
 		}
-		if !p.binaryMode {
-			dropCols := 0
-			if p.wrapEnabled && p.width > 0 && currentSkip > 0 {
-				dropCols = currentSkip * p.width
-			}
-			widthLimit := 0
-			if !p.wrapEnabled && p.width > 0 {
-				widthLimit = p.width
-			}
-			if spans, focus := p.visibleHighlights(i, dropCols, widthLimit); len(spans) > 0 {
-				displayText = applySearchHighlights(displayText, spans, focus)
-			}
+		dropCols := 0
+		if p.wrapEnabled && p.width > 0 && currentSkip > 0 {
+			dropCols = currentSkip * p.width
+		}
+		widthLimit := 0
+		if !p.wrapEnabled && p.width > 0 {
+			widthLimit = p.width
+		}
+		if spans, focus := p.visibleHighlights(i, dropCols, widthLimit); len(spans) > 0 {
+			displayText = applySearchHighlights(displayText, spans, focus)
 		}
 		p.drawRow(row, displayText, false)
 		rowsUsed := p.rowSpanForIndex(i)
@@ -1644,22 +1644,33 @@ func (p *PreviewPager) searchStatusSegment() string {
 	if p.searchMode {
 		displayRaw = string(p.searchInput)
 	}
-	trimmed := strings.TrimSpace(displayRaw)
-	if trimmed == "" {
-		if p.searchMode {
+	if p.searchMode {
+		if displayRaw == "" {
 			return "/_"
 		}
+		visibleQuery := visualizeSpaces(displayRaw)
+		safeQuery := textutil.SanitizeTerminalText(visibleQuery)
+		segment := "/" + safeQuery + "_"
+
+		activeQuery := p.searchQuery
+		matchInput := displayRaw
+		useResults := activeQuery != "" && strings.EqualFold(activeQuery, matchInput)
+		if !useResults {
+			return segment
+		}
+		return segment + " " + p.searchCountsSegment()
+	}
+
+	if displayRaw == "" {
 		return ""
 	}
 
-	safeQuery := textutil.SanitizeTerminalText(trimmed)
+	visibleQuery := visualizeSpaces(displayRaw)
+	safeQuery := textutil.SanitizeTerminalText(visibleQuery)
 	segment := "/" + safeQuery
-	if p.searchMode {
-		segment += "_"
-	}
 
-	activeQuery := strings.TrimSpace(p.searchQuery)
-	useResults := activeQuery != "" && strings.EqualFold(activeQuery, trimmed)
+	activeQuery := p.searchQuery
+	useResults := activeQuery != "" && strings.EqualFold(activeQuery, displayRaw)
 	if !useResults {
 		return segment
 	}
@@ -1668,23 +1679,26 @@ func (p *PreviewPager) searchStatusSegment() string {
 		return segment + " !"
 	}
 
+	return segment + " " + p.searchCountsSegment()
+}
+
+func (p *PreviewPager) searchCountsSegment() string {
 	total := len(p.searchHits)
 	if total == 0 {
 		if p.searchLimited {
-			return segment + " 0/0+"
+			return "0/0+"
 		}
-		return segment + " 0/0"
+		return "0/0"
 	}
-
 	cursor := p.searchCursor
 	if cursor < 0 || cursor >= total {
 		cursor = 0
 	}
-	segment += fmt.Sprintf(" %d/%d", cursor+1, total)
+	seg := fmt.Sprintf("%d/%d", cursor+1, total)
 	if p.searchLimited {
-		segment += "+"
+		seg += "+"
 	}
-	return segment
+	return seg
 }
 
 type helpEntry struct {
