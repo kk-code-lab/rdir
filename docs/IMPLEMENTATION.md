@@ -95,6 +95,7 @@ Main application controller:
 - `input` - InputHandler instance
 - `Run()` - Main event loop
 - `processActions()` - Applies actions to state
+- Debug logging: set `RDIR_DEBUG_LOG=1` to write session logs (timestamp with zone, pid, GOOS/GOARCH, cwd, build commit) to `os.TempDir()/rdir_debug.log`, recreating the file on each start. `BuildCommit` is injected at build time via `-ldflags "-X github.com/kk-code-lab/rdir/internal/app.BuildCommit=$(git rev-parse --short HEAD)"` (wired into `make build`).
 
 #### 9. **Entry Point** (cmd/rdir/main.go)
 Minimal entry point that calls `internal.NewApplication()`
