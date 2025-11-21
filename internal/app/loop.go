@@ -618,6 +618,7 @@ func (app *Application) handleAppAction(action statepkg.Action) bool {
 		return app.handleEditorOpen()
 	case statepkg.OpenPagerAction:
 		app.logf("handleAppAction OpenPagerAction")
+		_ = app.reducer.EnsurePreviewCurrent(app.state)
 		return app.handleOpenPager()
 	}
 
