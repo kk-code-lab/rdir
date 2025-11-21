@@ -2,8 +2,8 @@ package app
 
 import (
 	"fmt"
+	"log"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -11,6 +11,8 @@ import (
 	inputui "github.com/kk-code-lab/rdir/internal/ui/input"
 	renderui "github.com/kk-code-lab/rdir/internal/ui/render"
 )
+
+var debugLoggingEnabled = os.Getenv("RDIR_DEBUG_LOG") == "1"
 
 // Application represents the running app.
 type Application struct {
@@ -23,7 +25,6 @@ type Application struct {
 	eventChan      chan tcell.Event
 	eventStop      chan struct{}
 	eventStopped   chan struct{}
-	eventLog       *os.File
 	shouldQuit     bool
 	currentPath    string
 	clipboardCmd   []string
@@ -41,9 +42,6 @@ func (app *Application) Close() error {
 	app.stopEventPoller()
 	if app.screen != nil {
 		app.screen.Fini()
-	}
-	if app.eventLog != nil {
-		_ = app.eventLog.Close()
 	}
 	return nil
 }
@@ -114,23 +112,10 @@ func (app *Application) drainPendingEvents() {
 }
 
 func (app *Application) logf(format string, args ...interface{}) {
-	if app == nil || app.eventLog == nil {
+	if !debugLoggingEnabled {
 		return
 	}
-	ts := time.Now().Format("15:04:05.000")
-	_, _ = app.eventLog.WriteString(ts + " " + fmt.Sprintf(format, args...) + "\n")
-}
-
-func initEventLog() *os.File {
-	path := filepath.Join("temp", "log.txt")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return nil
-	}
-	return f
+	log.Printf(format, args...)
 }
 
 func formatTcellEvent(ev tcell.Event) string {

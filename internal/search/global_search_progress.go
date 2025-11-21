@@ -37,13 +37,8 @@ func progressDebugf(format string, args ...interface{}) {
 	progressDebugMu.Lock()
 	defer progressDebugMu.Unlock()
 
-	f, err := os.OpenFile("log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
 	timestamp := time.Now().Format(time.RFC3339Nano)
-	_, _ = fmt.Fprintf(f, "%s "+format+"\n", append([]interface{}{timestamp}, args...)...)
-	_ = f.Close()
+	_, _ = fmt.Fprintf(os.Stderr, "%s "+format+"\n", append([]interface{}{timestamp}, args...)...)
 }
 
 type progressTracker struct {
