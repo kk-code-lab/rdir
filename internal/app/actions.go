@@ -60,6 +60,13 @@ func (app *Application) handleRightArrow() bool {
 		return true
 	}
 
+	// Ensure preview matches the currently selected file; when user opens the
+	// fullscreen pager immediately after moving the cursor, the async preview
+	// load may still point to the previous selection.
+	if err := app.reducer.EnsurePreviewCurrent(app.state); err != nil {
+		app.state.LastError = err
+	}
+
 	if _, err := app.reducer.Reduce(app.state, statepkg.PreviewEnterFullScreenAction{}); err != nil {
 		app.state.LastError = err
 		return true
