@@ -500,8 +500,88 @@ func TestStatusLineBinaryOmitsWrapAndFormat(t *testing.T) {
 	if !strings.Contains(status, "bytes") {
 		t.Fatalf("binary status should show byte counts, got %q", status)
 	}
+	if !strings.Contains(status, "offset:") {
+		t.Fatalf("binary status should show offset, got %q", status)
+	}
+	if !strings.Contains(status, "pos:") {
+		t.Fatalf("binary status should show percentage, got %q", status)
+	}
 	if !strings.Contains(status, "? help") {
 		t.Fatalf("help segment should advertise help toggle, got %q", status)
+	}
+}
+
+func TestBinaryJumpSmallForward(t *testing.T) {
+	t.Parallel()
+	total := int64(128 * 1024)
+	state := &statepkg.AppState{
+		PreviewData: &statepkg.PreviewData{
+			Name: "blob.bin",
+			Size: total,
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: total,
+			},
+		},
+	}
+	p := &PreviewPager{
+		state:      state,
+		binaryMode: true,
+		binarySource: &binaryPagerSource{
+			totalBytes:   total,
+			bytesPerLine: binaryPreviewLineWidth,
+		},
+		height: 25,
+		width:  80,
+	}
+
+	if done := p.handleKey(keyEvent{kind: keyJumpForwardSmall}); done {
+		t.Fatalf("jump should not exit pager")
+	}
+	expected := binaryJumpSmallBytes / binaryPreviewLineWidth
+	if p.state.PreviewScrollOffset != expected {
+		t.Fatalf("expected offset line %d after jump, got %d", expected, p.state.PreviewScrollOffset)
+	}
+}
+
+func TestBinaryJumpClampsAtEnd(t *testing.T) {
+	t.Parallel()
+	total := int64(10 * 1024)
+	lines := int((total + int64(binaryPreviewLineWidth) - 1) / int64(binaryPreviewLineWidth))
+
+	state := &statepkg.AppState{
+		PreviewData: &statepkg.PreviewData{
+			Name: "blob.bin",
+			Size: total,
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: total,
+			},
+		},
+		PreviewScrollOffset: lines - 2,
+	}
+	p := &PreviewPager{
+		state:      state,
+		binaryMode: true,
+		height:     25,
+		width:      80,
+		binarySource: &binaryPagerSource{
+			totalBytes:   total,
+			bytesPerLine: binaryPreviewLineWidth,
+		},
+	}
+
+	if done := p.handleKey(keyEvent{kind: keyJumpForwardLarge}); done {
+		t.Fatalf("jump should not exit pager")
+	}
+	visible := p.height - (len(p.headerLines()) + 1) - 1
+	if visible < 1 {
+		visible = 1
+	}
+	maxStart := lines - visible
+	if maxStart < 0 {
+		maxStart = 0
+	}
+	if p.state.PreviewScrollOffset != maxStart {
+		t.Fatalf("expected clamp to last visible page start %d, got %d", maxStart, p.state.PreviewScrollOffset)
 	}
 }
 
