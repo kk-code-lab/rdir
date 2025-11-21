@@ -77,7 +77,6 @@ func NewApplication() (*Application, error) {
 		clipboardCmd:   clipboardCmd,
 		clipboardAvail: clipboardAvail,
 		editorCmd:      editorCmd,
-		eventLog:       initEventLog(),
 	}
 
 	inputHandler.SetState(state)
