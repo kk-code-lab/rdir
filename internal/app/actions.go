@@ -145,7 +145,9 @@ func (app *Application) openFileInPager(filePath string) error {
 		_ = tty.Close()
 	}()
 
+	app.stopEventPoller()
 	if err := app.screen.Suspend(); err != nil {
+		app.startEventPoller()
 		return fmt.Errorf("failed to suspend screen: %w", err)
 	}
 
@@ -156,21 +158,37 @@ func (app *Application) openFileInPager(filePath string) error {
 	}, "pager")
 
 	if err := app.screen.Resume(); err != nil {
+		app.startEventPoller()
 		return fmt.Errorf("failed to resume screen: %w", err)
 	}
-	app.screen.Sync()
+	if err := app.reinitScreen(); err != nil {
+		return err
+	}
+	if app.processActions() {
+		app.renderer.Render(app.state)
+		app.screen.Show()
+	}
 	return runErr
 }
 
-func (app *Application) openFileInPagerFallback(args []string) error {
+func (app *Application) openFileInPagerFallback(args []string) (err error) {
 	if len(args) == 0 {
 		return fmt.Errorf("no pager command available")
 	}
+	app.stopEventPoller()
 	if err := app.screen.Suspend(); err != nil {
+		app.startEventPoller()
 		return fmt.Errorf("failed to suspend screen: %w", err)
 	}
 	defer func() {
-		_ = app.screen.Resume()
+		if resumeErr := app.screen.Resume(); resumeErr != nil && err == nil {
+			err = resumeErr
+		}
+		_ = app.reinitScreen()
+		if app.processActions() {
+			app.renderer.Render(app.state)
+			app.screen.Show()
+		}
 	}()
 
 	return runExternalCommand(args, func(cmd *exec.Cmd) {
@@ -200,7 +218,9 @@ func (app *Application) openFileInEditor(filePath string) error {
 		}()
 	}
 
+	app.stopEventPoller()
 	if err := app.screen.Suspend(); err != nil {
+		app.startEventPoller()
 		return fmt.Errorf("failed to suspend screen: %w", err)
 	}
 
@@ -217,19 +237,34 @@ func (app *Application) openFileInEditor(filePath string) error {
 	}, "editor")
 
 	if err := app.screen.Resume(); err != nil {
+		app.startEventPoller()
 		return fmt.Errorf("failed to resume screen: %w", err)
 	}
-	app.screen.Sync()
+	if err := app.reinitScreen(); err != nil {
+		return err
+	}
+	if app.processActions() {
+		app.renderer.Render(app.state)
+		app.screen.Show()
+	}
 	return runErr
 }
 
-func (app *Application) openFileInEditorFallback(args []string) error {
+func (app *Application) openFileInEditorFallback(args []string) (err error) {
+	app.stopEventPoller()
 	if err := app.screen.Suspend(); err != nil {
+		app.startEventPoller()
 		return fmt.Errorf("failed to suspend screen: %w", err)
 	}
 	defer func() {
-		_ = app.screen.Resume()
-		app.screen.Sync()
+		if resumeErr := app.screen.Resume(); resumeErr != nil && err == nil {
+			err = resumeErr
+		}
+		_ = app.reinitScreen()
+		if app.processActions() {
+			app.renderer.Render(app.state)
+			app.screen.Show()
+		}
 	}()
 
 	return runExternalCommand(args, func(cmd *exec.Cmd) {

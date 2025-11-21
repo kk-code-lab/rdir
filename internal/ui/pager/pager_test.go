@@ -408,6 +408,7 @@ func TestRestoreAfterEditorStreamingKeepsPosition(t *testing.T) {
 	}
 
 	p := &PreviewPager{state: state, wrapEnabled: false, height: 20}
+	t.Cleanup(func() { cleanupPagerSources(t, p) })
 	p.restoreAfterEditor(150, 0)
 
 	if got := p.state.PreviewScrollOffset; got != 150 {
@@ -432,7 +433,7 @@ func TestHandleKeyEditorStaysOpen(t *testing.T) {
 
 func TestHeaderLinesSanitizeControlCharacters(t *testing.T) {
 	state := &statepkg.AppState{
-		CurrentPath: "/tmp",
+		CurrentPath: filepath.FromSlash("/tmp"),
 		PreviewData: &statepkg.PreviewData{
 			Name:     "bad\x1b[31m\nfile",
 			Size:     42,
@@ -449,8 +450,9 @@ func TestHeaderLinesSanitizeControlCharacters(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("expected two header lines, got %d", len(lines))
 	}
-	if lines[0] != "/tmp/bad?[31m file" {
-		t.Fatalf("unexpected sanitized path: %q", lines[0])
+	want := filepath.Join(filepath.FromSlash("/tmp"), "bad?[31m file")
+	if lines[0] != want {
+		t.Fatalf("unexpected sanitized path: %q (want %q)", lines[0], want)
 	}
 	if strings.Contains(lines[1], "\x1b") || strings.Contains(lines[1], "\n") {
 		t.Fatalf("metadata line should not contain control characters: %q", lines[1])
@@ -913,6 +915,7 @@ func TestSearchStreamingMarksLimitedWhenCapHit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
+	t.Cleanup(func() { cleanupPagerSources(t, pager) })
 	if pager.rawTextSource == nil {
 		t.Fatalf("expected streaming source for truncated preview")
 	}
@@ -1258,6 +1261,7 @@ func TestInfoSegmentsTrackStreamingLineCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
+	t.Cleanup(func() { cleanupPagerSources(t, pager) })
 
 	segments := pager.detailInfoSegments(preview)
 	if !containsSegment(segments, "lines:~5") {
@@ -1297,6 +1301,19 @@ func containsLineWith(lines []string, target string) bool {
 	return false
 }
 
+func cleanupPagerSources(t *testing.T, p *PreviewPager) {
+	t.Helper()
+	if p == nil {
+		return
+	}
+	if p.rawTextSource != nil {
+		p.rawTextSource.Close()
+	}
+	if p.binarySource != nil {
+		p.binarySource.Close()
+	}
+}
+
 func TestPersistLoadedLinesUpdatesPreviewState(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "persist.txt")
@@ -1333,6 +1350,7 @@ func TestPersistLoadedLinesUpdatesPreviewState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
+	t.Cleanup(func() { cleanupPagerSources(t, pager) })
 	if pager.rawTextSource == nil {
 		t.Fatalf("expected streaming text source")
 	}
@@ -1355,6 +1373,7 @@ func TestPersistLoadedLinesUpdatesPreviewState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen pager: %v", err)
 	}
+	t.Cleanup(func() { cleanupPagerSources(t, pager2) })
 	if pager2.isLineCountApprox() {
 		t.Fatalf("line counts should be exact after persistence")
 	}
@@ -1404,6 +1423,7 @@ func TestPersistLoadedLinesAllowsSubsequentStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
+	t.Cleanup(func() { cleanupPagerSources(t, pager) })
 	if pager.rawTextSource == nil {
 		t.Fatalf("expected streaming source for truncated file")
 	}
@@ -1419,6 +1439,7 @@ func TestPersistLoadedLinesAllowsSubsequentStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen pager: %v", err)
 	}
+	t.Cleanup(func() { cleanupPagerSources(t, pager2) })
 	if pager2.rawTextSource == nil {
 		t.Fatalf("expected streaming source after persistence")
 	}
@@ -1479,6 +1500,7 @@ func TestCopyAllStreamsFullFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
+	t.Cleanup(func() { cleanupPagerSources(t, pager) })
 	if pager.rawTextSource == nil {
 		t.Fatalf("expected streaming source")
 	}

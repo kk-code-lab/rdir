@@ -2,7 +2,9 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -16,6 +18,9 @@ import (
 const doubleClickThreshold = 300 * time.Millisecond
 
 func NewApplication() (*Application, error) {
+	if runtime.GOOS == "windows" {
+		_ = os.Setenv("TCELL_ALTSCREEN", "disable")
+	}
 	screen, err := tcell.NewScreen()
 	if err != nil {
 		return nil, err
@@ -72,9 +77,12 @@ func NewApplication() (*Application, error) {
 		clipboardCmd:   clipboardCmd,
 		clipboardAvail: clipboardAvail,
 		editorCmd:      editorCmd,
+		eventLog:       initEventLog(),
 	}
 
 	inputHandler.SetState(state)
+
+	app.logf("session start GOOS=%s", runtime.GOOS)
 	_ = reducer.GeneratePreview(state)
 	return app, nil
 }
@@ -98,16 +106,13 @@ func newInitialState(cwd string, clipboardAvail, editorAvail bool) *statepkg.App
 
 func (app *Application) Run() {
 	defer app.screen.Fini()
+	defer app.logf("session end")
 
 	app.renderer.Render(app.state)
 	renderPending := false
 
-	eventChan := make(chan tcell.Event)
-	go func() {
-		for {
-			eventChan <- app.screen.PollEvent()
-		}
-	}()
+	app.startEventPoller()
+	defer app.stopEventPoller()
 
 	const animationInterval = 50 * time.Millisecond
 	var animationTimer *time.Timer
@@ -154,13 +159,20 @@ func (app *Application) Run() {
 		}
 
 		select {
-		case ev := <-eventChan:
-			if app.handleEvent(ev) {
+		case ev, ok := <-app.eventChan:
+			if !ok {
+				app.logf("event channel closed; restarting poller")
+				app.startEventPoller()
+				continue
+			}
+			app.logf("recv event: %s", formatTcellEvent(ev))
+			if ev != nil && app.handleEvent(ev) {
 				renderPending = true
 			}
 		case <-animationCh:
 			renderPending = true
 		case action := <-app.actionCh:
+			app.logf("action: %T", action)
 			if app.handleAction(action) {
 				renderPending = true
 			}
@@ -195,6 +207,55 @@ func (app *Application) handleEvent(ev tcell.Event) bool {
 		return false
 	}
 	return true
+}
+
+// reinitScreen rebuilds the tcell screen and renderer after returning from
+// the external pager/editor to avoid Windows console quirks.
+func (app *Application) reinitScreen() error {
+	if _, sim := app.screen.(tcell.SimulationScreen); sim {
+		// Tests use SimulationScreen; rebuilding it confuses its internals (double Fini).
+		return nil
+	}
+	app.logf("reinitScreen: start")
+	app.stopEventPoller()
+	app.drainPendingEvents()
+	_ = flushConsoleInput()
+
+	if app.screen != nil {
+		app.screen.Fini()
+	}
+
+	if runtime.GOOS == "windows" {
+		_ = os.Setenv("TCELL_ALTSCREEN", "disable")
+	}
+
+	scr, err := tcell.NewScreen()
+	if err != nil {
+		app.logf("reinitScreen: NewScreen err=%v", err)
+		return err
+	}
+	if err := scr.Init(); err != nil {
+		app.logf("reinitScreen: Init err=%v", err)
+		return err
+	}
+	scr.EnableMouse()
+
+	app.screen = scr
+	app.renderer = renderui.NewRenderer(scr)
+	app.input = input.NewInputHandler(app.actionCh)
+	app.input.SetState(app.state)
+
+	w, h := scr.Size()
+	app.state.ScreenWidth = w
+	app.state.ScreenHeight = h
+
+	app.renderer.Render(app.state)
+	app.screen.Show()
+	app.startEventPoller()
+	app.screen.PostEventWait(tcell.NewEventResize(w, h))
+	app.screen.PostEventWait(tcell.NewEventInterrupt(nil))
+	app.logf("reinitScreen: done %dx%d", w, h)
+	return nil
 }
 
 // handleMouse maps primary-clicks to selection and navigation.
@@ -500,9 +561,11 @@ func (app *Application) handleAction(action statepkg.Action) bool {
 
 	switch action.(type) {
 	case statepkg.QuitAction:
+		app.logf("handleAction QuitAction")
 		app.shouldQuit = true
 		return false
 	case statepkg.QuitAndChangeAction:
+		app.logf("handleAction QuitAndChangeAction")
 		app.currentPath = app.state.CurrentPath
 		app.shouldQuit = true
 		return false
@@ -514,12 +577,16 @@ func (app *Application) handleAction(action statepkg.Action) bool {
 func (app *Application) handleAppAction(action statepkg.Action) bool {
 	switch action.(type) {
 	case statepkg.YankPathAction:
+		app.logf("handleAppAction YankPathAction")
 		return app.handleClipboard()
 	case statepkg.RightArrowAction:
+		app.logf("handleAppAction RightArrowAction")
 		return app.handleRightArrow()
 	case statepkg.OpenEditorAction:
+		app.logf("handleAppAction OpenEditorAction")
 		return app.handleEditorOpen()
 	case statepkg.OpenPagerAction:
+		app.logf("handleAppAction OpenPagerAction")
 		return app.handleOpenPager()
 	}
 
@@ -535,14 +602,27 @@ func (app *Application) runPreviewPager() (err error) {
 		return err
 	}
 
+	app.stopEventPoller()
+	app.logf("runPreviewPager: suspending screen")
 	if err := app.screen.Suspend(); err != nil {
+		app.startEventPoller()
 		return err
 	}
 	defer func() {
 		if resumeErr := app.screen.Resume(); resumeErr != nil && err == nil {
 			err = resumeErr
 		}
-		app.screen.Sync()
+		app.logf("runPreviewPager: resumed screen")
+		app.drainPendingEvents()
+		_ = flushConsoleInput()
+		if errReinit := app.reinitScreen(); errReinit != nil && err == nil {
+			err = errReinit
+		}
+		if app.processActions() {
+			app.renderer.Render(app.state)
+			app.screen.Show()
+			app.logf("runPreviewPager: rendered pending actions after reinit")
+		}
 	}()
 
 	return view.Run()
