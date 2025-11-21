@@ -1771,6 +1771,12 @@ func (p *PreviewPager) helpSections() []helpSection {
 		{keys: "PgDn / space", desc: "Page down"},
 		{keys: "Home/End or g/G", desc: "Jump to start/end"},
 	}
+	if p.binaryMode {
+		nav = append(nav,
+			helpEntry{keys: "{ / }", desc: "Jump ±4 KB"},
+			helpEntry{keys: "Ctrl/Alt+PgUp/PgDn", desc: "Jump ±64 KB"},
+		)
+	}
 
 	view := []helpEntry{
 		{keys: "?", desc: "Toggle this help"},

@@ -1174,6 +1174,12 @@ func TestHelpOverlayReflectsContext(t *testing.T) {
 	if containsLineWith(lines, "formatted") {
 		t.Fatalf("formatted hint should be hidden without formatted lines, got %v", lines)
 	}
+	if !containsLineWith(lines, "Jump ±4 KB") {
+		t.Fatalf("binary help should list small jump keys, got %v", lines)
+	}
+	if !containsLineWith(lines, "Jump ±64 KB") {
+		t.Fatalf("binary help should list large jump keys, got %v", lines)
+	}
 
 	pager.width = 40
 	lines = pager.helpOverlayLines()
