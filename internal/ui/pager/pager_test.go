@@ -1177,8 +1177,8 @@ func TestHelpOverlayReflectsContext(t *testing.T) {
 	if !containsLineWith(lines, "Jump ±4 KB") {
 		t.Fatalf("binary help should list small jump keys, got %v", lines)
 	}
-	if !containsLineWith(lines, "Jump ±64 KB") {
-		t.Fatalf("binary help should list large jump keys, got %v", lines)
+	if countOccurrences(lines, "Jump ±64 KB") < 2 { // braces + Ctrl/Alt PgUp/PgDn
+		t.Fatalf("binary help should list both 64 KB jump shortcuts, got %v", lines)
 	}
 
 	pager.width = 40
@@ -1385,6 +1385,16 @@ func containsLineWith(lines []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func countOccurrences(lines []string, target string) int {
+	count := 0
+	for _, line := range lines {
+		if strings.Contains(line, target) {
+			count++
+		}
+	}
+	return count
 }
 
 func cleanupPagerSources(t *testing.T, p *PreviewPager) {
