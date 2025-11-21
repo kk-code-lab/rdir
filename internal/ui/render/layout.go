@@ -22,6 +22,18 @@ type layoutMetrics struct {
 	binaryMode            binaryPreviewMode
 }
 
+// LayoutSnapshot exposes the parts of the computed layout that other packages need.
+type LayoutSnapshot struct {
+	SidebarWidth          int
+	SideSeparatorWidth    int
+	ContentSeparatorWidth int
+	MainPanelStart        int
+	MainPanelWidth        int
+	PreviewStart          int
+	PreviewWidth          int
+	ShowPreview           bool
+}
+
 const (
 	minMainPanelWidth         = 32
 	minPreviewPanelWidth      = 28

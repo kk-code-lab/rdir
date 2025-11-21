@@ -23,6 +23,8 @@ type Renderer struct {
 	runeWidthCache   [128]int // ASCII cache (0-127)
 	runeWidthCacheMu sync.RWMutex
 	runeWidthWide    sync.Map // For non-ASCII runes
+	lastLayout       layoutMetrics
+	layoutReady      bool
 }
 
 // NewRenderer creates a new renderer
@@ -33,6 +35,25 @@ func NewRenderer(screen tcell.Screen) *Renderer {
 	}
 }
 
+// LastLayout returns the most recent layout snapshot computed during rendering.
+// The second return value is false if no layout has been computed yet (e.g. before first render).
+func (r *Renderer) LastLayout() (LayoutSnapshot, bool) {
+	if !r.layoutReady {
+		return LayoutSnapshot{}, false
+	}
+	l := r.lastLayout
+	return LayoutSnapshot{
+		SidebarWidth:          l.sidebarWidth,
+		SideSeparatorWidth:    l.sideSeparatorWidth,
+		ContentSeparatorWidth: l.contentSeparatorWidth,
+		MainPanelStart:        l.mainPanelStart,
+		MainPanelWidth:        l.mainPanelWidth,
+		PreviewStart:          l.previewStart,
+		PreviewWidth:          l.previewWidth,
+		ShowPreview:           l.showPreview,
+	}, true
+}
+
 // Render draws the entire UI based on state
 func (r *Renderer) Render(state *statepkg.AppState) {
 	r.screen.Clear()
@@ -40,6 +61,7 @@ func (r *Renderer) Render(state *statepkg.AppState) {
 	w, h := r.screen.Size()
 
 	if state != nil && state.PreviewFullScreen {
+		r.layoutReady = false
 		r.drawHeader(state, w, h)
 		r.drawFullScreenPreview(state, w, h)
 		r.drawStatusLine(state, w, h)
@@ -48,6 +70,8 @@ func (r *Renderer) Render(state *statepkg.AppState) {
 	}
 
 	layout := r.computeLayout(w, state)
+	r.lastLayout = layout
+	r.layoutReady = true
 
 	// Draw all panels
 	r.drawHeader(state, w, h)

@@ -294,6 +294,9 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 	if app.state == nil {
 		return true
 	}
+
+	layout, layoutReady := app.renderer.LastLayout()
+
 	// Mouse wheel scrolls the main list regardless of button 1.
 	if ev.Buttons()&tcell.WheelUp != 0 {
 		if app.state != nil && app.state.GlobalSearchActive {
@@ -329,6 +332,9 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 	}
 
 	sidebarWidth := renderui.SidebarWidthForWidth(app.state.ScreenWidth, app.state)
+	if layoutReady {
+		sidebarWidth = layout.SidebarWidth
+	}
 
 	// Sidebar click: jump to parent directory (any row).
 	if sidebarWidth > 0 && x < sidebarWidth {
@@ -336,6 +342,25 @@ func (app *Application) handleMouse(ev *tcell.EventMouse) bool {
 			return true
 		}
 		// otherwise fall through to list handling
+	}
+
+	if layoutReady && layout.ShowPreview {
+		// Ignore clicks on the separator or preview area so users can select text without changing rows.
+		sepStart := layout.PreviewStart - layout.ContentSeparatorWidth
+		previewEnd := layout.PreviewStart + layout.PreviewWidth
+		if x >= sepStart && x < previewEnd {
+			return true
+		}
+	}
+
+	mainStart := sidebarWidth
+	mainEnd := app.state.ScreenWidth
+	if layoutReady {
+		mainStart = layout.MainPanelStart
+		mainEnd = layout.MainPanelStart + layout.MainPanelWidth
+	}
+	if x < mainStart || x >= mainEnd {
+		return true
 	}
 
 	listStartY := 1
