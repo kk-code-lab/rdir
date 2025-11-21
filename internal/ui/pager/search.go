@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -181,7 +182,7 @@ func smartCaseInsensitive(query string) bool {
 	return true
 }
 
-func (p *PreviewPager) visibleHighlights(lineIdx int, drop int, widthLimit int) ([]textSpan, *textSpan) {
+func (p *PreviewPager) visibleHighlights(lineIdx int, drop int, widthLimit int) ([]textSpan, []textSpan) {
 	if p == nil || len(p.searchHighlights) == 0 {
 		return nil, nil
 	}
@@ -189,15 +190,45 @@ func (p *PreviewPager) visibleHighlights(lineIdx int, drop int, widthLimit int) 
 	if !ok || len(spans) == 0 {
 		return nil, nil
 	}
+	sortSpansByStart(spans)
 	adjusted := shiftAndClipSpans(spans, drop, widthLimit)
 
-	var focus *textSpan
-	if hit := p.focusedHit(); hit != nil && hit.line == lineIdx {
-		if sp, ok := adjustSpan(hit.span, drop, widthLimit); ok {
-			focus = &sp
+	var focusSpans []textSpan
+	if hit := p.focusedHit(); hit != nil {
+		if !p.binaryMode {
+			if hit.line == lineIdx {
+				if sp, ok := adjustSpan(hit.span, drop, widthLimit); ok {
+					focusSpans = append(focusSpans, sp)
+				}
+			}
+		} else if hit.len > 0 {
+			bytesPerLine := binaryPreviewLineWidth
+			if p.binarySource != nil && p.binarySource.bytesPerLine > 0 {
+				bytesPerLine = p.binarySource.bytesPerLine
+			}
+			start := hit.startByte
+			if start < 0 {
+				start = hit.line*bytesPerLine + byteIndexForSpanStart(hit.span.start, bytesPerLine)
+			}
+			end := start + hit.len - 1
+			startLine := start / bytesPerLine
+			endLine := end / bytesPerLine
+			if lineIdx >= startLine && lineIdx <= endLine {
+				lineStart := lineIdx * bytesPerLine
+				lineEnd := lineStart + bytesPerLine - 1
+				for b := maxInt(lineStart, start); b <= minInt(lineEnd, end); b++ {
+					col := b - lineStart
+					if sp, ok := adjustSpan(hexSpanForByte(col, bytesPerLine), drop, widthLimit); ok {
+						focusSpans = append(focusSpans, sp)
+					}
+					if sp, ok := adjustSpan(asciiSpanForByte(col, bytesPerLine), drop, widthLimit); ok {
+						focusSpans = append(focusSpans, sp)
+					}
+				}
+			}
 		}
 	}
-	return adjusted, focus
+	return adjusted, focusSpans
 }
 
 func hexSpanForByte(byteIdx int, bytesPerLine int) textSpan {
@@ -218,13 +249,26 @@ func hexSpanForByte(byteIdx int, bytesPerLine int) textSpan {
 	return textSpan{start: col, end: col + 2}
 }
 
+func asciiSpanForByte(byteIdx int, bytesPerLine int) textSpan {
+	if byteIdx < 0 {
+		byteIdx = 0
+	}
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	if byteIdx >= bytesPerLine {
+		byteIdx = bytesPerLine - 1
+	}
+	asciiStart := 10 + bytesPerLine*3 + 3
+	return textSpan{start: asciiStart + byteIdx, end: asciiStart + byteIdx + 1}
+}
+
 func parseBinaryNeedle(query string) ([]byte, error) {
-	trimmed := strings.TrimSpace(query)
-	if trimmed == "" {
+	if query == "" {
 		return nil, nil
 	}
-	if strings.HasPrefix(trimmed, ":") {
-		hex := strings.TrimSpace(trimmed[1:])
+	if strings.HasPrefix(query, ":") {
+		hex := strings.TrimSpace(query[1:])
 		hex = strings.ReplaceAll(hex, " ", "")
 		if len(hex)%2 != 0 {
 			return nil, errors.New("hex pattern must have even length")
@@ -243,10 +287,31 @@ func parseBinaryNeedle(query string) ([]byte, error) {
 		}
 		return buf, nil
 	}
-	return []byte(trimmed), nil
+	return []byte(query), nil
 }
 
-func applySearchHighlights(text string, spans []textSpan, focus *textSpan) string {
+func smartCaseInsensitiveASCII(b []byte) bool {
+	for _, ch := range b {
+		if ch >= 'A' && ch <= 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+func foldASCIIBytes(b []byte) []byte {
+	out := make([]byte, len(b))
+	for i, ch := range b {
+		if ch >= 'A' && ch <= 'Z' {
+			out[i] = ch + 32
+		} else {
+			out[i] = ch
+		}
+	}
+	return out
+}
+
+func applySearchHighlights(text string, spans []textSpan, focus []textSpan) string {
 	if text == "" || len(spans) == 0 {
 		return text
 	}
@@ -331,9 +396,11 @@ func applySearchHighlights(text string, spans []textSpan, focus *textSpan) strin
 	return builder.String()
 }
 
-func highlightStyleForSpan(span textSpan, focus *textSpan) string {
-	if focus != nil && span.start == focus.start && span.end == focus.end {
-		return searchHighlightFocusOn
+func highlightStyleForSpan(span textSpan, focuses []textSpan) string {
+	for _, f := range focuses {
+		if spansOverlap(span, f) {
+			return searchHighlightFocusOn
+		}
 	}
 	return searchHighlightOn
 }
@@ -343,6 +410,49 @@ func highlightOffForStyle(style string) string {
 		return searchHighlightFocusOff
 	}
 	return searchHighlightOff
+}
+
+func spansOverlap(a, b textSpan) bool {
+	return a.start < b.end && b.start < a.end
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func byteIndexForSpanStart(startCol int, bytesPerLine int) int {
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	for b := 0; b < bytesPerLine; b++ {
+		if hexSpanForByte(b, bytesPerLine).start == startCol {
+			return b
+		}
+	}
+	return -1
+}
+
+func sortSpansByStart(spans []textSpan) {
+	sort.Slice(spans, func(i, j int) bool {
+		if spans[i].start == spans[j].start {
+			return spans[i].end < spans[j].end
+		}
+		return spans[i].start < spans[j].start
+	})
+}
+
+func visualizeSpaces(s string) string {
+	return strings.ReplaceAll(s, " ", "·")
 }
 
 func (p *PreviewPager) enterSearchMode() {
@@ -457,7 +567,7 @@ func (p *PreviewPager) executeSearch(query string) {
 	p.clearSearchResults()
 	p.searchQuery = query
 	p.searchFocused = false
-	if strings.TrimSpace(query) == "" {
+	if query == "" {
 		return
 	}
 
@@ -535,6 +645,11 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 	}
 	overlap := len(needle) - 1
 	window := make([]byte, bufSize+overlap)
+	caseInsensitive := smartCaseInsensitiveASCII(needle)
+	needleFolded := needle
+	if caseInsensitive {
+		needleFolded = foldASCIIBytes(needle)
+	}
 
 	file := p.binarySource.file
 	if file == nil {
@@ -549,7 +664,6 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 	hits := []searchHit{}
 	highlights := make(map[int][]textSpan)
 	limited := totalBytes > bytesToScan
-
 	var tail []byte
 	for offset := int64(0); offset < bytesToScan && len(hits) < searchMaxHits; {
 		readSize := bufSize
@@ -564,19 +678,42 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 			break
 		}
 		chunk := append(tail, window[:n]...)
+		searchChunk := chunk
+		if caseInsensitive {
+			searchChunk = foldASCIIBytes(chunk)
+		}
 
 		searchFrom := 0
 		for len(hits) < searchMaxHits {
-			idx := bytes.Index(chunk[searchFrom:], needle)
+			idx := bytes.Index(searchChunk[searchFrom:], needleFolded)
 			if idx == -1 {
 				break
 			}
 			abs := offset - int64(len(tail)) + int64(searchFrom+idx)
-			line := int(abs / int64(bytesPerLine))
-			col := int(abs % int64(bytesPerLine))
-			sp := hexSpanForByte(col, bytesPerLine)
-			highlights[line] = append(highlights[line], sp)
-			hits = append(hits, searchHit{line: line, span: sp})
+			startByte := int(abs)
+			endByte := startByte + len(needle) - 1
+			startLine := startByte / bytesPerLine
+			endLine := endByte / bytesPerLine
+
+			for line := startLine; line <= endLine; line++ {
+				lineStart := line * bytesPerLine
+				lineEnd := lineStart + bytesPerLine - 1
+				for b := maxInt(lineStart, startByte); b <= minInt(lineEnd, endByte); b++ {
+					col := b - lineStart
+					highlights[line] = append(highlights[line],
+						hexSpanForByte(col, bytesPerLine),
+						asciiSpanForByte(col, bytesPerLine),
+					)
+				}
+			}
+
+			hits = append(hits, searchHit{
+				line:      startLine,
+				span:      hexSpanForByte(startByte-startLine*bytesPerLine, bytesPerLine),
+				len:       len(needle),
+				startByte: startByte,
+			})
+
 			searchFrom += idx + 1
 		}
 

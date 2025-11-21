@@ -611,6 +611,54 @@ func TestBinaryJumpClampsAtEnd(t *testing.T) {
 	}
 }
 
+func TestBinaryHighlightsApplied(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := make([]byte, 32)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       10,
+		binarySource: source,
+	}
+
+	p.searchHighlights = map[int][]textSpan{
+		0: {
+			{start: 10, end: 12},
+			{start: 61, end: 62},
+		},
+	}
+	line := p.lineAt(0)
+	spans, focus := p.visibleHighlights(0, 0, p.width)
+	highlighted := applySearchHighlights(line, spans, focus)
+	if strings.Count(highlighted, searchHighlightOn) < 2 {
+		t.Fatalf("expected hex and ascii highlights, got %q", highlighted)
+	}
+}
+
 func TestBinarySearchFindsHexPattern(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -655,6 +703,140 @@ func TestBinarySearchFindsHexPattern(t *testing.T) {
 	}
 	if _, ok := p.searchHighlights[0]; !ok {
 		t.Fatalf("expected highlights on first line")
+	}
+}
+
+func TestBinarySearchAsciiSmartCase(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := []byte("TeSt")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        40,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch("test") // lower-case should match mixed-case due to smart case
+	if len(p.searchHits) == 0 {
+		t.Fatalf("expected case-insensitive ascii match in binary search")
+	}
+}
+
+func TestBinarySearchSpaceLiteral(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "space.bin")
+	data := []byte{0x00, 0x20, 0x00, 0x20}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        40,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch(" ")
+	got := len(p.searchHits)
+	t.Logf("space hits=%d highlights=%v", got, p.searchHighlights)
+	if got != 2 {
+		t.Fatalf("expected 2 space hits, got %d", got)
+	}
+}
+
+func TestBinarySearchHighlightsMultiBytePattern(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := []byte{0xAB, 0xCD, 0xEF}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch(":ABCD")
+	high := p.searchHighlights[0]
+	if len(high) < 4 {
+		t.Fatalf("expected per-byte hex+ascii spans, got %d", len(high))
+	}
+}
+
+func TestSearchStatusShowsSpaces(t *testing.T) {
+	t.Parallel()
+	p := &PreviewPager{
+		state:       &statepkg.AppState{PreviewData: &statepkg.PreviewData{LineCount: 1}},
+		searchMode:  true,
+		searchInput: []rune("foo bar"),
+	}
+	seg := p.searchStatusSegment()
+	if !strings.Contains(seg, "·") {
+		t.Fatalf("expected visible space marker in search status, got %q", seg)
+	}
+
+	p.searchMode = true
+	p.searchInput = []rune("    ")
+	seg = p.searchStatusSegment()
+	if !strings.Contains(seg, "·") {
+		t.Fatalf("expected visible space marker for leading/trailing spaces, got %q", seg)
 	}
 }
 
@@ -743,7 +925,7 @@ func TestExecuteSearchBuildsHighlights(t *testing.T) {
 	if len(spans) != 1 || spans[0].start != 7 || spans[0].end != 12 {
 		t.Fatalf("unexpected highlight spans for line 1: %+v", spans)
 	}
-	if focus != nil {
+	if len(focus) != 0 {
 		t.Fatalf("focus should not be on line 1")
 	}
 	highlighted := applySearchHighlights(pager.lineAt(1), spans, nil)
