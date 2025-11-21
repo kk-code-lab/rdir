@@ -44,8 +44,7 @@ func formatBinaryPreviewLines(content []byte, totalSize int64) BinaryPreview {
 		content = content[:binaryPreviewMaxBytes]
 	}
 
-	lines := make([]string, 0, len(content)/binaryPreviewLineWidth+4)
-	lines = append(lines, fmt.Sprintf("Binary preview (%d of %d bytes)", len(content), totalSize))
+	lines := make([]string, 0, len(content)/binaryPreviewLineWidth+3)
 
 	for offset := 0; offset < len(content); offset += binaryPreviewLineWidth {
 		chunk := content[offset:min(offset+binaryPreviewLineWidth, len(content))]
