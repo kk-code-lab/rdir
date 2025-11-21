@@ -1,4 +1,4 @@
-.PHONY: build test test-coverage test-race clean fmt lint help run bench-fuzzy bench-fuzzy-prof pprof-fuzzy-cpu pprof-fuzzy-mem
+.PHONY: build install test test-coverage test-race clean fmt lint help run bench-fuzzy bench-fuzzy-prof pprof-fuzzy-cpu pprof-fuzzy-mem
 
 BINARY_NAME=rdir
 BUILD_DIR=build
@@ -13,6 +13,10 @@ LDFLAGS=-ldflags "-X github.com/kk-code-lab/rdir/internal/app.BuildCommit=$(GIT_
 build:
 	@echo "Building $(BINARY_NAME)..."
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_ENTRY)
+
+install:
+	@echo "Installing $(BINARY_NAME) to $$GOBIN (or GOPATH/bin)..."
+	go install $(LDFLAGS) $(MAIN_ENTRY)
 
 test:
 	@echo "Running tests..."
@@ -71,6 +75,7 @@ help:
 	@echo ""
 	@echo "Available targets:"
 	@echo "  make build         - Build the binary to build/rdir"
+	@echo "  make install       - Install the binary to $$GOBIN (or GOPATH/bin)"
 	@echo "  make test          - Run all tests with verbose output"
 	@echo "  make test-coverage - Run tests with coverage report"
 	@echo "  make test-race     - Run tests with race detector"
