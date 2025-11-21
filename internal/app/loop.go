@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -60,8 +61,30 @@ func NewApplication() (*Application, error) {
 	renderer := renderui.NewRenderer(screen)
 	inputHandler := input.NewInputHandler(actionCh)
 
+	var debugFile *os.File
+	var debugLogger *log.Logger
+	commit := BuildCommit
+	if commit == "" {
+		commit = "unknown"
+	}
+	if debugLoggingEnabled {
+		path := filepath.Join(os.TempDir(), "rdir_debug.log")
+		if f, err := os.Create(path); err == nil {
+			debugFile = f
+			debugLogger = log.New(f, "", 0)
+			log.SetOutput(f)
+			log.SetFlags(0)
+		} else {
+			// Fallback to stderr if temp file unavailable.
+			debugLogger = log.New(os.Stderr, "", 0)
+		}
+	}
+
 	if err := statepkg.LoadDirectory(state); err != nil {
 		screen.Fini()
+		if debugFile != nil {
+			_ = debugFile.Close()
+		}
 		return nil, err
 	}
 	state.RefreshParentEntries()
@@ -73,6 +96,8 @@ func NewApplication() (*Application, error) {
 		renderer:       renderer,
 		input:          inputHandler,
 		actionCh:       actionCh,
+		debugLog:       debugLogger,
+		debugLogFile:   debugFile,
 		currentPath:    cwd,
 		clipboardCmd:   clipboardCmd,
 		clipboardAvail: clipboardAvail,
@@ -81,7 +106,10 @@ func NewApplication() (*Application, error) {
 
 	inputHandler.SetState(state)
 
-	app.logf("session start GOOS=%s", runtime.GOOS)
+	if debugLogger != nil {
+		ts := time.Now().Format("2006-01-02 15:04:05.000000 -0700 MST")
+		debugLogger.Printf("%s session start pid=%d goos=%s goarch=%s cwd=%s commit=%s", ts, os.Getpid(), runtime.GOOS, runtime.GOARCH, cwd, commit)
+	}
 	_ = reducer.GeneratePreview(state)
 	return app, nil
 }
@@ -251,8 +279,12 @@ func (app *Application) reinitScreen() error {
 	app.renderer.Render(app.state)
 	app.screen.Show()
 	app.startEventPoller()
-	app.screen.PostEventWait(tcell.NewEventResize(w, h))
-	app.screen.PostEventWait(tcell.NewEventInterrupt(nil))
+	if err := app.screen.PostEvent(tcell.NewEventResize(w, h)); err != nil {
+		app.logf("reinitScreen: PostEvent resize err=%v", err)
+	}
+	if err := app.screen.PostEvent(tcell.NewEventInterrupt(nil)); err != nil {
+		app.logf("reinitScreen: PostEvent interrupt err=%v", err)
+	}
 	app.logf("reinitScreen: done %dx%d", w, h)
 	return nil
 }

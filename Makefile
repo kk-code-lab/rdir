@@ -7,10 +7,12 @@ INTERNAL_PACKAGES=./internal/...
 PROFILE_DIR=$(BUILD_DIR)/profiles
 CPU_PROFILE=$(PROFILE_DIR)/fuzzy.cpu.pprof
 MEM_PROFILE=$(PROFILE_DIR)/fuzzy.mem.pprof
+GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+LDFLAGS=-ldflags "-X github.com/kk-code-lab/rdir/internal/app.BuildCommit=$(GIT_COMMIT)"
 
 build:
 	@echo "Building $(BINARY_NAME)..."
-	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_ENTRY)
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_ENTRY)
 
 test:
 	@echo "Running tests..."

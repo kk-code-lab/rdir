@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"time"
 
@@ -22,6 +21,8 @@ type Application struct {
 	renderer       *renderui.Renderer
 	input          *inputui.InputHandler
 	actionCh       chan statepkg.Action
+	debugLog       interface{ Printf(string, ...interface{}) }
+	debugLogFile   *os.File
 	eventChan      chan tcell.Event
 	eventStop      chan struct{}
 	eventStopped   chan struct{}
@@ -42,6 +43,9 @@ func (app *Application) Close() error {
 	app.stopEventPoller()
 	if app.screen != nil {
 		app.screen.Fini()
+	}
+	if app.debugLogFile != nil {
+		_ = app.debugLogFile.Close()
 	}
 	return nil
 }
@@ -112,10 +116,11 @@ func (app *Application) drainPendingEvents() {
 }
 
 func (app *Application) logf(format string, args ...interface{}) {
-	if !debugLoggingEnabled {
+	if !debugLoggingEnabled || app == nil || app.debugLog == nil {
 		return
 	}
-	log.Printf(format, args...)
+	ts := time.Now().Format("2006-01-02 15:04:05.000000 -0700 MST")
+	app.debugLog.Printf("%s "+format, append([]interface{}{ts}, args...)...)
 }
 
 func formatTcellEvent(ev tcell.Event) string {

@@ -37,8 +37,8 @@ func progressDebugf(format string, args ...interface{}) {
 	progressDebugMu.Lock()
 	defer progressDebugMu.Unlock()
 
-	timestamp := time.Now().Format(time.RFC3339Nano)
-	_, _ = fmt.Fprintf(os.Stderr, "%s "+format+"\n", append([]interface{}{timestamp}, args...)...)
+	ts := time.Now().Format("2006-01-02 15:04:05.000000 -0700 MST")
+	_, _ = fmt.Fprintf(os.Stderr, "%s "+format+"\n", append([]interface{}{ts}, args...)...)
 }
 
 type progressTracker struct {
