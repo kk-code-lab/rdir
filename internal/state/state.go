@@ -133,6 +133,7 @@ type AppState struct {
 
 	// Preview
 	PreviewData          *PreviewData
+	PreviewPath          string
 	PreviewFullScreen    bool
 	PreviewWrap          bool
 	PreviewScrollOffset  int

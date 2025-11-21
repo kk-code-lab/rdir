@@ -794,6 +794,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 			preview, info, err := buildPreviewData(pendingPath, state.HideHiddenFiles)
 			if err != nil {
 				state.PreviewData = nil
+				state.PreviewPath = ""
 				state.resetPreviewScroll()
 				return state, nil
 			}
@@ -846,6 +847,7 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		if a.Err != nil {
 			state.LastError = a.Err
 			state.PreviewData = nil
+			state.PreviewPath = ""
 			state.resetPreviewScroll()
 			return state, nil
 		}
@@ -1960,6 +1962,7 @@ func (r *StateReducer) applyPreviewToState(state *AppState, preview *PreviewData
 	}
 	if preview == nil {
 		state.PreviewData = nil
+		state.PreviewPath = ""
 		state.resetPreviewScroll()
 		return
 	}
@@ -1969,6 +1972,7 @@ func (r *StateReducer) applyPreviewToState(state *AppState, preview *PreviewData
 	}
 
 	state.PreviewData = preview
+	state.PreviewPath = path
 	if resetScroll {
 		if path != "" && state.restorePreviewScrollForPath(path) {
 			state.clampPreviewScroll()
@@ -2040,6 +2044,7 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 		preview, info, err := buildPreviewData(filePath, state.HideHiddenFiles)
 		if err != nil {
 			state.PreviewData = nil
+			state.PreviewPath = ""
 			state.resetPreviewScroll()
 			return nil
 		}
@@ -2081,4 +2086,40 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 // GeneratePreview exposes the preview-building helper to other packages (e.g., initial boot).
 func (r *StateReducer) GeneratePreview(state *AppState) error {
 	return r.generatePreview(state)
+}
+
+// EnsurePreviewCurrent forces the preview to match the currently selected file,
+// bypassing debounce/async gaps. Useful when the user opens the fullscreen
+// pager immediately after moving the cursor.
+func (r *StateReducer) EnsurePreviewCurrent(state *AppState) error {
+	if state == nil {
+		return nil
+	}
+	filePath := state.CurrentFilePath()
+	if filePath == "" {
+		return nil
+	}
+
+	if state.PreviewData != nil && state.PreviewPath == filePath && !state.PreviewLoading {
+		return nil
+	}
+
+	// Cancel any in-flight preview for another file.
+	if state.PreviewLoading && state.PreviewLoadingPath != "" && state.PreviewLoadingPath != filePath {
+		r.cancelPreviewLoad(state)
+	}
+	state.cancelPreviewDebounceTimer()
+	state.clearPreviewPendingLoad()
+
+	preview, info, err := buildPreviewData(filePath, state.HideHiddenFiles)
+	if err != nil {
+		state.PreviewData = nil
+		state.resetPreviewScroll()
+		state.LastError = err
+		return err
+	}
+
+	state.clearPreviewLoadingState()
+	r.applyPreviewToState(state, preview, info, true, filePath)
+	return nil
 }
