@@ -35,3 +35,23 @@
 
 - [ ] **Optional: auto-jump search anchor**  
   If we enable live jumping while typing, anchor to the view center on entering `/`, auto-center the first hit at/after that anchor as the query updates (debounced), and reset the anchor after manual jumps (`n/N/Enter`). Clearing (←) or `Esc` should restore the anchored view and clear results. Gate behind a preference (e.g., `PreviewSearchAutoJump`) to avoid surprising motion by default.
+
+## Binary Pager Improvements
+
+- [ ] **Block jumps + offset status**  
+  Add `{` / `}` (or Ctrl+PgUp/PgDn) to jump by 4 KB / 64 KB in `PreviewPager` for binaries; status should show current offset and file %. Pager-only; no preview panel change.
+
+- [ ] **Binary search**  
+  Remove the `/` blockade in binary mode (`pager.go:1162-1168`) after adding simple byte/ASCII search on `binarySource`. Support `n/N`, hit highlighting, respect `searchMaxHits/Lines`. Preview panel remains without search.
+
+- [ ] **Adaptive hexdump width (pager)**  
+  Let `binaryPagerSource` emit 8/16/24 bytes per row based on pager width; size offset/hex/ASCII columns accordingly. Inline preview stays fixed at 16 B to remain lightweight.
+
+- [ ] **Dual-column hex + text**  
+  Add a pager mode where each line shows hex plus parallel ASCII/UTF-8 decoding with non-printables masked; simple key toggle. Preview panel unchanged.
+
+- [ ] **Export visible block**  
+  Extend existing `copyVisibleToClipboard` so binary mode can copy the current view as hex+ASCII (e.g., the ~256 B on screen) and optionally save to `temp/`. Pager-only.
+
+- [ ] **Lightweight format detection**  
+  Detect signatures (PNG/ZIP/ELF/Mach-O/PDF) when loading binaries; show a terse header in preview (e.g., type + section sizes) and richer detail in pager. Minimal I/O: first few hundred bytes, no full parse.  
