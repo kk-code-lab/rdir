@@ -75,6 +75,57 @@ func TestTextPagerSource_UTF16_CRLF(t *testing.T) {
 	}
 }
 
+func TestTextPagerSource_UTF16_CRLF_BE(t *testing.T) {
+	enc := fsutil.EncodingUTF16BE
+	text := "uno\r\ndos\r\ntres"
+
+	encoded, err := unicode.UTF16(endian(enc), unicode.ExpectBOM).NewEncoder().Bytes([]byte(text))
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "crlf_be.txt")
+	if err := os.WriteFile(path, encoded, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	content, err := fsutil.ReadFileHead(path, statepkg.PreviewByteLimitForTest())
+	if err != nil {
+		t.Fatalf("read head: %v", err)
+	}
+
+	linesHead, meta, chars, rem := statepkg.BuildUTF16PreviewForTest(content, enc, false)
+	preview := &statepkg.PreviewData{
+		Name:          filepath.Base(path),
+		TextEncoding:  enc,
+		TextLines:     linesHead,
+		TextLineMeta:  meta,
+		TextCharCount: chars,
+		TextTruncated: len(rem) > 0,
+		TextBytesRead: int64(len(content)),
+		TextRemainder: rem,
+	}
+
+	src, err := newTextPagerSource(path, preview)
+	if err != nil {
+		t.Fatalf("newTextPagerSource: %v", err)
+	}
+	if err := src.EnsureAll(); err != nil {
+		t.Fatalf("EnsureAll: %v", err)
+	}
+
+	wantLines := []string{"uno", "dos", "tres"}
+	if src.LineCount() != len(wantLines) {
+		t.Fatalf("line count %d want %d", src.LineCount(), len(wantLines))
+	}
+	for i, want := range wantLines {
+		if got := src.Line(i); got != want {
+			t.Fatalf("line %d = %q want %q", i, got, want)
+		}
+	}
+}
+
 // Ensure limit flag is raised on real-sized file without mutating globals:
 // encode enough lines to exceed default searchMaxLines (20k) in UTF-16 BE.
 func TestTextPagerSource_UTF16_LimitDefault(t *testing.T) {
