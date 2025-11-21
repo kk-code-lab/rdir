@@ -1,6 +1,7 @@
 package render
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -301,7 +302,7 @@ func TestDrawStatusLineSanitizesPath(t *testing.T) {
 
 	r := NewRenderer(screen)
 	state := &statepkg.AppState{
-		CurrentPath: "/tmp",
+		CurrentPath: filepath.FromSlash("/tmp"),
 		Files: []statepkg.FileEntry{
 			{Name: "bad\x1b[31m\nfile"},
 		},
@@ -315,7 +316,7 @@ func TestDrawStatusLineSanitizesPath(t *testing.T) {
 	if strings.Contains(row, "\x1b") || strings.Contains(row, "\n") {
 		t.Fatalf("status line should not contain control characters: %q", row)
 	}
-	want := "/tmp/bad?[31m file"
+	want := filepath.Join(filepath.FromSlash("/tmp"), "bad?[31m file")
 	if !strings.Contains(row, want) {
 		t.Fatalf("expected sanitized path %q in status line, got %q", want, row)
 	}
