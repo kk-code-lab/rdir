@@ -1653,6 +1653,9 @@ func (p *PreviewPager) statusBadges(kind pagerContentKind) []string {
 		infoState = "on"
 	}
 	badges = append(badges, "info:"+infoState)
+	if p.binaryMode && p.searchFullScan {
+		badges = append(badges, "scan:*")
+	}
 	return badges
 }
 
@@ -1698,7 +1701,7 @@ func (p *PreviewPager) searchStatusSegment() string {
 		}
 		counts := p.searchCountsSegment()
 		if binary && p.searchFullScan {
-			counts += " full"
+			counts += "*"
 		}
 		return segment + " " + counts
 	}
@@ -1721,7 +1724,11 @@ func (p *PreviewPager) searchStatusSegment() string {
 		return segment + " !"
 	}
 
-	return segment + " " + p.searchCountsSegment()
+	counts := p.searchCountsSegment()
+	if binary && p.searchFullScan {
+		counts += "*"
+	}
+	return segment + " " + counts
 }
 
 func (p *PreviewPager) searchCountsSegment() string {
