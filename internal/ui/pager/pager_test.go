@@ -1173,101 +1173,68 @@ func TestBinarySearchClearingKeepsBinaryMode(t *testing.T) {
 	}
 }
 
-func TestBinarySearchPartialNibbleHighlightsAsciiForNibbleByte(t *testing.T) {
+func TestBinarySearchPartialNibbleAsciiHighlights(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "data.bin")
-	data := []byte{0x5F, 0x5A}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
+
+	tests := []struct {
+		name   string
+		data   []byte
+		query  string
+		hitCnt int
+	}{
+		{name: "partial tail after full byte", data: []byte{0x5F, 0x5A}, query: ":5f5", hitCnt: 1},
+		{name: "partial tail at end", data: []byte{0x5A, 0x45}, query: ":5a4", hitCnt: 1},
 	}
 
-	state := &statepkg.AppState{
-		CurrentPath: filepath.Dir(path),
-		PreviewData: &statepkg.PreviewData{
-			Name: filepath.Base(path),
-			Size: int64(len(data)),
-			BinaryInfo: statepkg.BinaryPreview{
-				TotalBytes: int64(len(data)),
-			},
-		},
-	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
-	if err != nil {
-		t.Fatalf("newBinaryPagerSource: %v", err)
-	}
-	t.Cleanup(source.Close)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "data.bin")
+			if err := os.WriteFile(path, tt.data, 0o644); err != nil {
+				t.Fatalf("write file: %v", err)
+			}
 
-	p := &PreviewPager{
-		state:        state,
-		binaryMode:   true,
-		width:        80,
-		height:       6,
-		binarySource: source,
-	}
+			state := &statepkg.AppState{
+				CurrentPath: filepath.Dir(path),
+				PreviewData: &statepkg.PreviewData{
+					Name: filepath.Base(path),
+					Size: int64(len(tt.data)),
+					BinaryInfo: statepkg.BinaryPreview{
+						TotalBytes: int64(len(tt.data)),
+					},
+				},
+			}
+			source, err := newBinaryPagerSource(path, int64(len(tt.data)))
+			if err != nil {
+				t.Fatalf("newBinaryPagerSource: %v", err)
+			}
+			t.Cleanup(source.Close)
 
-	p.executeSearch(":5f5")
-	if len(p.searchHits) != 1 {
-		t.Fatalf("expected single match for :5f5, got %d", len(p.searchHits))
-	}
-	highlights := p.searchHighlights[0]
-	var asciiCount int
-	for _, sp := range highlights {
-		if sp.start >= 10+binaryPreviewLineWidth*3+3 {
-			asciiCount++
-		}
-	}
-	if asciiCount != 2 { // first full byte + partial nibble byte
-		t.Fatalf("expected ascii highlight for nibble byte, got %d ascii spans", asciiCount)
-	}
-}
+			p := &PreviewPager{
+				state:        state,
+				binaryMode:   true,
+				width:        80,
+				height:       6,
+				binarySource: source,
+			}
 
-func TestBinarySearchPartialNibbleHighlightsAsciiTail(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "data.bin")
-	data := []byte{0x5A, 0x45}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	state := &statepkg.AppState{
-		CurrentPath: filepath.Dir(path),
-		PreviewData: &statepkg.PreviewData{
-			Name: filepath.Base(path),
-			Size: int64(len(data)),
-			BinaryInfo: statepkg.BinaryPreview{
-				TotalBytes: int64(len(data)),
-			},
-		},
-	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
-	if err != nil {
-		t.Fatalf("newBinaryPagerSource: %v", err)
-	}
-	t.Cleanup(source.Close)
-
-	p := &PreviewPager{
-		state:        state,
-		binaryMode:   true,
-		width:        80,
-		height:       6,
-		binarySource: source,
-	}
-
-	p.executeSearch(":5a4")
-	if len(p.searchHits) != 1 {
-		t.Fatalf("expected single hit for :5a4, got %d", len(p.searchHits))
-	}
-	highlights := p.searchHighlights[0]
-	var asciiCount int
-	for _, sp := range highlights {
-		if sp.start >= 10+binaryPreviewLineWidth*3+3 {
-			asciiCount++
-		}
-	}
-	if asciiCount != 2 {
-		t.Fatalf("expected ascii highlights for full byte and nibble byte, got %d", asciiCount)
+			p.executeSearch(tt.query)
+			if len(p.searchHits) != tt.hitCnt {
+				t.Fatalf("expected %d hits for %s, got %d", tt.hitCnt, tt.query, len(p.searchHits))
+			}
+			highlights := p.searchHighlights[0]
+			var asciiCount int
+			for _, sp := range highlights {
+				if sp.start >= 10+binaryPreviewLineWidth*3+3 {
+					asciiCount++
+				}
+			}
+			if asciiCount != 2 {
+				t.Fatalf("expected ascii highlights for full and nibble byte, got %d", asciiCount)
+			}
+		})
 	}
 }
 
