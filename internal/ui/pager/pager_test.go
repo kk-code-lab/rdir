@@ -607,6 +607,24 @@ func TestToggleSearchBinaryModeAddsOrRemovesColon(t *testing.T) {
 	}
 }
 
+func TestHandleSearchModeToggleBinaryKey(t *testing.T) {
+	t.Parallel()
+	p := &PreviewPager{
+		binaryMode: true,
+		searchMode: true,
+		state:      &statepkg.AppState{PreviewData: &statepkg.PreviewData{LineCount: 1}},
+	}
+	p.searchInput = []rune("abc")
+	p.handleSearchModeEvent(keyEvent{kind: keyToggleBinarySearchMode})
+	if !p.searchBinaryMode || string(p.searchInput) != ":abc" {
+		t.Fatalf("expected toggle to enable binary mode and prefix colon, got binary=%v input=%q", p.searchBinaryMode, string(p.searchInput))
+	}
+	p.handleSearchModeEvent(keyEvent{kind: keyToggleBinarySearchMode})
+	if p.searchBinaryMode || string(p.searchInput) != "abc" {
+		t.Fatalf("expected toggle to disable binary mode and drop colon, got binary=%v input=%q", p.searchBinaryMode, string(p.searchInput))
+	}
+}
+
 func TestBinaryJumpSmallForward(t *testing.T) {
 	t.Parallel()
 	total := int64(128 * 1024)
