@@ -503,6 +503,27 @@ func (p *PreviewPager) cancelSearch() {
 	p.clearSearchResults()
 }
 
+func (p *PreviewPager) toggleSearchBinaryMode() {
+	if p == nil || !p.searchMode {
+		return
+	}
+	if !p.binaryMode {
+		p.searchBinaryMode = false
+		return
+	}
+	p.searchBinaryMode = !p.searchBinaryMode
+	if p.searchBinaryMode {
+		if len(p.searchInput) == 0 {
+			p.searchInput = []rune{':'}
+		} else if p.searchInput[0] != ':' {
+			p.searchInput = append([]rune{':'}, p.searchInput...)
+		}
+	} else if len(p.searchInput) > 0 && p.searchInput[0] == ':' {
+		p.searchInput = p.searchInput[1:]
+	}
+	p.onSearchInputChanged()
+}
+
 func (p *PreviewPager) appendSearchRune(ch rune) {
 	if ch == 0 {
 		return
