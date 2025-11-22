@@ -809,7 +809,11 @@ func (p *PreviewPager) render() error {
 
 	searchRow := contentRowLimit + 1
 	if showSearchRow {
-		p.drawStyledRow(searchRow, searchSegment, true, statusBarStyle)
+		searchDisplay := " " + searchSegment + " "
+		if p.width > 0 && displayWidth(searchDisplay) > p.width {
+			searchDisplay = truncateToWidth(searchDisplay, p.width)
+		}
+		p.drawStyledRow(searchRow, searchDisplay, true, statusBarStyle)
 		searchRow++
 	}
 
