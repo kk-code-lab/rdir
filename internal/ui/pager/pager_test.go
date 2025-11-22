@@ -601,7 +601,7 @@ func TestBinarySearchStatusUsesColonPrefix(t *testing.T) {
 		searchInput:      []rune(":AB"),
 		state:            &statepkg.AppState{PreviewData: &statepkg.PreviewData{LineCount: 1}},
 	}
-	if seg := p.searchStatusSegment(); seg != ":AB_" {
+	if seg := p.searchStatusSegment(); seg != ":AB" {
 		t.Fatalf("expected colon-prefixed status for binary search, got %q", seg)
 	}
 }
@@ -620,7 +620,7 @@ func TestBinarySearchStatusShowsFullScanMarker(t *testing.T) {
 		searchCursor:      0,
 		state:             &statepkg.AppState{PreviewData: &statepkg.PreviewData{LineCount: 1}},
 	}
-	if seg := p.searchStatusSegment(); seg != ":aa_ 1/1*" {
+	if seg := p.searchStatusSegment(); seg != ":aa 1/1*" {
 		t.Fatalf("expected full-scan marker in status, got %q", seg)
 	}
 }
@@ -1485,12 +1485,12 @@ func TestSearchStatusPlaceholderWhenActive(t *testing.T) {
 	}
 
 	pager.enterTextSearchMode()
-	if seg := pager.searchStatusSegment(); seg != "/_" {
+	if seg := pager.searchStatusSegment(); seg != "/" {
 		t.Fatalf("expected placeholder search segment, got %q", seg)
 	}
 
 	pager.appendSearchRune('a')
-	if seg := pager.searchStatusSegment(); seg != "/a_" {
+	if seg := pager.searchStatusSegment(); seg != "/a" {
 		t.Fatalf("expected search segment to reflect input, got %q", seg)
 	}
 }
@@ -1786,13 +1786,13 @@ func TestSearchStatusShowsCountsDuringActiveMode(t *testing.T) {
 	pager.searchInput = []rune("hello")
 
 	seg := pager.searchStatusSegment()
-	if seg != "/hello_ 1/2" {
+	if seg != "/hello 1/2" {
 		t.Fatalf("expected active search to show counts, got %q", seg)
 	}
 
 	pager.searchInput = []rune("hel")
 	seg = pager.searchStatusSegment()
-	if seg != "/hel_" {
+	if seg != "/hel" {
 		t.Fatalf("expected counts to hide when input diverges, got %q", seg)
 	}
 }
