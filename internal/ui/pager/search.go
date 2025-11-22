@@ -455,12 +455,29 @@ func visualizeSpaces(s string) string {
 	return strings.ReplaceAll(s, " ", "·")
 }
 
-func (p *PreviewPager) enterSearchMode() {
+func (p *PreviewPager) enterTextSearchMode() {
+	binary := false
+	if p != nil && p.binaryMode {
+		binary = true
+	}
+	p.enterSearchModeWithPreset(binary, nil)
+}
+
+func (p *PreviewPager) enterBinarySearchMode() {
+	p.enterSearchModeWithPreset(true, []rune{':'})
+}
+
+func (p *PreviewPager) enterSearchModeWithPreset(binary bool, preset []rune) {
 	if p == nil {
 		return
 	}
+	// Only allow binary search mode when in binary preview; otherwise treat as text.
+	binary = binary && p.binaryMode
 	p.searchMode = true
-	if len(p.searchQuery) > 0 {
+	p.searchBinaryMode = binary
+	if len(preset) > 0 && (len(p.searchQuery) == 0 || p.searchQueryBinary != binary) {
+		p.searchInput = append([]rune(nil), preset...)
+	} else if len(p.searchQuery) > 0 && p.searchQueryBinary == binary {
 		p.searchInput = append([]rune(nil), []rune(p.searchQuery)...)
 	} else {
 		p.searchInput = nil
@@ -470,15 +487,18 @@ func (p *PreviewPager) enterSearchMode() {
 
 func (p *PreviewPager) exitSearchMode() {
 	p.searchMode = false
+	p.searchBinaryMode = false
 	p.searchInput = nil
 	p.stopSearchTimer()
 }
 
 func (p *PreviewPager) cancelSearch() {
 	p.searchMode = false
+	p.searchBinaryMode = false
 	p.searchInput = nil
 	p.stopSearchTimer()
 	p.searchQuery = ""
+	p.searchQueryBinary = false
 	p.clearSearchResults()
 }
 
@@ -567,6 +587,16 @@ func (p *PreviewPager) executeSearch(query string) {
 	p.clearSearchResults()
 	p.searchQuery = query
 	p.searchFocused = false
+	binarySearch := p.binaryMode
+	if p.searchMode {
+		binarySearch = p.searchBinaryMode
+	} else if p.searchQueryBinary {
+		binarySearch = true
+	}
+	if !p.binaryMode {
+		binarySearch = false
+	}
+	p.searchQueryBinary = binarySearch
 	if query == "" {
 		return
 	}
@@ -578,7 +608,7 @@ func (p *PreviewPager) executeSearch(query string) {
 		err        error
 	)
 
-	if p.binaryMode {
+	if binarySearch {
 		hits, highlights, limited, err = p.collectBinarySearchMatches(query)
 	} else {
 		hits, highlights, limited, err = p.collectSearchMatches(query)

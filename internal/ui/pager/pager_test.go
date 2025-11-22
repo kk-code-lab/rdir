@@ -535,6 +535,38 @@ func TestBinarySearchEntersMode(t *testing.T) {
 	if !p.searchMode {
 		t.Fatalf("expected searchMode to be enabled in binary mode")
 	}
+	if !p.searchBinaryMode {
+		t.Fatalf("expected binary search mode in binary preview")
+	}
+}
+
+func TestBinarySearchColonShortcut(t *testing.T) {
+	t.Parallel()
+	state := &statepkg.AppState{
+		PreviewData: &statepkg.PreviewData{
+			Name: "blob.bin",
+			Size: 64,
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: 64,
+			},
+		},
+	}
+	p := &PreviewPager{
+		state:      state,
+		binaryMode: true,
+		height:     20,
+		width:      80,
+	}
+
+	if done := p.handleKey(keyEvent{kind: keyStartBinarySearch, ch: ':'}); done {
+		t.Fatalf("entering binary search should not exit pager")
+	}
+	if !p.searchMode || !p.searchBinaryMode {
+		t.Fatalf("expected binary search mode to be enabled")
+	}
+	if got := string(p.searchInput); got != ":" {
+		t.Fatalf("expected preset ':' in search input, got %q", got)
+	}
 }
 
 func TestBinaryJumpSmallForward(t *testing.T) {
@@ -1067,7 +1099,7 @@ func TestSearchStatusPlaceholderWhenActive(t *testing.T) {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
 
-	pager.enterSearchMode()
+	pager.enterTextSearchMode()
 	if seg := pager.searchStatusSegment(); seg != "/_" {
 		t.Fatalf("expected placeholder search segment, got %q", seg)
 	}
@@ -1094,7 +1126,7 @@ func TestSearchNavigationFinalizesPendingInput(t *testing.T) {
 	}
 	pager.height = 8
 	pager.width = 10
-	pager.enterSearchMode()
+	pager.enterTextSearchMode()
 	pager.searchInput = []rune("foo")
 	pager.searchQuery = ""
 
@@ -1169,7 +1201,7 @@ func TestSearchEscapeClearsQueryAndHighlights(t *testing.T) {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
 
-	pager.enterSearchMode()
+	pager.enterTextSearchMode()
 	pager.searchInput = []rune("foo")
 	pager.finalizeSearchInput()
 	if len(pager.searchHits) == 0 {
@@ -1365,7 +1397,7 @@ func TestSearchStatusShowsCountsDuringActiveMode(t *testing.T) {
 	}
 
 	pager.executeSearch("hello")
-	pager.enterSearchMode()
+	pager.enterTextSearchMode()
 	pager.searchInput = []rune("hello")
 
 	seg := pager.searchStatusSegment()
@@ -1522,6 +1554,9 @@ func TestHelpOverlayReflectsContext(t *testing.T) {
 	}
 	if !containsLineWith(lines, "Enter search") {
 		t.Fatalf("binary help should list search shortcuts, got %v", lines)
+	}
+	if !containsLineWith(lines, "Enter binary search") {
+		t.Fatalf("binary help should list binary search shortcut, got %v", lines)
 	}
 
 	pager.width = 40

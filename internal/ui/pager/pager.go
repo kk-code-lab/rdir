@@ -43,13 +43,13 @@ const (
 	searchHighlightFocusOn  = "\x1b[38;5;16;48;5;178m"
 	searchHighlightFocusOff = "\x1b[39;49m"
 	searchDebounceDelay     = 140 * time.Millisecond
-	)
+)
 
-	var (
-		searchMaxHits         = 10000
-		searchMaxLines        = 20000
-		searchMaxBinaryBytes  int64 = 16 * 1024 * 1024
-	)
+var (
+	searchMaxHits              = 10000
+	searchMaxLines             = 20000
+	searchMaxBinaryBytes int64 = 16 * 1024 * 1024
+)
 
 type pagerContentKind int
 
@@ -114,58 +114,60 @@ type searchHit struct {
 var termGetSize = term.GetSize
 
 type PreviewPager struct {
-	state            *statepkg.AppState
-	editorCmd        []string
-	reducer          *statepkg.StateReducer
-	input            *os.File
-	outputFile       *os.File
-	output           io.Writer
-	reader           *bufio.Reader
-	writer           *bufio.Writer
-	restoreTerm      *term.State
-	stopKeyReader    func()
-	width            int
-	height           int
-	wrapEnabled      bool
-	lines            []string
-	lineWidths       []int
-	rawLines         []string
-	rawLineWidths    []int
-	rawSanitized     []string
-	rawSanitizedWid  []int
-	formattedLines   []string
-	formattedWidths  []int
-	formattedRules   []bool
-	formattedStyles  []string
-	rowSpans         []int
-	rowPrefix        []int
-	rowMetricsWidth  int
-	charCount        int
-	binaryMode       bool
-	binarySource     *binaryPagerSource
-	rawTextSource    *textPagerSource
-	preloadLines     int
-	showInfo         bool
-	showHelp         bool
-	showFormatted    bool
-	statusMessage    string
-	statusStyle      string
-	statusExpiry     time.Time
-	statusTimer      *time.Timer
-	lastErr          error
-	restartKeys      bool
-	clipboardCmd     []string
-	clipboardFunc    func(string) error
-	searchMode       bool
-	searchInput      []rune
-	searchQuery      string
-	searchHits       []searchHit
-	searchCursor     int
-	searchHighlights map[int][]textSpan
-	searchLimited    bool
-	searchErr        error
-	searchTimer      *time.Timer
-	searchFocused    bool
+	state             *statepkg.AppState
+	editorCmd         []string
+	reducer           *statepkg.StateReducer
+	input             *os.File
+	outputFile        *os.File
+	output            io.Writer
+	reader            *bufio.Reader
+	writer            *bufio.Writer
+	restoreTerm       *term.State
+	stopKeyReader     func()
+	width             int
+	height            int
+	wrapEnabled       bool
+	lines             []string
+	lineWidths        []int
+	rawLines          []string
+	rawLineWidths     []int
+	rawSanitized      []string
+	rawSanitizedWid   []int
+	formattedLines    []string
+	formattedWidths   []int
+	formattedRules    []bool
+	formattedStyles   []string
+	rowSpans          []int
+	rowPrefix         []int
+	rowMetricsWidth   int
+	charCount         int
+	binaryMode        bool
+	binarySource      *binaryPagerSource
+	rawTextSource     *textPagerSource
+	preloadLines      int
+	showInfo          bool
+	showHelp          bool
+	showFormatted     bool
+	statusMessage     string
+	statusStyle       string
+	statusExpiry      time.Time
+	statusTimer       *time.Timer
+	lastErr           error
+	restartKeys       bool
+	clipboardCmd      []string
+	clipboardFunc     func(string) error
+	searchMode        bool
+	searchInput       []rune
+	searchQuery       string
+	searchHits        []searchHit
+	searchCursor      int
+	searchHighlights  map[int][]textSpan
+	searchLimited     bool
+	searchErr         error
+	searchTimer       *time.Timer
+	searchFocused     bool
+	searchBinaryMode  bool
+	searchQueryBinary bool
 }
 
 var pagerCommand = exec.Command
@@ -1261,7 +1263,9 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		}
 		p.recordCopyResult(err, msg, style)
 	case keyStartSearch:
-		p.enterSearchMode()
+		p.enterTextSearchMode()
+	case keyStartBinarySearch:
+		p.enterBinarySearchMode()
 	case keySearchNext:
 		if p.searchQuery != "" || p.searchMode {
 			p.moveSearchCursor(1)
@@ -1820,6 +1824,9 @@ func (p *PreviewPager) helpSections() []helpSection {
 		{keys: "/", desc: "Enter search"},
 		{keys: "n / N", desc: "Jump to next/prev hit"},
 	}
+	if p.binaryMode {
+		search = append(search, helpEntry{keys: ":", desc: "Enter binary search"})
+	}
 
 	sections := []helpSection{
 		{title: "Navigation", entries: nav},
@@ -1838,6 +1845,9 @@ func (p *PreviewPager) helpSections() []helpSection {
 func (p *PreviewPager) helpSegments() []string {
 	segments := []string{"? help"}
 	segments = append(segments, "/ search")
+	if p.binaryMode {
+		segments = append(segments, ": binary search")
+	}
 	return segments
 }
 
@@ -2859,6 +2869,7 @@ const (
 	keyCopyVisible
 	keyCopyAll
 	keyStartSearch
+	keyStartBinarySearch
 	keySearchNext
 	keySearchPrev
 	keyEnter
@@ -2914,6 +2925,8 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keyCopyAll, ch: rune(b)}, nil
 	case '/':
 		return keyEvent{kind: keyStartSearch, ch: rune(b)}, nil
+	case ':':
+		return keyEvent{kind: keyStartBinarySearch, ch: rune(b)}, nil
 	case 'n':
 		return keyEvent{kind: keySearchNext, ch: rune(b)}, nil
 	case 'N':
