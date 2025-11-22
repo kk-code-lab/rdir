@@ -535,8 +535,8 @@ func TestBinarySearchEntersMode(t *testing.T) {
 	if !p.searchMode {
 		t.Fatalf("expected searchMode to be enabled in binary mode")
 	}
-	if !p.searchBinaryMode {
-		t.Fatalf("expected binary search mode in binary preview")
+	if p.searchBinaryMode {
+		t.Fatalf("expected text search mode for '/' even in binary preview")
 	}
 }
 
@@ -566,6 +566,20 @@ func TestBinarySearchColonShortcut(t *testing.T) {
 	}
 	if got := string(p.searchInput); got != ":" {
 		t.Fatalf("expected preset ':' in search input, got %q", got)
+	}
+}
+
+func TestBinarySearchStatusUsesColonPrefix(t *testing.T) {
+	t.Parallel()
+	p := &PreviewPager{
+		binaryMode:       true,
+		searchMode:       true,
+		searchBinaryMode: true,
+		searchInput:      []rune(":AB"),
+		state:            &statepkg.AppState{PreviewData: &statepkg.PreviewData{LineCount: 1}},
+	}
+	if seg := p.searchStatusSegment(); seg != ":AB_" {
+		t.Fatalf("expected colon-prefixed status for binary search, got %q", seg)
 	}
 }
 

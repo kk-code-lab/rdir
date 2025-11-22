@@ -1646,16 +1646,34 @@ func (p *PreviewPager) searchStatusSegment() string {
 		return ""
 	}
 	displayRaw := p.searchQuery
+	binary := false
 	if p.searchMode {
-		displayRaw = string(p.searchInput)
+		binary = p.searchBinaryMode
+	} else if p.binaryMode && p.searchQueryBinary {
+		binary = true
+	}
+	prefix := "/"
+	if binary {
+		prefix = ":"
+	}
+	displayText := displayRaw
+	if binary && strings.HasPrefix(displayText, ":") {
+		displayText = strings.TrimPrefix(displayText, ":")
 	}
 	if p.searchMode {
-		if displayRaw == "" {
-			return "/_"
+		displayRaw = string(p.searchInput)
+		displayText = displayRaw
+		if binary && strings.HasPrefix(displayText, ":") {
+			displayText = strings.TrimPrefix(displayText, ":")
 		}
-		visibleQuery := visualizeSpaces(displayRaw)
+	}
+	if p.searchMode {
+		if displayText == "" {
+			return prefix + "_"
+		}
+		visibleQuery := visualizeSpaces(displayText)
 		safeQuery := textutil.SanitizeTerminalText(visibleQuery)
-		segment := "/" + safeQuery + "_"
+		segment := prefix + safeQuery + "_"
 
 		activeQuery := p.searchQuery
 		matchInput := displayRaw
@@ -1666,13 +1684,13 @@ func (p *PreviewPager) searchStatusSegment() string {
 		return segment + " " + p.searchCountsSegment()
 	}
 
-	if displayRaw == "" {
+	if displayText == "" {
 		return ""
 	}
 
-	visibleQuery := visualizeSpaces(displayRaw)
+	visibleQuery := visualizeSpaces(displayText)
 	safeQuery := textutil.SanitizeTerminalText(visibleQuery)
-	segment := "/" + safeQuery
+	segment := prefix + safeQuery
 
 	activeQuery := p.searchQuery
 	useResults := activeQuery != "" && strings.EqualFold(activeQuery, displayRaw)
