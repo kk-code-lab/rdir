@@ -1869,13 +1869,7 @@ func (p *PreviewPager) helpSections() []helpSection {
 }
 
 func (p *PreviewPager) helpSegments() []string {
-	segments := []string{"? help"}
-	segments = append(segments, "/ search")
-	if p.binaryMode {
-		segments = append(segments, ": binary search")
-		segments = append(segments, "Ctrl+B toggle text/hex")
-	}
-	return segments
+	return []string{"? help"}
 }
 
 func (p *PreviewPager) clipboardAvailable() bool {
