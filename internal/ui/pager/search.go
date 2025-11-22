@@ -3,7 +3,6 @@ package pager
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"sort"
@@ -211,14 +210,29 @@ func (p *PreviewPager) visibleHighlights(lineIdx int, drop int, widthLimit int) 
 				start = hit.line*bytesPerLine + byteIndexForSpanStart(hit.span.start, bytesPerLine)
 			}
 			end := start + hit.len - 1
+			nibble := hit.nibblePos
 			startLine := start / bytesPerLine
 			endLine := end / bytesPerLine
+			if nibble >= 0 {
+				if nl := nibble / bytesPerLine; nl > endLine {
+					endLine = nl
+				}
+			}
 			if lineIdx >= startLine && lineIdx <= endLine {
 				lineStart := lineIdx * bytesPerLine
 				lineEnd := lineStart + bytesPerLine - 1
 				for b := maxInt(lineStart, start); b <= minInt(lineEnd, end); b++ {
 					col := b - lineStart
 					if sp, ok := adjustSpan(hexSpanForByte(col, bytesPerLine), drop, widthLimit); ok {
+						focusSpans = append(focusSpans, sp)
+					}
+					if sp, ok := adjustSpan(asciiSpanForByte(col, bytesPerLine), drop, widthLimit); ok {
+						focusSpans = append(focusSpans, sp)
+					}
+				}
+				if nibble >= 0 && nibble >= lineStart && nibble <= lineEnd {
+					col := nibble - lineStart
+					if sp, ok := adjustSpan(hexNibbleSpanForByte(col, bytesPerLine, true), drop, widthLimit); ok {
 						focusSpans = append(focusSpans, sp)
 					}
 					if sp, ok := adjustSpan(asciiSpanForByte(col, bytesPerLine), drop, widthLimit); ok {
@@ -249,6 +263,19 @@ func hexSpanForByte(byteIdx int, bytesPerLine int) textSpan {
 	return textSpan{start: col, end: col + 2}
 }
 
+func hexNibbleSpanForByte(byteIdx int, bytesPerLine int, high bool) textSpan {
+	span := hexSpanForByte(byteIdx, bytesPerLine)
+	if high {
+		span.end = span.start + 1
+	} else {
+		span.start++
+	}
+	if span.end <= span.start {
+		span.end = span.start + 1
+	}
+	return span
+}
+
 func asciiSpanForByte(byteIdx int, bytesPerLine int) textSpan {
 	if byteIdx < 0 {
 		byteIdx = 0
@@ -263,31 +290,96 @@ func asciiSpanForByte(byteIdx int, bytesPerLine int) textSpan {
 	return textSpan{start: asciiStart + byteIdx, end: asciiStart + byteIdx + 1}
 }
 
-func parseBinaryNeedle(query string) ([]byte, error) {
+func parseBinaryNeedle(query string) ([]byte, bool, byte, error) {
 	if query == "" {
-		return nil, nil
+		return nil, false, 0, nil
 	}
 	if strings.HasPrefix(query, ":") {
 		hex := strings.TrimSpace(query[1:])
 		hex = strings.ReplaceAll(hex, " ", "")
-		if len(hex)%2 != 0 {
-			return nil, errors.New("hex pattern must have even length")
-		}
 		if len(hex) == 0 {
-			return nil, nil
+			return nil, false, 0, nil
 		}
-		buf := make([]byte, len(hex)/2)
+		buf := make([]byte, 0, len(hex)/2)
+		var partial bool
+		var nibble byte
 		for i := 0; i < len(hex); i += 2 {
-			var b byte
-			_, err := fmt.Sscanf(hex[i:i+2], "%02X", &b)
-			if err != nil {
-				return nil, errors.New("invalid hex pattern")
+			hi, ok := hexNibble(hex[i])
+			if !ok {
+				return nil, false, 0, errors.New("invalid hex pattern")
 			}
-			buf[i/2] = b
+			if i+1 >= len(hex) {
+				partial = true
+				nibble = hi
+				break
+			}
+			lo, ok := hexNibble(hex[i+1])
+			if !ok {
+				return nil, false, 0, errors.New("invalid hex pattern")
+			}
+			buf = append(buf, hi<<4|lo)
 		}
-		return buf, nil
+		return buf, partial, nibble, nil
 	}
-	return []byte(query), nil
+	return []byte(query), false, 0, nil
+}
+
+func hexNibble(ch byte) (byte, bool) {
+	switch {
+	case ch >= '0' && ch <= '9':
+		return ch - '0', true
+	case ch >= 'a' && ch <= 'f':
+		return ch - 'a' + 10, true
+	case ch >= 'A' && ch <= 'F':
+		return ch - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+func findBinaryPattern(buf []byte, needle []byte, partialNibble bool, nibble byte, start int) int {
+	patternLen := len(needle)
+	if partialNibble {
+		patternLen++
+	}
+	if patternLen == 0 || start >= len(buf) {
+		return -1
+	}
+	if start < 0 {
+		start = 0
+	}
+	if !partialNibble {
+		idx := bytes.Index(buf[start:], needle)
+		if idx == -1 {
+			return -1
+		}
+		return start + idx
+	}
+
+	if patternLen == 1 {
+		for i := start; i < len(buf); i++ {
+			if buf[i]>>4 == nibble {
+				return i
+			}
+		}
+		return -1
+	}
+
+	searchFrom := start
+	limit := len(buf) - patternLen
+	for searchFrom <= limit {
+		idx := bytes.Index(buf[searchFrom:], needle)
+		if idx == -1 {
+			return -1
+		}
+		candidate := searchFrom + idx
+		nextIdx := candidate + len(needle)
+		if nextIdx < len(buf) && buf[nextIdx]>>4 == nibble {
+			return candidate
+		}
+		searchFrom = candidate + 1
+	}
+	return -1
 }
 
 func smartCaseInsensitiveASCII(b []byte) bool {
@@ -537,6 +629,9 @@ func (p *PreviewPager) appendSearchRune(ch rune) {
 	if ch == 0 {
 		return
 	}
+	if p.searchMode && p.searchBinaryMode && (len(p.searchInput) == 0 || (len(p.searchInput) > 0 && p.searchInput[0] != ':')) {
+		p.searchInput = append([]rune{':'}, p.searchInput...)
+	}
 	p.searchInput = append(p.searchInput, ch)
 	p.onSearchInputChanged()
 }
@@ -667,11 +762,11 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 		return nil, nil, false, errors.New("binary source unavailable")
 	}
 
-	needle, err := parseBinaryNeedle(query)
+	needle, partialNibble, nibble, err := parseBinaryNeedle(query)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if len(needle) == 0 {
+	if len(needle) == 0 && !partialNibble {
 		return nil, nil, false, nil
 	}
 
@@ -698,7 +793,14 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 	if bufSize < bytesPerLine {
 		bufSize = bytesPerLine * 64
 	}
-	overlap := len(needle) - 1
+	patternLen := len(needle)
+	if partialNibble {
+		patternLen++
+	}
+	overlap := patternLen - 1
+	if overlap < 0 {
+		overlap = 0
+	}
 	window := make([]byte, bufSize+overlap)
 	caseInsensitive := !hexQuery && smartCaseInsensitiveASCII(needle)
 	needleFolded := needle
@@ -740,15 +842,25 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 
 		searchFrom := 0
 		for len(hits) < searchMaxHits {
-			idx := bytes.Index(searchChunk[searchFrom:], needleFolded)
+			idx := findBinaryPattern(searchChunk, needleFolded, partialNibble, nibble, searchFrom)
 			if idx == -1 {
 				break
 			}
-			abs := offset - int64(len(tail)) + int64(searchFrom+idx)
+			abs := offset - int64(len(tail)) + int64(idx)
 			startByte := int(abs)
-			endByte := startByte + len(needle) - 1
+			matchLen := len(needle)
+			endByte := startByte + matchLen - 1
+			nibbleByte := -1
+			if partialNibble {
+				nibbleByte = startByte + matchLen
+			}
 			startLine := startByte / bytesPerLine
 			endLine := endByte / bytesPerLine
+			if nibbleByte >= 0 {
+				if nl := nibbleByte / bytesPerLine; nl > endLine {
+					endLine = nl
+				}
+			}
 
 			for line := startLine; line <= endLine; line++ {
 				lineStart := line * bytesPerLine
@@ -760,16 +872,29 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 						asciiSpanForByte(col, bytesPerLine),
 					)
 				}
+				if nibbleByte >= 0 && nibbleByte >= lineStart && nibbleByte <= lineEnd {
+					col := nibbleByte - lineStart
+					highlights[line] = append(highlights[line],
+						hexNibbleSpanForByte(col, bytesPerLine, true),
+						asciiSpanForByte(col, bytesPerLine),
+					)
+				}
 			}
 
 			hits = append(hits, searchHit{
 				line:      startLine,
 				span:      hexSpanForByte(startByte-startLine*bytesPerLine, bytesPerLine),
-				len:       len(needle),
+				len:       matchLen,
 				startByte: startByte,
+				nibbleEnd: partialNibble,
+				nibblePos: nibbleByte,
 			})
 
-			searchFrom += idx + 1
+			step := 1
+			if partialNibble {
+				step = len(needle) + 1 // skip over nibble tail to avoid overlapping partial matches
+			}
+			searchFrom = idx + step
 		}
 
 		if len(hits) >= searchMaxHits {

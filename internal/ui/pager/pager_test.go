@@ -1054,6 +1054,262 @@ func TestBinarySearchHexDoesNotFoldASCII(t *testing.T) {
 	}
 }
 
+func TestBinarySearchAcceptsPartialHexNibble(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := []byte{0xAA, 0xB4, 0xAA}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch(":A")
+	if len(p.searchHits) != 2 {
+		t.Fatalf("expected partial nibble to match two bytes, got %d", len(p.searchHits))
+	}
+	if p.searchErr != nil {
+		t.Fatalf("unexpected error for partial nibble search: %v", p.searchErr)
+	}
+
+	p.executeSearch(":AAB")
+	if len(p.searchHits) != 1 {
+		t.Fatalf("expected combined byte+nibble match, got %d", len(p.searchHits))
+	}
+	hit := p.searchHits[0]
+	if hit.startByte != 0 || hit.len != 1 {
+		t.Fatalf("unexpected match start/len: start=%d len=%d", hit.startByte, hit.len)
+	}
+	if !hit.nibbleEnd || hit.nibblePos != 1 {
+		t.Fatalf("expected trailing nibble metadata, nibbleEnd=%v nibblePos=%d", hit.nibbleEnd, hit.nibblePos)
+	}
+	if got := len(p.searchHighlights[0]); got != 4 {
+		t.Fatalf("expected highlight spans for first byte + trailing nibble, got %d", got)
+	}
+	if hexSpanLen := p.searchHighlights[0][2].end - p.searchHighlights[0][2].start; hexSpanLen != 1 {
+		t.Fatalf("expected trailing nibble to highlight one hex column, got width %d", hexSpanLen)
+	}
+}
+
+func TestBinarySearchClearingKeepsBinaryMode(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := []byte{0x5F, 0x00, 0x5F}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.enterBinarySearchMode()
+	p.appendSearchRune('5')
+	p.appendSearchRune('f')
+	p.appendSearchRune('5')
+	p.runPendingSearch()
+
+	p.handleSearchModeEvent(keyEvent{kind: keyLeft}) // clear input
+	if len(p.searchInput) != 0 {
+		t.Fatalf("expected cleared input after left key, got %q", string(p.searchInput))
+	}
+
+	p.appendSearchRune('5')
+	p.appendSearchRune('f')
+	p.runPendingSearch()
+
+	if got := string(p.searchInput); got != ":5f" {
+		t.Fatalf("expected colon prefix to persist after retyping, got %q", got)
+	}
+	if !p.searchQueryBinary || !p.searchBinaryMode {
+		t.Fatalf("expected binary search state to persist after clearing")
+	}
+	if len(p.searchHits) != 2 {
+		t.Fatalf("expected binary matches for two 0x5F bytes, got %d", len(p.searchHits))
+	}
+}
+
+func TestBinarySearchPartialNibbleHighlightsAsciiForNibbleByte(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := []byte{0x5F, 0x5A}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch(":5f5")
+	if len(p.searchHits) != 1 {
+		t.Fatalf("expected single match for :5f5, got %d", len(p.searchHits))
+	}
+	highlights := p.searchHighlights[0]
+	var asciiCount int
+	for _, sp := range highlights {
+		if sp.start >= 10+binaryPreviewLineWidth*3+3 {
+			asciiCount++
+		}
+	}
+	if asciiCount != 2 { // first full byte + partial nibble byte
+		t.Fatalf("expected ascii highlight for nibble byte, got %d ascii spans", asciiCount)
+	}
+}
+
+func TestBinarySearchPartialNibbleHighlightsAsciiTail(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := []byte{0x5A, 0x45}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch(":5a4")
+	if len(p.searchHits) != 1 {
+		t.Fatalf("expected single hit for :5a4, got %d", len(p.searchHits))
+	}
+	highlights := p.searchHighlights[0]
+	var asciiCount int
+	for _, sp := range highlights {
+		if sp.start >= 10+binaryPreviewLineWidth*3+3 {
+			asciiCount++
+		}
+	}
+	if asciiCount != 2 {
+		t.Fatalf("expected ascii highlights for full byte and nibble byte, got %d", asciiCount)
+	}
+}
+
+func TestBinarySearchPartialNibbleSkipsOverlappingMatches(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := []byte{0x5F, 0x5F, 0x50}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch(":5f5")
+	if len(p.searchHits) != 1 {
+		t.Fatalf("expected non-overlapping partial nibble match, got %d", len(p.searchHits))
+	}
+}
+
 func TestBinarySearchHonorsByteLimit(t *testing.T) {
 	t.Parallel()
 	oldLimit := searchMaxBinaryBytes
