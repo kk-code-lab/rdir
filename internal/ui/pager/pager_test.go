@@ -1056,8 +1056,8 @@ func TestHelpSegmentsCompactFooter(t *testing.T) {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
 	segments := pager.helpSegments()
-	if len(segments) < 2 || !containsSegment(segments, "? help") || !containsSegment(segments, "/ search") {
-		t.Fatalf("footer help should advertise help and search, got %v", segments)
+	if len(segments) != 1 || !containsSegment(segments, "? help") {
+		t.Fatalf("footer help should be compact, got %v", segments)
 	}
 
 	stateNoClipboard := &statepkg.AppState{
@@ -1068,8 +1068,8 @@ func TestHelpSegmentsCompactFooter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
-	if !containsSegment(pagerNoClipboard.helpSegments(), "/ search") {
-		t.Fatalf("footer help should still include help hint without clipboard")
+	if len(pagerNoClipboard.helpSegments()) != 1 || !containsSegment(pagerNoClipboard.helpSegments(), "? help") {
+		t.Fatalf("footer help should remain compact without clipboard")
 	}
 }
 
