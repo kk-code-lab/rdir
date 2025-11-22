@@ -456,15 +456,16 @@ func visualizeSpaces(s string) string {
 }
 
 func (p *PreviewPager) enterTextSearchMode() {
-	binary := false
-	if p != nil && p.binaryMode {
-		binary = true
-	}
-	p.enterSearchModeWithPreset(binary, nil)
+	p.enterSearchModeWithPreset(false, nil)
 }
 
 func (p *PreviewPager) enterBinarySearchMode() {
-	p.enterSearchModeWithPreset(true, []rune{':'})
+	if p != nil && p.binaryMode {
+		p.enterSearchModeWithPreset(true, []rune{':'})
+		return
+	}
+	// In non-binary previews treat ':' as a normal text search prefix.
+	p.enterSearchModeWithPreset(false, []rune{':'})
 }
 
 func (p *PreviewPager) enterSearchModeWithPreset(binary bool, preset []rune) {
@@ -587,16 +588,13 @@ func (p *PreviewPager) executeSearch(query string) {
 	p.clearSearchResults()
 	p.searchQuery = query
 	p.searchFocused = false
-	binarySearch := p.binaryMode
-	if p.searchMode {
-		binarySearch = p.searchBinaryMode
-	} else if p.searchQueryBinary {
-		binarySearch = true
+	searchBinaryUI := p.searchBinaryMode
+	if !p.searchMode && p.searchQueryBinary {
+		searchBinaryUI = true
 	}
-	if !p.binaryMode {
-		binarySearch = false
-	}
-	p.searchQueryBinary = binarySearch
+	p.searchQueryBinary = searchBinaryUI
+
+	binaryEngine := p.binaryMode
 	if query == "" {
 		return
 	}
@@ -608,7 +606,7 @@ func (p *PreviewPager) executeSearch(query string) {
 		err        error
 	)
 
-	if binarySearch {
+	if binaryEngine {
 		hits, highlights, limited, err = p.collectBinarySearchMatches(query)
 	} else {
 		hits, highlights, limited, err = p.collectSearchMatches(query)
