@@ -630,6 +630,33 @@ func TestToggleSearchBinaryModeAddsOrRemovesColon(t *testing.T) {
 	}
 }
 
+func TestToggleSearchLimitEnablesFullScan(t *testing.T) {
+	t.Parallel()
+	state := &statepkg.AppState{
+		PreviewData: &statepkg.PreviewData{
+			Name: "blob.bin",
+			Size: 256,
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: 256,
+			},
+		},
+	}
+	p := &PreviewPager{
+		state:          state,
+		binaryMode:     true,
+		searchMode:     true,
+		searchFullScan: false,
+	}
+	p.toggleSearchLimit()
+	if !p.searchFullScan {
+		t.Fatalf("expected full scan to be enabled after toggle")
+	}
+	p.toggleSearchLimit()
+	if p.searchFullScan {
+		t.Fatalf("expected full scan to be disabled after second toggle")
+	}
+}
+
 func TestHandleSearchModeToggleBinaryKey(t *testing.T) {
 	t.Parallel()
 	p := &PreviewPager{
@@ -645,6 +672,23 @@ func TestHandleSearchModeToggleBinaryKey(t *testing.T) {
 	p.handleSearchModeEvent(keyEvent{kind: keyToggleBinarySearchMode})
 	if p.searchBinaryMode || string(p.searchInput) != "abc" {
 		t.Fatalf("expected toggle to disable binary mode and drop colon, got binary=%v input=%q", p.searchBinaryMode, string(p.searchInput))
+	}
+}
+
+func TestHandleSearchModeToggleLimitKey(t *testing.T) {
+	t.Parallel()
+	p := &PreviewPager{
+		binaryMode: true,
+		searchMode: true,
+		state:      &statepkg.AppState{PreviewData: &statepkg.PreviewData{LineCount: 1}},
+	}
+	p.handleSearchModeEvent(keyEvent{kind: keyToggleBinarySearchLimit})
+	if !p.searchFullScan {
+		t.Fatalf("expected limit toggle to enable full scan")
+	}
+	p.handleSearchModeEvent(keyEvent{kind: keyToggleBinarySearchLimit})
+	if p.searchFullScan {
+		t.Fatalf("expected limit toggle to disable full scan")
 	}
 }
 

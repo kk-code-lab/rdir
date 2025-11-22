@@ -522,6 +522,14 @@ func (p *PreviewPager) toggleSearchBinaryMode() {
 	p.onSearchInputChanged()
 }
 
+func (p *PreviewPager) toggleSearchLimit() {
+	if p == nil || !p.searchMode || !p.binaryMode {
+		return
+	}
+	p.searchFullScan = !p.searchFullScan
+	p.onSearchInputChanged()
+}
+
 func (p *PreviewPager) appendSearchRune(ch rune) {
 	if ch == 0 {
 		return
@@ -679,7 +687,7 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 	}
 
 	bytesToScan := totalBytes
-	if searchMaxBinaryBytes > 0 && bytesToScan > searchMaxBinaryBytes {
+	if !p.searchFullScan && searchMaxBinaryBytes > 0 && bytesToScan > searchMaxBinaryBytes {
 		bytesToScan = searchMaxBinaryBytes
 	}
 

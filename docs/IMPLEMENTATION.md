@@ -290,6 +290,7 @@ Search controls inside the pager:
 - `/` enters text search; results use the text engine even when previewing a binary file.
 - `:` enters binary (hex) search when viewing a binary preview; in text previews it behaves like a literal colon query.
 - `Ctrl+B` toggles the active search between text/hex while in search mode (binary previews only) and adjusts the query prefix accordingly.
+- `Ctrl+L` toggles binary search between limited scan (default ~16 MB) and full scan for large files.
 
 ### Navigation History
 ```go

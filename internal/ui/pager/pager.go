@@ -168,6 +168,7 @@ type PreviewPager struct {
 	searchFocused     bool
 	searchBinaryMode  bool
 	searchQueryBinary bool
+	searchFullScan    bool
 }
 
 var pagerCommand = exec.Command
@@ -1286,6 +1287,10 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		if p.searchMode {
 			p.toggleSearchBinaryMode()
 		}
+	case keyToggleBinarySearchLimit:
+		if p.searchMode {
+			p.toggleSearchLimit()
+		}
 	}
 
 	p.clampScroll(totalLines, contentRows)
@@ -1299,6 +1304,9 @@ func (p *PreviewPager) handleSearchModeEvent(ev keyEvent) {
 		return
 	case keyToggleBinarySearchMode:
 		p.toggleSearchBinaryMode()
+		return
+	case keyToggleBinarySearchLimit:
+		p.toggleSearchLimit()
 		return
 	case keyLeft:
 		if len(p.searchInput) > 0 {
@@ -1688,7 +1696,11 @@ func (p *PreviewPager) searchStatusSegment() string {
 		if !useResults {
 			return segment
 		}
-		return segment + " " + p.searchCountsSegment()
+		counts := p.searchCountsSegment()
+		if binary && p.searchFullScan {
+			counts += " full"
+		}
+		return segment + " " + counts
 	}
 
 	if displayText == "" {
@@ -1852,6 +1864,7 @@ func (p *PreviewPager) helpSections() []helpSection {
 	if p.binaryMode {
 		search = append(search, helpEntry{keys: ":", desc: "Enter binary search"})
 		search = append(search, helpEntry{keys: "Ctrl+B", desc: "Toggle text/hex mode while searching"})
+		search = append(search, helpEntry{keys: "Ctrl+L", desc: "Toggle full scan for binary search"})
 	}
 
 	sections := []helpSection{
@@ -2894,6 +2907,7 @@ const (
 	keySearchNext
 	keySearchPrev
 	keyToggleBinarySearchMode
+	keyToggleBinarySearchLimit
 	keyEnter
 	keyBackspace
 	keyRune
@@ -2955,6 +2969,8 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keySearchPrev, ch: rune(b)}, nil
 	case 0x02: // Ctrl+B
 		return keyEvent{kind: keyToggleBinarySearchMode}, nil
+	case 0x0c: // Ctrl+L
+		return keyEvent{kind: keyToggleBinarySearchLimit}, nil
 	case ' ':
 		return keyEvent{kind: keySpace, ch: rune(b)}, nil
 	case 'b', 'B':
