@@ -487,7 +487,7 @@ func TestStatusLineBinaryOmitsWrapAndFormat(t *testing.T) {
 	}
 	state := &statepkg.AppState{PreviewData: preview}
 	p := &PreviewPager{state: state, binaryMode: true}
-	status := p.statusLine(preview.LineCount, 2, int(preview.BinaryInfo.TotalBytes))
+	status := p.statusLine(preview.LineCount, 2, int(preview.BinaryInfo.TotalBytes), "")
 	if strings.Contains(status, "wrap:") {
 		t.Fatalf("binary status should not mention wrap, got %q", status)
 	}
@@ -1357,7 +1357,7 @@ func TestStatusLineTextShowsWrapAndFormat(t *testing.T) {
 		formattedLines: preview.FormattedTextLines,
 		showFormatted:  true,
 	}
-	status := p.statusLine(len(preview.FormattedTextLines), 2, preview.TextCharCount)
+	status := p.statusLine(len(preview.FormattedTextLines), 2, preview.TextCharCount, "")
 	if !strings.Contains(status, "wrap:on") {
 		t.Fatalf("text status should include wrap:on, got %q", status)
 	}
@@ -1970,7 +1970,7 @@ func TestStatusLinePrioritizesStatusMessage(t *testing.T) {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
 	pager.statusMessage = "copied view"
-	line := pager.statusLine(1, 1, 2)
+	line := pager.statusLine(1, 1, 2, "")
 	if !strings.HasPrefix(line, "copied view") {
 		t.Fatalf("status message should be first, got %q", line)
 	}
@@ -2010,7 +2010,7 @@ func TestStatusLineMarksApproxChars(t *testing.T) {
 	}
 	state := &statepkg.AppState{PreviewData: preview}
 	p := &PreviewPager{state: state}
-	status := p.statusLine(preview.LineCount, 1, preview.TextCharCount)
+	status := p.statusLine(preview.LineCount, 1, preview.TextCharCount, "")
 	if !strings.Contains(status, "~1024 chars") {
 		t.Fatalf("status should mark approximate char counts, got %q", status)
 	}

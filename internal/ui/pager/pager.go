@@ -707,11 +707,27 @@ func (p *PreviewPager) render() error {
 		}
 	}
 
+	searchSegment := p.searchStatusSegment()
+	showSearchRow := false
+	if searchSegment != "" {
+		available := p.height - headerRows - 1 // must leave space for status
+		if available >= 2 {
+			showSearchRow = true
+		}
+	}
+
 	contentRows := p.height - headerRows - 1 // leave space for status
+	if showSearchRow {
+		contentRows--
+	}
 	if contentRows < 1 {
 		contentRows = 1
+		showSearchRow = false
 	}
 	contentRowLimit := p.height - 1
+	if showSearchRow {
+		contentRowLimit--
+	}
 	if contentRowLimit < 1 {
 		contentRowLimit = 1
 	}
@@ -791,7 +807,18 @@ func (p *PreviewPager) render() error {
 		row++
 	}
 
-	status := p.statusLine(totalLines, contentRows, p.totalCharCount())
+	searchRow := contentRowLimit + 1
+	if showSearchRow {
+		p.drawStyledRow(searchRow, searchSegment, true, statusBarStyle)
+		searchRow++
+	}
+
+	status := p.statusLine(totalLines, contentRows, p.totalCharCount(), func() string {
+		if showSearchRow {
+			return ""
+		}
+		return searchSegment
+	}())
 	p.drawStatus(status)
 
 	if p.writer != nil {
@@ -1488,7 +1515,7 @@ func (p *PreviewPager) restoreAfterEditor(savedScroll, savedWrap int) {
 	p.clampScroll(totalLines, visible)
 }
 
-func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
+func (p *PreviewPager) statusLine(totalLines, visible, charCount int, search string) string {
 	lineApprox := p.isLineCountApprox()
 	charApprox := p.isCharCountApprox()
 	kind := p.contentKind()
@@ -1501,7 +1528,7 @@ func (p *PreviewPager) statusLine(totalLines, visible, charCount int) string {
 		segments = append(segments, offset)
 	}
 	segments = append(segments, p.statusBadges(kind)...)
-	if search := p.searchStatusSegment(); search != "" {
+	if search != "" {
 		segments = append([]string{search}, segments...)
 	}
 	segments = filterEmptyStrings(segments)
