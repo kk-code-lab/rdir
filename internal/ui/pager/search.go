@@ -460,12 +460,10 @@ func (p *PreviewPager) enterTextSearchMode() {
 }
 
 func (p *PreviewPager) enterBinarySearchMode() {
-	if p != nil && p.binaryMode {
-		p.enterSearchModeWithPreset(true, []rune{':'})
+	if p == nil || !p.binaryMode {
 		return
 	}
-	// In non-binary previews treat ':' as a normal text search prefix.
-	p.enterSearchModeWithPreset(false, []rune{':'})
+	p.enterSearchModeWithPreset(true, []rune{':'})
 }
 
 func (p *PreviewPager) enterSearchModeWithPreset(binary bool, preset []rune) {
