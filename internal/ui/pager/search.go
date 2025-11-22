@@ -633,7 +633,27 @@ func (p *PreviewPager) appendSearchRune(ch rune) {
 		p.searchInput = append([]rune{':'}, p.searchInput...)
 	}
 	p.searchInput = append(p.searchInput, ch)
+	p.drainSearchBuffer()
 	p.onSearchInputChanged()
+}
+
+// drainSearchBuffer pulls buffered runes (e.g., from a paste burst) into the search input
+// without blocking; stops if an escape sequence prefix is encountered.
+func (p *PreviewPager) drainSearchBuffer() {
+	if p == nil || !p.searchMode || p.reader == nil {
+		return
+	}
+	for p.reader.Buffered() > 0 {
+		r, _, err := p.reader.ReadRune()
+		if err != nil {
+			return
+		}
+		if r == '\x1b' {
+			_ = p.reader.UnreadRune()
+			return
+		}
+		p.searchInput = append(p.searchInput, r)
+	}
 }
 
 func (p *PreviewPager) backspaceSearch() {
