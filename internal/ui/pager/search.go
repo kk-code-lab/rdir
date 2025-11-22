@@ -648,7 +648,7 @@ func (p *PreviewPager) drainSearchBuffer() {
 		if err != nil {
 			return
 		}
-		if r == '\x1b' {
+		if r < 32 || r == '\x1b' {
 			_ = p.reader.UnreadRune()
 			return
 		}
@@ -910,7 +910,10 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 				nibblePos: nibbleByte,
 			})
 
-			step := 1
+			step := len(needle)
+			if step < 1 {
+				step = 1
+			}
 			if partialNibble {
 				step = len(needle) + 1 // skip over nibble tail to avoid overlapping partial matches
 			}
