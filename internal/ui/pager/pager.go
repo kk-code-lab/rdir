@@ -707,9 +707,9 @@ func (p *PreviewPager) render() error {
 		}
 	}
 
-	searchSegment := p.searchStatusSegment()
+	searchDisplay, cursorColBase := p.searchDisplaySegment()
 	showSearchRow := false
-	if searchSegment != "" {
+	if searchDisplay != "" && p.searchMode {
 		available := p.height - headerRows - 1 // must leave space for status
 		if available >= 2 {
 			showSearchRow = true
@@ -807,13 +807,23 @@ func (p *PreviewPager) render() error {
 		row++
 	}
 
+	searchCursorRow := 0
+	searchCursorCol := 0
 	searchRow := contentRowLimit + 1
 	if showSearchRow {
-		searchDisplay := " " + searchSegment + " "
-		if p.width > 0 && displayWidth(searchDisplay) > p.width {
-			searchDisplay = truncateToWidth(searchDisplay, p.width)
+		searchDisplayPadded := " " + searchDisplay + " "
+		if p.width > 0 && displayWidth(searchDisplayPadded) > p.width {
+			searchDisplayPadded = truncateToWidth(searchDisplayPadded, p.width)
 		}
-		p.drawStyledRow(searchRow, searchDisplay, true, statusBarStyle)
+		p.drawStyledRow(searchRow, searchDisplayPadded, true, statusBarStyle)
+		searchCursorRow = searchRow
+		searchCursorCol = cursorColBase + 1 // account for leading pad
+		if searchCursorCol <= 0 {
+			searchCursorCol = displayWidth(searchDisplayPadded)
+		}
+		if p.width > 0 && searchCursorCol > p.width {
+			searchCursorCol = p.width
+		}
 		searchRow++
 	}
 
@@ -821,9 +831,29 @@ func (p *PreviewPager) render() error {
 		if showSearchRow {
 			return ""
 		}
-		return searchSegment
+		return searchDisplay
 	}())
 	p.drawStatus(status)
+	if !showSearchRow && searchDisplay != "" && p.searchMode {
+		searchCursorRow = p.height
+		// search is first segment in statusLine; drawStatus wraps with leading space.
+		searchCursorCol = cursorColBase + 1 // leading pad
+		if searchCursorCol <= 0 {
+			searchCursorCol = displayWidth(" " + searchDisplay)
+		}
+		if p.width > 0 && searchCursorCol > p.width {
+			searchCursorCol = p.width
+		}
+	}
+	if searchCursorRow > 0 && p.searchMode {
+		p.writeString("\x1b[?25h")
+		if searchCursorCol < 1 {
+			searchCursorCol = 1
+		}
+		p.printf("\x1b[%d;%dH", searchCursorRow, searchCursorCol)
+	} else {
+		p.writeString("\x1b[?25l")
+	}
 
 	if p.writer != nil {
 		return p.writer.Flush()
@@ -1693,8 +1723,13 @@ func (p *PreviewPager) statusBadges(kind pagerContentKind) []string {
 }
 
 func (p *PreviewPager) searchStatusSegment() string {
+	segment, _ := p.searchDisplaySegment()
+	return segment
+}
+
+func (p *PreviewPager) searchDisplaySegment() (string, int) {
 	if p == nil {
-		return ""
+		return "", 0
 	}
 	displayRaw := p.searchQuery
 	binary := false
@@ -1718,50 +1753,47 @@ func (p *PreviewPager) searchStatusSegment() string {
 			displayText = strings.TrimPrefix(displayText, ":")
 		}
 	}
-	if p.searchMode {
-		if displayText == "" {
-			return prefix + "_"
-		}
-		visibleQuery := visualizeSpaces(displayText)
-		safeQuery := textutil.SanitizeTerminalText(visibleQuery)
-		segment := prefix + safeQuery + "_"
-
-		activeQuery := p.searchQuery
-		matchInput := displayRaw
-		useResults := activeQuery != "" && strings.EqualFold(activeQuery, matchInput)
-		if !useResults {
-			return segment
-		}
-		counts := p.searchCountsSegment()
-		if binary && p.searchFullScan {
-			counts += "*"
-		}
-		return segment + " " + counts
-	}
-
 	if displayText == "" {
-		return ""
+		if p.searchMode {
+			return prefix, displayWidth(prefix) + 1
+		}
+		return "", 0
 	}
 
 	visibleQuery := visualizeSpaces(displayText)
 	safeQuery := textutil.SanitizeTerminalText(visibleQuery)
 	segment := prefix + safeQuery
+	cursorCol := displayWidth(segment) + 1
 
 	activeQuery := p.searchQuery
-	useResults := activeQuery != "" && strings.EqualFold(activeQuery, displayRaw)
-	if !useResults {
-		return segment
+	matchInput := displayRaw
+	useResults := activeQuery != "" && strings.EqualFold(activeQuery, matchInput)
+
+	if !p.searchMode {
+		if activeQuery == "" {
+			return "", 0
+		}
+		if !useResults {
+			return segment, 0
+		}
+		if p.searchErr != nil {
+			return segment + " !", 0
+		}
+		counts := p.searchCountsSegment()
+		if binary && p.searchFullScan {
+			counts += "*"
+		}
+		return segment + " " + counts, 0
 	}
 
-	if p.searchErr != nil {
-		return segment + " !"
+	if useResults {
+		counts := p.searchCountsSegment()
+		if binary && p.searchFullScan {
+			counts += "*"
+		}
+		segment += " " + counts
 	}
-
-	counts := p.searchCountsSegment()
-	if binary && p.searchFullScan {
-		counts += "*"
-	}
-	return segment + " " + counts
+	return segment, cursorCol
 }
 
 func (p *PreviewPager) searchCountsSegment() string {
