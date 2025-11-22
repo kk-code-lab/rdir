@@ -1282,6 +1282,10 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		if p.searchMode {
 			p.appendSearchRune(ev.ch)
 		}
+	case keyToggleBinarySearchMode:
+		if p.searchMode {
+			p.toggleSearchBinaryMode()
+		}
 	}
 
 	p.clampScroll(totalLines, contentRows)
@@ -1844,6 +1848,7 @@ func (p *PreviewPager) helpSections() []helpSection {
 	}
 	if p.binaryMode {
 		search = append(search, helpEntry{keys: ":", desc: "Enter binary search"})
+		search = append(search, helpEntry{keys: "Ctrl+B", desc: "Toggle text/hex mode while searching"})
 	}
 
 	sections := []helpSection{
@@ -1865,6 +1870,7 @@ func (p *PreviewPager) helpSegments() []string {
 	segments = append(segments, "/ search")
 	if p.binaryMode {
 		segments = append(segments, ": binary search")
+		segments = append(segments, "Ctrl+B toggle text/hex")
 	}
 	return segments
 }
@@ -2890,6 +2896,7 @@ const (
 	keyStartBinarySearch
 	keySearchNext
 	keySearchPrev
+	keyToggleBinarySearchMode
 	keyEnter
 	keyBackspace
 	keyRune
@@ -2949,6 +2956,8 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 		return keyEvent{kind: keySearchNext, ch: rune(b)}, nil
 	case 'N':
 		return keyEvent{kind: keySearchPrev, ch: rune(b)}, nil
+	case 0x02: // Ctrl+B
+		return keyEvent{kind: keyToggleBinarySearchMode}, nil
 	case ' ':
 		return keyEvent{kind: keySpace, ch: rune(b)}, nil
 	case 'b', 'B':

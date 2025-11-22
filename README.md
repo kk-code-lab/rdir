@@ -21,6 +21,8 @@ rdir
 - **→**: Open file in pager
 - **c/C (pager)**: Copy visible view/all content to clipboard
 - **f (pager)**: Toggle formatted/raw preview (pretty JSON/Markdown when available; falls back to raw for truncated/large files)
+- **/** (pager)**: Text search within the pager
+- **:** (pager, binary preview)**: Hex search; `Ctrl+B` while searching toggles text/hex mode
 - **←/Backspace**: Go to parent
 - **/**: Fuzzy search
 - **r**: Refresh current directory listing

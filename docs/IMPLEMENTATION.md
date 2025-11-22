@@ -286,6 +286,11 @@ The `internal/ui/pager` package owns the full-screen preview mode. When the user
 
 The pager keeps `AppState.PreviewScrollOffset` and `PreviewWrap` in sync so the side preview reuses the last position, but it no longer draws anything through tcell—copy/paste fidelity matches the system pager.
 
+Search controls inside the pager:
+- `/` enters text search; results use the text engine even when previewing a binary file.
+- `:` enters binary (hex) search when viewing a binary preview; in text previews it behaves like a literal colon query.
+- `Ctrl+B` toggles the active search between text/hex while in search mode (binary previews only) and adjusts the query prefix accordingly.
+
 ### Navigation History
 ```go
 history []string    // Array of visited paths
