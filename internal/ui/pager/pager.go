@@ -109,6 +109,8 @@ type searchHit struct {
 	span      textSpan
 	len       int
 	startByte int
+	nibbleEnd bool
+	nibblePos int
 }
 
 var termGetSize = term.GetSize
