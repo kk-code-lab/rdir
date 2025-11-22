@@ -2999,6 +2999,7 @@ func (p *PreviewPager) readKeyEvent() (keyEvent, error) {
 	if p.reader == nil {
 		return keyEvent{}, errors.New("no reader available")
 	}
+
 	b, err := p.reader.ReadByte()
 	if err != nil {
 		return keyEvent{}, err
@@ -3141,7 +3142,7 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 	}
 
 	final := seq[len(seq)-1]
-	params, modifier := parseCSIParameters(string(seq[:len(seq)-1]))
+	_, modifier := parseCSIParameters(string(seq[:len(seq)-1]))
 
 	switch final {
 	case 'A':
@@ -3162,22 +3163,15 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 		return keyEvent{kind: keyHome, mod: modifier}, nil
 	case 'F':
 		return keyEvent{kind: keyEnd, mod: modifier}, nil
-	case '~':
-		switch params {
-		case "3":
-			return keyEvent{kind: keyUnknown}, nil
-		case "5":
-			return keyEvent{kind: keyPageUp}, nil
-		case "6":
-			return keyEvent{kind: keyPageDown}, nil
-		case "1":
-			return keyEvent{kind: keyHome}, nil
-		case "4":
-			return keyEvent{kind: keyEnd}, nil
-		}
 	}
 	return keyEvent{kind: keyUnknown}, nil
 }
+
+func (p *PreviewPager) readBracketedPaste() error {
+	return nil
+}
+
+func (p *PreviewPager) startPasteTimer() {}
 
 func isCSIFinalByte(b byte) bool {
 	return (b >= 'A' && b <= 'Z') || b == '~'
