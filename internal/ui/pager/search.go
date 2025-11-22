@@ -617,6 +617,8 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 		return nil, nil, false, nil
 	}
 
+	hexQuery := strings.HasPrefix(query, ":")
+
 	bytesPerLine := p.binarySource.bytesPerLine
 	if bytesPerLine <= 0 {
 		bytesPerLine = binaryPreviewLineWidth
@@ -629,14 +631,9 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 		return nil, nil, false, nil
 	}
 
-	maxLines := searchMaxLines
-	totalLines := int((totalBytes + int64(bytesPerLine) - 1) / int64(bytesPerLine))
-	if totalLines < maxLines {
-		maxLines = totalLines
-	}
-	bytesToScan := int64(maxLines) * int64(bytesPerLine)
-	if bytesToScan > totalBytes {
-		bytesToScan = totalBytes
+	bytesToScan := totalBytes
+	if searchMaxBinaryBytes > 0 && bytesToScan > searchMaxBinaryBytes {
+		bytesToScan = searchMaxBinaryBytes
 	}
 
 	bufSize := p.binarySource.chunkSize
@@ -645,7 +642,7 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 	}
 	overlap := len(needle) - 1
 	window := make([]byte, bufSize+overlap)
-	caseInsensitive := smartCaseInsensitiveASCII(needle)
+	caseInsensitive := !hexQuery && smartCaseInsensitiveASCII(needle)
 	needleFolded := needle
 	if caseInsensitive {
 		needleFolded = foldASCIIBytes(needle)

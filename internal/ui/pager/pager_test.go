@@ -820,6 +820,91 @@ func TestBinarySearchHighlightsMultiBytePattern(t *testing.T) {
 	}
 }
 
+func TestBinarySearchHexDoesNotFoldASCII(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := []byte{0x41, 0x61}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch(":61")
+	if len(p.searchHits) != 1 {
+		t.Fatalf("expected only lowercase hex match, got %d hits", len(p.searchHits))
+	}
+	if p.searchHits[0].startByte != 1 {
+		t.Fatalf("expected hit at second byte, got start %d", p.searchHits[0].startByte)
+	}
+}
+
+func TestBinarySearchHonorsByteLimit(t *testing.T) {
+	t.Parallel()
+	oldLimit := searchMaxBinaryBytes
+	searchMaxBinaryBytes = 64 // small limit to force truncation
+	defer func() { searchMaxBinaryBytes = oldLimit }()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	// Put needle near the end so it is skipped when limit is small.
+	data := append(make([]byte, 128), []byte{0xDE, 0xAD}...)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch(":DEAD")
+	if len(p.searchHits) != 0 {
+		t.Fatalf("expected no hits when needle lies beyond scan limit")
+	}
+	if !p.searchLimited {
+		t.Fatalf("expected limited flag when scan is capped")
+	}
+}
+
 func TestSearchStatusShowsSpaces(t *testing.T) {
 	t.Parallel()
 	p := &PreviewPager{
