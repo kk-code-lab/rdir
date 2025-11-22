@@ -1297,6 +1297,9 @@ func (p *PreviewPager) handleSearchModeEvent(ev keyEvent) {
 	case keyEscape:
 		p.cancelSearch()
 		return
+	case keyToggleBinarySearchMode:
+		p.toggleSearchBinaryMode()
+		return
 	case keyLeft:
 		if len(p.searchInput) > 0 {
 			p.searchInput = nil
