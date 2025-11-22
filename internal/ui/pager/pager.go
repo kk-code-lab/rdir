@@ -824,7 +824,6 @@ func (p *PreviewPager) render() error {
 		if p.width > 0 && searchCursorCol > p.width {
 			searchCursorCol = p.width
 		}
-		searchRow++
 	}
 
 	status := p.statusLine(totalLines, contentRows, p.totalCharCount(), func() string {
@@ -3166,12 +3165,6 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 	}
 	return keyEvent{kind: keyUnknown}, nil
 }
-
-func (p *PreviewPager) readBracketedPaste() error {
-	return nil
-}
-
-func (p *PreviewPager) startPasteTimer() {}
 
 func isCSIFinalByte(b byte) bool {
 	return (b >= 'A' && b <= 'Z') || b == '~'
