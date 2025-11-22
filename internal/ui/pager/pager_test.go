@@ -606,6 +606,25 @@ func TestBinarySearchStatusUsesColonPrefix(t *testing.T) {
 	}
 }
 
+func TestBinarySearchStatusShowsFullScanMarker(t *testing.T) {
+	t.Parallel()
+	p := &PreviewPager{
+		binaryMode:        true,
+		searchMode:        true,
+		searchBinaryMode:  true,
+		searchFullScan:    true,
+		searchInput:       []rune(":aa"),
+		searchQuery:       ":aa",
+		searchQueryBinary: true,
+		searchHits:        []searchHit{{line: 0}},
+		searchCursor:      0,
+		state:             &statepkg.AppState{PreviewData: &statepkg.PreviewData{LineCount: 1}},
+	}
+	if seg := p.searchStatusSegment(); seg != ":aa_ 1/1*" {
+		t.Fatalf("expected full-scan marker in status, got %q", seg)
+	}
+}
+
 func TestToggleSearchBinaryModeAddsOrRemovesColon(t *testing.T) {
 	t.Parallel()
 	p := &PreviewPager{
