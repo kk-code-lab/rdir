@@ -569,6 +569,29 @@ func TestBinarySearchColonShortcut(t *testing.T) {
 	}
 }
 
+func TestTextPreviewIgnoresColonShortcut(t *testing.T) {
+	t.Parallel()
+	state := &statepkg.AppState{
+		PreviewData: &statepkg.PreviewData{
+			Name:      "notes.txt",
+			TextLines: []string{"hi"},
+			LineCount: 1,
+		},
+	}
+	p := &PreviewPager{
+		state:      state,
+		binaryMode: false,
+		height:     10,
+		width:      40,
+	}
+	if done := p.handleKey(keyEvent{kind: keyStartBinarySearch, ch: ':'}); done {
+		t.Fatalf("colon shortcut should not exit pager")
+	}
+	if p.searchMode {
+		t.Fatalf("colon shortcut should be ignored in text preview")
+	}
+}
+
 func TestBinarySearchStatusUsesColonPrefix(t *testing.T) {
 	t.Parallel()
 	p := &PreviewPager{
