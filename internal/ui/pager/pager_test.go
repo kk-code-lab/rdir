@@ -625,6 +625,26 @@ func TestBinarySearchStatusShowsFullScanMarker(t *testing.T) {
 	}
 }
 
+func TestCancelSearchClearsFullScan(t *testing.T) {
+	t.Parallel()
+	p := &PreviewPager{
+		binaryMode:        true,
+		searchMode:        true,
+		searchBinaryMode:  true,
+		searchFullScan:    true,
+		searchInput:       []rune(":aa"),
+		searchQuery:       ":aa",
+		searchQueryBinary: true,
+		searchHits:        []searchHit{{line: 0}},
+		searchCursor:      0,
+		state:             &statepkg.AppState{PreviewData: &statepkg.PreviewData{LineCount: 1}},
+	}
+	p.cancelSearch()
+	if p.searchFullScan {
+		t.Fatalf("expected full scan flag to clear on cancel")
+	}
+}
+
 func TestToggleSearchBinaryModeAddsOrRemovesColon(t *testing.T) {
 	t.Parallel()
 	p := &PreviewPager{

@@ -474,6 +474,7 @@ func (p *PreviewPager) enterSearchModeWithPreset(binary bool, preset []rune) {
 	binary = binary && p.binaryMode
 	p.searchMode = true
 	p.searchBinaryMode = binary
+	p.searchFullScan = false
 	if len(preset) > 0 && (len(p.searchQuery) == 0 || p.searchQueryBinary != binary) {
 		p.searchInput = append([]rune(nil), preset...)
 	} else if len(p.searchQuery) > 0 && p.searchQueryBinary == binary {
@@ -487,6 +488,7 @@ func (p *PreviewPager) enterSearchModeWithPreset(binary bool, preset []rune) {
 func (p *PreviewPager) exitSearchMode() {
 	p.searchMode = false
 	p.searchBinaryMode = false
+	p.searchFullScan = false
 	p.searchInput = nil
 	p.stopSearchTimer()
 }
@@ -494,6 +496,7 @@ func (p *PreviewPager) exitSearchMode() {
 func (p *PreviewPager) cancelSearch() {
 	p.searchMode = false
 	p.searchBinaryMode = false
+	p.searchFullScan = false
 	p.searchInput = nil
 	p.stopSearchTimer()
 	p.searchQuery = ""
