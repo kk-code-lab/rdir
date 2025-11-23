@@ -1114,6 +1114,62 @@ func TestBinarySearchAcceptsPartialHexNibble(t *testing.T) {
 	}
 }
 
+func TestBinarySearchFocusSingleNibbleHighlight(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := []byte{0xAA, 0xB4, 0xAA}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)))
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        80,
+		height:       6,
+		binarySource: source,
+	}
+
+	p.executeSearch(":A")
+	if len(p.searchHits) != 2 {
+		t.Fatalf("expected partial nibble to match two bytes, got %d", len(p.searchHits))
+	}
+
+	_, focus := p.visibleHighlights(0, 0, 80)
+	if len(focus) == 0 {
+		t.Fatalf("expected focused highlight for single-nibble match")
+	}
+
+	expect := hexNibbleSpanForByte(0, binaryPreviewLineWidth, true)
+	found := false
+	for _, sp := range focus {
+		if sp == expect {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected focus span for high nibble of first byte, got %#v", focus)
+	}
+}
+
 func TestBinarySearchClearingKeepsBinaryMode(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

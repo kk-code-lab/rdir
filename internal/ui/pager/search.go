@@ -200,7 +200,7 @@ func (p *PreviewPager) visibleHighlights(lineIdx int, drop int, widthLimit int) 
 					focusSpans = append(focusSpans, sp)
 				}
 			}
-		} else if hit.len > 0 {
+		} else if hit.len > 0 || hit.nibblePos >= 0 {
 			bytesPerLine := binaryPreviewLineWidth
 			if p.binarySource != nil && p.binarySource.bytesPerLine > 0 {
 				bytesPerLine = p.binarySource.bytesPerLine
@@ -221,13 +221,15 @@ func (p *PreviewPager) visibleHighlights(lineIdx int, drop int, widthLimit int) 
 			if lineIdx >= startLine && lineIdx <= endLine {
 				lineStart := lineIdx * bytesPerLine
 				lineEnd := lineStart + bytesPerLine - 1
-				for b := maxInt(lineStart, start); b <= minInt(lineEnd, end); b++ {
-					col := b - lineStart
-					if sp, ok := adjustSpan(hexSpanForByte(col, bytesPerLine), drop, widthLimit); ok {
-						focusSpans = append(focusSpans, sp)
-					}
-					if sp, ok := adjustSpan(asciiSpanForByte(col, bytesPerLine), drop, widthLimit); ok {
-						focusSpans = append(focusSpans, sp)
+				if hit.len > 0 {
+					for b := maxInt(lineStart, start); b <= minInt(lineEnd, end); b++ {
+						col := b - lineStart
+						if sp, ok := adjustSpan(hexSpanForByte(col, bytesPerLine), drop, widthLimit); ok {
+							focusSpans = append(focusSpans, sp)
+						}
+						if sp, ok := adjustSpan(asciiSpanForByte(col, bytesPerLine), drop, widthLimit); ok {
+							focusSpans = append(focusSpans, sp)
+						}
 					}
 				}
 				if nibble >= 0 && nibble >= lineStart && nibble <= lineEnd {

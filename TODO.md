@@ -41,7 +41,7 @@
 - [x] **Block jumps + offset status**  
   Add `[ / ]` for ±4 KB and `{ / }` for ±64 KB jumps in `PreviewPager` for binaries; status shows current offset and file %. Pager-only; no preview panel change.
 
-- [ ] **Binary search**  
+- [x] **Binary search**  
   Remove the `/` blockade in binary mode (`pager.go:1162-1168`) after adding simple byte/ASCII search on `binarySource`. Support `n/N`, hit highlighting, respect `searchMaxHits/Lines`. Preview panel remains without search.
 
 - [ ] **Adaptive hexdump width (pager)**  
