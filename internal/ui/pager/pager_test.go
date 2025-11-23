@@ -284,6 +284,41 @@ func TestReadKeyEventShiftArrows(t *testing.T) {
 	}
 }
 
+func TestReadKeyEventPageKeys(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		input string
+		kind  keyKind
+		mod   int
+	}{
+		{name: "page-up", input: "\x1b[5~", kind: keyPageUp, mod: 1},
+		{name: "page-down", input: "\x1b[6~", kind: keyPageDown, mod: 1},
+		{name: "shift-page-up", input: "\x1b[5;2~", kind: keyPageUp, mod: 2},
+		{name: "shift-page-down", input: "\x1b[6;2~", kind: keyPageDown, mod: 2},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := &PreviewPager{
+				reader: bufio.NewReader(strings.NewReader(tc.input)),
+			}
+			ev, err := p.readKeyEvent()
+			if err != nil {
+				t.Fatalf("readKeyEvent: %v", err)
+			}
+			if ev.kind != tc.kind {
+				t.Fatalf("expected %v, got %v", tc.kind, ev.kind)
+			}
+			if ev.mod != tc.mod {
+				t.Fatalf("expected modifier %d, got %d", tc.mod, ev.mod)
+			}
+		})
+	}
+}
+
 func TestReadKeyEventEdit(t *testing.T) {
 	t.Parallel()
 	p := &PreviewPager{reader: bufio.NewReader(strings.NewReader("e"))}
