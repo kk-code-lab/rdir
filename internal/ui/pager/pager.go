@@ -3141,7 +3141,7 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 	}
 
 	final := seq[len(seq)-1]
-	_, modifier := parseCSIParameters(string(seq[:len(seq)-1]))
+	base, modifier := parseCSIParameters(string(seq[:len(seq)-1]))
 
 	switch final {
 	case 'A':
@@ -3162,6 +3162,19 @@ func (p *PreviewPager) parseCSI() (keyEvent, error) {
 		return keyEvent{kind: keyHome, mod: modifier}, nil
 	case 'F':
 		return keyEvent{kind: keyEnd, mod: modifier}, nil
+	case '~':
+		switch base {
+		case "5":
+			return keyEvent{kind: keyPageUp, mod: modifier}, nil
+		case "6":
+			return keyEvent{kind: keyPageDown, mod: modifier}, nil
+		case "1", "7":
+			return keyEvent{kind: keyHome, mod: modifier}, nil
+		case "4", "8":
+			return keyEvent{kind: keyEnd, mod: modifier}, nil
+		default:
+			return keyEvent{kind: keyUnknown}, nil
+		}
 	}
 	return keyEvent{kind: keyUnknown}, nil
 }
