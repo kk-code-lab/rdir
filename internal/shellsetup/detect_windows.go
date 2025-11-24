@@ -20,7 +20,10 @@ func DetectParentShellName() string {
 	if err != nil {
 		return ""
 	}
-	defer windows.CloseHandle(handle)
+	defer func() {
+		// Best-effort close; ignore errors because handle is only used for read-only queries.
+		_ = windows.CloseHandle(handle)
+	}()
 
 	buffer := make([]uint16, 512)
 	size := uint32(len(buffer))
