@@ -9,6 +9,7 @@ const (
 	TextStyleStrong
 	TextStyleStrike
 	TextStyleCode
+	TextStyleCodeBlock
 	TextStyleLink
 	TextStyleHeading
 	TextStyleRule
