@@ -60,6 +60,7 @@ func TestTextPagerSource_UTF16_CRLF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTextPagerSource: %v", err)
 	}
+	t.Cleanup(src.Close)
 	if err := src.EnsureAll(); err != nil {
 		t.Fatalf("EnsureAll: %v", err)
 	}
@@ -111,6 +112,7 @@ func TestTextPagerSource_UTF16_CRLF_BE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTextPagerSource: %v", err)
 	}
+	t.Cleanup(src.Close)
 	if err := src.EnsureAll(); err != nil {
 		t.Fatalf("EnsureAll: %v", err)
 	}
@@ -174,6 +176,11 @@ func TestTextPagerSource_UTF16_LimitDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
+	t.Cleanup(func() {
+		if pager.rawTextSource != nil {
+			pager.rawTextSource.Close()
+		}
+	})
 
 	pager.executeSearch("line")
 	if !pager.searchLimited {
@@ -227,6 +234,7 @@ func runUTF16StreamingTest(t *testing.T, enc fsutil.UnicodeEncoding) {
 	if err != nil {
 		t.Fatalf("newTextPagerSource: %v", err)
 	}
+	t.Cleanup(source.Close)
 	source.chunkSize = 32
 	if err := source.EnsureAll(); err != nil {
 		t.Fatalf("EnsureAll: %v", err)
@@ -263,6 +271,11 @@ func runUTF16StreamingTest(t *testing.T, enc fsutil.UnicodeEncoding) {
 	if err != nil {
 		t.Fatalf("NewPreviewPager: %v", err)
 	}
+	t.Cleanup(func() {
+		if pager.rawTextSource != nil {
+			pager.rawTextSource.Close()
+		}
+	})
 
 	copied := ""
 	pager.clipboardFunc = func(s string) error {
