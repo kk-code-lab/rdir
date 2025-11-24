@@ -20,6 +20,10 @@ type ColorTheme struct {
 	FooterFg        tcell.Color
 	PreviewBg       tcell.Color
 	PreviewFg       tcell.Color
+	CodeBg          tcell.Color
+	CodeFg          tcell.Color
+	CodeBlockBg     tcell.Color
+	CodeBlockFg     tcell.Color
 }
 
 // GetColorTheme returns the default color scheme.
@@ -41,5 +45,9 @@ func GetColorTheme() ColorTheme {
 		FooterFg:        tcell.ColorDefault,
 		PreviewBg:       tcell.ColorDefault,
 		PreviewFg:       tcell.ColorDefault,
+		CodeBg:          tcell.ColorDefault,
+		CodeFg:          tcell.Color44,  // brighter cyan text for code
+		CodeBlockBg:     tcell.Color234, // darker grey background for fenced code
+		CodeBlockFg:     tcell.Color252, // light grey text for fenced code
 	}
 }

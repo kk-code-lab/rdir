@@ -57,10 +57,10 @@ func renderCodeBlockSegments(block markdownCodeBlock) [][]StyledTextSegment {
 	prefix := "    "
 	lines := make([][]StyledTextSegment, 0, len(block.lines)+1)
 	if block.info != "" {
-		lines = append(lines, []StyledTextSegment{{Text: prefix + "[" + block.info + "]", Style: TextStyleCode}})
+		lines = append(lines, []StyledTextSegment{{Text: prefix + "[" + block.info + "]", Style: TextStyleCodeBlock}})
 	}
 	for _, line := range block.lines {
-		lines = append(lines, []StyledTextSegment{{Text: prefix + line, Style: TextStyleCode}})
+		lines = append(lines, []StyledTextSegment{{Text: prefix + line, Style: TextStyleCodeBlock}})
 	}
 	return lines
 }

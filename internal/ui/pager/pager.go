@@ -17,9 +17,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/gdamore/tcell/v2"
 	fsutil "github.com/kk-code-lab/rdir/internal/fs"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
+	renderpkg "github.com/kk-code-lab/rdir/internal/ui/render"
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
@@ -903,7 +905,7 @@ func (p *PreviewPager) drawRow(row int, text string, bold bool) {
 	}
 
 	p.printf("\x1b[%d;1H", row)
-	p.writeString("\x1b[2K")
+	p.writeString("\x1b[0m\x1b[2K")
 	if bold {
 		p.writeString("\x1b[1m")
 	}
@@ -974,7 +976,7 @@ func (p *PreviewPager) drawStyledRow(row int, text string, bold bool, style stri
 	}
 
 	p.printf("\x1b[%d;1H", row)
-	p.writeString("\x1b[2K")
+	p.writeString("\x1b[0m\x1b[2K")
 
 	if style != "" {
 		p.writeString(style)
@@ -3339,7 +3341,9 @@ func ansiForStyle(kind statepkg.TextStyleKind) string {
 	case statepkg.TextStyleStrike:
 		return "\x1b[9m"
 	case statepkg.TextStyleCode:
-		return "\x1b[2m"
+		return ansiColorSequence(pagerTheme.CodeFg, pagerTheme.CodeBg)
+	case statepkg.TextStyleCodeBlock:
+		return ansiColorSequence(pagerTheme.CodeBlockFg, pagerTheme.CodeBlockBg)
 	case statepkg.TextStyleLink:
 		return "\x1b[4m"
 	case statepkg.TextStyleRule:
@@ -3347,6 +3351,27 @@ func ansiForStyle(kind statepkg.TextStyleKind) string {
 	default:
 		return ""
 	}
+}
+
+var pagerTheme = renderpkg.GetColorTheme()
+
+func ansiColorSequence(fg, bg tcell.Color) string {
+	if fg == tcell.ColorDefault && bg == tcell.ColorDefault {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if fg != tcell.ColorDefault {
+		r, g, b := fg.RGB()
+		parts = append(parts, fmt.Sprintf("38;2;%d;%d;%d", r, g, b))
+	}
+	if bg != tcell.ColorDefault {
+		r, g, b := bg.RGB()
+		parts = append(parts, fmt.Sprintf("48;2;%d;%d;%d", r, g, b))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\x1b[" + strings.Join(parts, ";") + "m"
 }
 
 func segmentDisplayWidth(segments []statepkg.StyledTextSegment) int {

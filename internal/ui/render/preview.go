@@ -596,7 +596,23 @@ func (r *Renderer) styleForSegment(base tcell.Style, kind statepkg.TextStyleKind
 	case statepkg.TextStyleStrike:
 		return base.StrikeThrough(true)
 	case statepkg.TextStyleCode:
-		return base.Dim(true)
+		style := base
+		if r.theme.CodeFg != tcell.ColorDefault {
+			style = style.Foreground(r.theme.CodeFg)
+		}
+		if r.theme.CodeBg != tcell.ColorDefault {
+			style = style.Background(r.theme.CodeBg)
+		}
+		return style.Dim(false)
+	case statepkg.TextStyleCodeBlock:
+		style := base
+		if r.theme.CodeBlockFg != tcell.ColorDefault {
+			style = style.Foreground(r.theme.CodeBlockFg)
+		}
+		if r.theme.CodeBlockBg != tcell.ColorDefault {
+			style = style.Background(r.theme.CodeBlockBg)
+		}
+		return style.Dim(false)
 	case statepkg.TextStyleLink:
 		return base.Underline(true)
 	case statepkg.TextStyleRule:
