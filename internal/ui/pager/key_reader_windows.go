@@ -200,6 +200,10 @@ func translateWindowsKey(ev *keyEventRecord) (keyEvent, bool) {
 
 func runeToPagerKey(ch rune) (keyEvent, bool) {
 	switch ch {
+	case 0x02: // Ctrl+B
+		return keyEvent{kind: keyToggleBinarySearchMode}, true
+	case 0x0c: // Ctrl+L
+		return keyEvent{kind: keyToggleBinarySearchLimit}, true
 	case '?':
 		return keyEvent{kind: keyToggleHelp, ch: ch}, true
 	case 'k', 'K':
@@ -226,6 +230,8 @@ func runeToPagerKey(ch rune) (keyEvent, bool) {
 		return keyEvent{kind: keyCopyAll, ch: ch}, true
 	case '/':
 		return keyEvent{kind: keyStartSearch, ch: ch}, true
+	case ':':
+		return keyEvent{kind: keyStartBinarySearch, ch: ch}, true
 	case 'n':
 		return keyEvent{kind: keySearchNext, ch: ch}, true
 	case 'N':
