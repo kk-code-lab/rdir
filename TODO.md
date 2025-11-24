@@ -55,3 +55,8 @@
 
 - [ ] **Lightweight format detection**  
   Detect signatures (PNG/ZIP/ELF/Mach-O/PDF) when loading binaries; show a terse header in preview (e.g., type + section sizes) and richer detail in pager. Minimal I/O: first few hundred bytes, no full parse.  
+
+## Display & Theming
+
+- [ ] **Terminal palette awareness / adaptive theming**  
+  Detect terminal color capabilities and palette (truecolor vs 256, custom iTerm schemes), then adapt preview/pager styling accordingly: choose nearest palette colors when truecolor unavailable, or switch to palette-only SGR to eliminate tone drift. Expose a toggle/preference to force 24-bit or 256-color for consistent appearance across panels and pager.
