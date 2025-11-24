@@ -17,8 +17,11 @@ import (
 )
 
 const (
-	previewByteLimit         int64 = 64 * 1024
-	formattedPreviewMaxBytes       = 32 * 1024
+	// previewByteLimit controls how much of a file we read for previews. Keep it
+	// comfortably above formattedPreviewMaxBytes so pretty renderers can work
+	// without hitting truncation.
+	previewByteLimit         int64 = 256 * 1024
+	formattedPreviewMaxBytes       = 128 * 1024
 	binaryPreviewMaxBytes          = 1024
 	binaryPreviewLineWidth         = 16
 	previewDebounceDelay           = 150 * time.Millisecond
