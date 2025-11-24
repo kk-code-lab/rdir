@@ -866,6 +866,7 @@ func TestBinaryHighlightsApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
+	t.Cleanup(source.Close)
 	p := &PreviewPager{
 		state:        state,
 		binaryMode:   true,
@@ -958,6 +959,7 @@ func TestBinarySearchAsciiSmartCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
+	t.Cleanup(source.Close)
 	p := &PreviewPager{
 		state:        state,
 		binaryMode:   true,
@@ -995,6 +997,7 @@ func TestBinarySearchSpaceLiteral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
+	t.Cleanup(source.Close)
 	p := &PreviewPager{
 		state:        state,
 		binaryMode:   true,
@@ -1034,6 +1037,7 @@ func TestBinarySearchHighlightsMultiBytePattern(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
+	t.Cleanup(source.Close)
 	p := &PreviewPager{
 		state:        state,
 		binaryMode:   true,
@@ -1072,6 +1076,7 @@ func TestBinarySearchHexDoesNotFoldASCII(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
+	t.Cleanup(source.Close)
 	p := &PreviewPager{
 		state:        state,
 		binaryMode:   true,
@@ -1396,6 +1401,7 @@ func TestBinarySearchHonorsByteLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
+	t.Cleanup(source.Close)
 	p := &PreviewPager{
 		state:        state,
 		binaryMode:   true,
