@@ -7,7 +7,12 @@ INTERNAL_PACKAGES=./internal/...
 PROFILE_DIR=$(BUILD_DIR)/profiles
 CPU_PROFILE=$(PROFILE_DIR)/fuzzy.cpu.pprof
 MEM_PROFILE=$(PROFILE_DIR)/fuzzy.mem.pprof
-GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+ifeq ($(OS),Windows_NT)
+DEVNULL=NUL
+else
+DEVNULL=/dev/null
+endif
+GIT_COMMIT=$(shell git rev-parse --short HEAD 2>$(DEVNULL) || echo unknown)
 LDFLAGS=-ldflags "-X github.com/kk-code-lab/rdir/internal/app.BuildCommit=$(GIT_COMMIT)"
 
 build:
