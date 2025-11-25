@@ -60,6 +60,12 @@ func (r *Renderer) Render(state *statepkg.AppState) {
 
 	w, h := r.screen.Size()
 
+	if state != nil && state.HelpVisible {
+		r.drawHelpOverlay(state, w, h)
+		r.screen.Show()
+		return
+	}
+
 	if state != nil && state.PreviewFullScreen {
 		r.layoutReady = false
 		r.drawHeader(state, w, h)

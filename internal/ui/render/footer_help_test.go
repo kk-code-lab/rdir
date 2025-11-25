@@ -25,9 +25,8 @@ func TestBuildFooterHelpSegments_DefaultMode(t *testing.T) {
 		"r: refresh",
 		"→: preview full",
 		"P: open pager",
+		"? help",
 		".: toggle hidden",
-		"y: yank path",
-		"e: edit file",
 	}
 
 	if !slices.Equal(got, want) {
@@ -46,10 +45,11 @@ func TestBuildFooterHelpSegments_FilterMode(t *testing.T) {
 		"Esc: exit filter",
 		"↵: accept selection",
 		"←: clear query",
+		"? help",
 	}
 
 	if len(got) != len(wantPrefix) {
-		t.Fatalf("filter help should only include contextual hints, got: %v", got)
+		t.Fatalf("filter help should only include contextual hints plus help toggle, got: %v", got)
 	}
 
 	if !slices.Equal(got, wantPrefix) {
@@ -70,6 +70,7 @@ func TestBuildFooterHelpSegments_GlobalSearchMode(t *testing.T) {
 		"Esc: clear/exit",
 		"↑↓: select match",
 		"PgUp/PgDn: page",
+		"? help",
 	}
 
 	if !slices.Equal(got, wantPrefix) {
@@ -109,6 +110,10 @@ func TestBuildFooterHelpSegments_PreviewMode(t *testing.T) {
 		if got[i] != want {
 			t.Fatalf("preview focus mismatch at %d: want %q got %q", i, want, got[i])
 		}
+	}
+
+	if !strings.Contains(strings.Join(got, " "), "? help") {
+		t.Fatal("fullscreen help should include help toggle hint")
 	}
 
 	for _, segment := range got {

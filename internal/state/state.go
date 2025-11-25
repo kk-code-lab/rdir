@@ -163,6 +163,9 @@ type AppState struct {
 	LastYankTime       time.Time // Time of last successful yank (for flash effect)
 	EditorAvailable    bool      // Whether an editor command is available for 'e'
 
+	// UI overlays
+	HelpVisible bool
+
 	// Error state
 	LastError error
 

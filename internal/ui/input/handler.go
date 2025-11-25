@@ -45,8 +45,28 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 	inFilterMode := ih.state != nil && ih.state.FilterActive
 	inGlobalSearch := ih.state != nil && ih.state.GlobalSearchActive
 	inSearchMode := inFilterMode || inGlobalSearch
+	helpVisible := ih.state != nil && ih.state.HelpVisible
 	previewFullScreen := ih.state != nil && ih.state.PreviewFullScreen
 	previewAvailable := ih.state != nil && ih.state.PreviewData != nil
+
+	if helpVisible {
+		switch ev.Key() {
+		case tcell.KeyCtrlC:
+			ih.actionChan <- statepkg.QuitAction{}
+			return false
+		case tcell.KeyEscape:
+			ih.actionChan <- statepkg.HelpHideAction{}
+			return true
+		case tcell.KeyRune:
+			r := ev.Rune()
+			if r == '?' || r == 'q' || r == 'Q' {
+				ih.actionChan <- statepkg.HelpHideAction{}
+			}
+			return true
+		default:
+			return true
+		}
+	}
 
 	// Handle special keys first
 	switch ev.Key() {
@@ -291,6 +311,10 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 				}
 				ih.actionChan <- statepkg.QuitAndChangeAction{}
 				return false
+
+			case '?':
+				ih.actionChan <- statepkg.HelpToggleAction{}
+				return true
 
 			case '.':
 				if previewFullScreen {

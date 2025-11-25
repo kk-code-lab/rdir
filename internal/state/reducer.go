@@ -1836,6 +1836,16 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		state.centerScrollOnSelection()
 		return state, r.generatePreview(state)
 
+	case HelpToggleAction:
+		state.HelpVisible = !state.HelpVisible
+		return state, nil
+
+	case HelpHideAction:
+		if state.HelpVisible {
+			state.HelpVisible = false
+		}
+		return state, nil
+
 	default:
 		return state, fmt.Errorf("unknown action: %T", action)
 	}
