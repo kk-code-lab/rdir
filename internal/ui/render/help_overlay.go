@@ -30,9 +30,12 @@ func buildHelpOverlayLines(state *statepkg.AppState) []string {
 			title: "Navigation",
 			entries: []helpOverlayEntry{
 				{keys: "↑/↓", desc: "Move selection"},
-				{keys: "↵ or →", desc: "Open / preview selection"},
+				{keys: "↵ / →", desc: "Open dir or preview file"},
+				{keys: "←", desc: "Go up to parent"},
 				{keys: "[ / ]", desc: "History back/forward"},
 				{keys: "~", desc: "Go home"},
+				{keys: "PgUp/PgDn", desc: "Page list"},
+				{keys: "Home/End", desc: "Jump to start/end"},
 			},
 		},
 		{
@@ -46,7 +49,6 @@ func buildHelpOverlayLines(state *statepkg.AppState) []string {
 		{
 			title: "Preview & Pager",
 			entries: []helpOverlayEntry{
-				{keys: "↵ or →", desc: "Open built-in pager (fullscreen preview)"},
 				{keys: "P", desc: "Open external pager ($PAGER)"},
 			},
 		},
