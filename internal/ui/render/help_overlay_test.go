@@ -32,7 +32,7 @@ func TestBuildHelpOverlayLinesIncludesSections(t *testing.T) {
 	assertContains("Show hidden files")
 	assertContains("external pager")
 	assertContains("external editor")
-	assertContains("external pager")
+	assertContains("Yank path")
 }
 
 func TestBuildHelpOverlayLinesReflectsHiddenToggle(t *testing.T) {
