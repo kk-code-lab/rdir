@@ -72,8 +72,10 @@ func persistentHelpSegments(state *statepkg.AppState) []string {
 		return nil
 	}
 
+	segments := []string{"? help"}
+
 	if state.FilterActive || state.GlobalSearchActive {
-		return nil
+		return segments
 	}
 
 	hiddenStatus := "visible"
@@ -81,17 +83,8 @@ func persistentHelpSegments(state *statepkg.AppState) []string {
 		hiddenStatus = "hidden"
 	}
 
-	segments := []string{}
 	if !state.PreviewFullScreen {
 		segments = append(segments, fmt.Sprintf(".: toggle %s", hiddenStatus))
-	}
-
-	if state.ClipboardAvailable {
-		segments = append(segments, "y: yank path")
-	}
-
-	if state.EditorAvailable {
-		segments = append(segments, "e: edit file")
 	}
 
 	return segments

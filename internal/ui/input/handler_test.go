@@ -31,6 +31,69 @@ func TestInputHandlerEscapeClearsQueryButKeepsGlobalSearchActive(t *testing.T) {
 	}
 }
 
+func TestQuestionMarkTogglesHelpInNormalMode(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyRune, '?', 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.HelpToggleAction); !ok {
+			t.Fatalf("Expected HelpToggleAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected HelpToggleAction to be emitted for '?'")
+	}
+}
+
+func TestEscapeHidesHelpBeforeOtherModes(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{
+		HelpVisible:  true,
+		FilterActive: true,
+	}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyEscape, 0, 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.HelpHideAction); !ok {
+			t.Fatalf("Expected HelpHideAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected HelpHideAction to be emitted when help is visible")
+	}
+}
+
+func TestQClosesHelpWithoutQuitting(t *testing.T) {
+	actionChan := make(chan statepkg.Action, 1)
+	handler := NewInputHandler(actionChan)
+
+	state := &statepkg.AppState{HelpVisible: true}
+	handler.SetState(state)
+
+	event := tcell.NewEventKey(tcell.KeyRune, 'q', 0)
+	handler.ProcessEvent(event)
+
+	select {
+	case action := <-actionChan:
+		if _, ok := action.(statepkg.HelpHideAction); !ok {
+			t.Fatalf("Expected HelpHideAction, got %T", action)
+		}
+	default:
+		t.Fatal("Expected HelpHideAction when pressing q with help visible")
+	}
+}
+
 func TestInputHandlerEscapeExitsGlobalSearchWhenQueryEmpty(t *testing.T) {
 	actionChan := make(chan statepkg.Action, 1)
 	handler := NewInputHandler(actionChan)

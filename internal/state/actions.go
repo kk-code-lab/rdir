@@ -56,6 +56,8 @@ type OpenPagerAction struct{}
 type GoToPathAction struct {
 	Path string
 }
+type HelpToggleAction struct{}
+type HelpHideAction struct{}
 
 // DirectoryLoadResultAction installs results from the async directory loader.
 type DirectoryLoadResultAction struct {
