@@ -911,22 +911,28 @@ func TestClearGlobalSearchStateMethod(t *testing.T) {
 }
 
 func TestGlobalSearchOpenActionWithHistory(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "file.txt")
+	if err := os.WriteFile(filePath, []byte("data"), 0o644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
 	state := &AppState{
-		CurrentPath:          "/tmp",
+		CurrentPath:          tmpDir,
 		GlobalSearchActive:   true,
 		GlobalSearchIndex:    0,
-		GlobalSearchRootPath: "/tmp",
+		GlobalSearchRootPath: tmpDir,
 		GlobalSearchResults: []GlobalSearchResult{
 			{
-				FilePath:  "/tmp/file.txt",
+				FilePath:  filePath,
 				FileName:  "file.txt",
-				DirPath:   "/tmp",
+				DirPath:   tmpDir,
 				Score:     100,
-				FileEntry: FileEntry{Name: "file.txt", IsDir: false},
+				FileEntry: FileEntry{Name: "file.txt", FullPath: filePath, IsDir: false},
 			},
 		},
 		Files:         []FileEntry{},
-		History:       []string{"/tmp"},
+		History:       []string{tmpDir},
 		HistoryIndex:  0,
 		SelectedIndex: -1,
 		ScreenHeight:  24,
