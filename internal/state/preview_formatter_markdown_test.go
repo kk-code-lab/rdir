@@ -222,6 +222,35 @@ func TestMarkdownBlockParsing(t *testing.T) {
 	}
 }
 
+func TestMarkdownFencedBlockAllowsNestedFenceLiteral(t *testing.T) {
+	lines := []string{
+		"```markdown",
+		"outer fence start",
+		"    ```js",
+		"    nested code fence",
+		"    ```",
+		"    outer fence end",
+		"```",
+		"after fence paragraph",
+	}
+
+	got := formatMarkdownLines(lines)
+	want := []string{
+		"    [markdown]",
+		"    outer fence start",
+		"        ```js",
+		"        nested code fence",
+		"        ```",
+		"        outer fence end",
+		"",
+		"after fence paragraph",
+	}
+
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
 func TestTableSplittingRespectsEscapedPipes(t *testing.T) {
 	lines := []string{
 		"A | B",

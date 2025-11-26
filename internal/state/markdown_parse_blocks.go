@@ -8,6 +8,7 @@ import (
 )
 
 const markdownNestingLimit = 64
+const fencedCodeIndentLimit = 3
 
 func parseMarkdown(lines []string) markdownDocument {
 	blocks, _ := parseBlocks(lines, 0)
@@ -178,14 +179,17 @@ func parseFencedCodeBlock(lines []string, start int, fence fenceSpec) (markdownC
 	i := start + 1
 	for i < len(lines) {
 		line := lines[i]
+		lineIndent := leadingSpaces(line)
 		trimmed := strings.TrimLeft(line, " \t")
-		if closing, ok := detectFence(trimmed); ok && closing.delimiter == fence.delimiter && closing.length >= fence.length {
-			return markdownCodeBlock{
-				info:     fence.info,
-				lines:    content,
-				fenced:   true,
-				indented: false,
-			}, i + 1
+		if lineIndent <= fencedCodeIndentLimit {
+			if closing, ok := detectFence(trimmed); ok && closing.delimiter == fence.delimiter && closing.length >= fence.length {
+				return markdownCodeBlock{
+					info:     fence.info,
+					lines:    content,
+					fenced:   true,
+					indented: false,
+				}, i + 1
+			}
 		}
 		content = append(content, line)
 		i++
@@ -283,24 +287,29 @@ func parseList(lines []string, start int, depth int) (markdownList, int, bool) {
 			}
 
 			content := line[contentIndent:]
+			contentLeading := leadingSpaces(content)
 			trimmedContent := strings.TrimLeft(content, " \t")
 
 			if inFence {
 				itemLines = append(itemLines, trimmedContent)
-				if count := countRepeatRune(trimmedContent, fenceDelimiter); count >= fenceLength {
-					inFence = false
+				if contentLeading <= fencedCodeIndentLimit {
+					if count := countRepeatRune(trimmedContent, fenceDelimiter); count >= fenceLength {
+						inFence = false
+					}
 				}
 				i++
 				continue
 			}
 
-			if fence, ok := detectFence(trimmedContent); ok {
-				inFence = true
-				fenceDelimiter = fence.delimiter
-				fenceLength = fence.length
-				itemLines = append(itemLines, trimmedContent)
-				i++
-				continue
+			if contentLeading <= fencedCodeIndentLimit {
+				if fence, ok := detectFence(trimmedContent); ok {
+					inFence = true
+					fenceDelimiter = fence.delimiter
+					fenceLength = fence.length
+					itemLines = append(itemLines, trimmedContent)
+					i++
+					continue
+				}
 			}
 
 			if leadingSpaces(line) >= codeIndent {
