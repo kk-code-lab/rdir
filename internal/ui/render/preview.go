@@ -9,6 +9,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
+	"github.com/rivo/uniseg"
 )
 
 func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetrics, w, h int) {
@@ -520,12 +521,23 @@ func (r *Renderer) drawSegments(startX, y, maxWidth int, segments []statepkg.Sty
 		}
 		text := textutil.SanitizeTerminalText(seg.Text)
 		style := r.styleForSegment(baseStyle, seg.Style)
-		for _, ru := range text {
-			width := textutil.DisplayWidth(string(ru))
+		g := uniseg.NewGraphemes(text)
+		for g.Next() {
+			cluster := g.Str()
+			width := textutil.DisplayWidth(cluster)
+			if width <= 0 {
+				width = 1
+			}
 			if width > remaining {
 				return
 			}
-			r.screen.SetContent(x, y, ru, nil, style)
+			runes := []rune(cluster)
+			main := runes[0]
+			comb := runes[1:]
+			r.screen.SetContent(x, y, main, comb, style)
+			for pad := 1; pad < width; pad++ {
+				r.screen.SetContent(x+pad, y, ' ', nil, style)
+			}
 			x += width
 			remaining -= width
 		}

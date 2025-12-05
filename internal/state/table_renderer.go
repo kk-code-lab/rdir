@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
-	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 )
 
 // formattedTable holds pre-rendered rows for fancy tables.
@@ -272,15 +272,17 @@ func trimLineToWidth(line cellLine, width int, ellipsis string) cellLine {
 			break
 		}
 		var buf strings.Builder
-		for _, ru := range seg.Text {
-			w := runewidth.RuneWidth(ru)
+		g := uniseg.NewGraphemes(seg.Text)
+		for g.Next() {
+			cluster := g.Str()
+			w := textutil.DisplayWidth(cluster)
 			if w < 1 {
 				w = 1
 			}
 			if curWidth+w > target {
 				break
 			}
-			buf.WriteRune(ru)
+			buf.WriteString(cluster)
 			curWidth += w
 		}
 		if buf.Len() > 0 {
@@ -318,8 +320,10 @@ func wrapSegmentsToWidth(segments []StyledTextSegment, width int) [][]StyledText
 			continue
 		}
 		var buf strings.Builder
-		for _, ru := range text {
-			w := runewidth.RuneWidth(ru)
+		g := uniseg.NewGraphemes(text)
+		for g.Next() {
+			cluster := g.Str()
+			w := textutil.DisplayWidth(cluster)
 			if w < 1 {
 				w = 1
 			}
@@ -331,7 +335,7 @@ func wrapSegmentsToWidth(segments []StyledTextSegment, width int) [][]StyledText
 			if w > width {
 				continue
 			}
-			buf.WriteRune(ru)
+			buf.WriteString(cluster)
 			currentWidth += w
 			if currentWidth == width {
 				current = append(current, StyledTextSegment{Text: buf.String(), Style: seg.Style})
@@ -497,7 +501,7 @@ func expandTabsInSegments(segments []StyledTextSegment, tabWidth int) []StyledTe
 				continue
 			}
 			b.WriteRune(r)
-			w := runewidth.RuneWidth(r)
+			w := textutil.DisplayWidth(string(r))
 			if w < 1 {
 				w = 1
 			}

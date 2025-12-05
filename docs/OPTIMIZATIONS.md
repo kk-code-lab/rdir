@@ -7,7 +7,7 @@ This document tracks performance optimizations implemented in rdir.
 | Optimization | Impact | Commit | Status |
 |---|---|---|---|
 | Fuzzy Search O(n log n) Sorting | +48% faster (1000 files) | d3678b4 | ✅ Complete |
-| RuneWidth Caching | +30-50% CPU (rendering) | ee5c57f | ✅ Complete |
+| Grapheme Width via uniseg | Correct emoji width; slight CPU cost | (this change) | ✅ Complete |
 | Display Files Caching | +10-20% allocations | a625bd9 | ✅ Complete |
 | Global Search Incremental Sort | +30-50% faster (large searches) | 367309f | ✅ Complete |
 | Async Cached Index Lookup | Removes UI stalls on indexed search | 4ebf922 | ✅ Complete |
@@ -51,35 +51,30 @@ This document tracks performance optimizations implemented in rdir.
 
 ---
 
-## 2. RuneWidth Caching
+## 2. Grapheme Widths (uniseg) & Emoji Correctness
 
-**Commit:** ee5c57f  
-**File:** `internal/ui/render/renderer.go`  
-**Date:** 2025-11-02
+**Commit:** (this change)  
+**Files:** `internal/ui/render/*`, `internal/ui/pager/*`, `internal/state/table_renderer.go`, `internal/app/loop.go`, `internal/textutil/tabs.go`  
+**Date:** 2025-12-05
 
 ### Problem
-- `runewidth.RuneWidth()` called multiple times per rune per frame
-- Path width calculated twice: once for layout, once for rendering
-- Every frame (50ms) does expensive Unicode range table lookups
+- Rendering measured width per rune (`runewidth`), so emoji/ZWJ/VS16 clusters were counted as 1 column or split, causing misalignment in Markdown preview, file list, breadcrumb, and tables.
 
 ### Solution
-- Add cache fields to Renderer struct:
-  - `runeWidthCache [128]int` - fast array for ASCII (0-127)
-  - `sync.RWMutex` - thread-safe access
-  - `sync.Map` - for non-ASCII runes
-- Implement `cachedRuneWidth()` method with two-tier caching
+- Switched to grapheme-cluster width using `github.com/rivo/uniseg` + `textutil.DisplayWidth`.
+- Segment rendering/highlights pass combining runes to `SetContent` and pad extra cells for wide clusters.
+- Markdown tables and wrap/truncate now use grapheme widths.
 
-### Performance Impact
-- **Sidebar rendering:** 30-40% faster
-- **File list rendering:** 25-35% faster
-- **Help panel rendering:** 30-40% faster
-- **Overall renderer CPU:** ~30-50% reduction
+### Impact
+- Correct alignment for emoji/RI/keycap/ZWJ in preview, sidebar, status, breadcrumb, and tables.
+- Small CPU increase in rendering (uniseg is heavier) but acceptable for typical files; no API changes.
 
 ### Code Changes
-- Added 3 cache fields to Renderer struct
-- Implemented `cachedRuneWidth()` with fast ASCII path + slow wide char path
-- Replaced all `runewidth.RuneWidth()` calls with `r.cachedRuneWidth()`
-- 6 call sites updated in renderer
+- `DisplayWidth` moved to uniseg; removed runewidth caches in renderer.
+- Updated wrap/truncate/draw logic in renderer, pager, tables.
+
+### Future Work
+- Add a lightweight grapheme-width cache (e.g., small LRU) inside `textutil.DisplayWidth` to shave uniseg cost when rendering large files with many emoji/ZWJ sequences.
 
 ---
 
