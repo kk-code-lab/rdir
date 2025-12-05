@@ -203,6 +203,37 @@ func TestCleanupTerminalRestoresCursorAndWrap(t *testing.T) {
 	}
 }
 
+func TestAnsiDisplayWidthIgnoresANSIAndCountsEmoji(t *testing.T) {
+	text := "\x1b[31m⚠️foo\x1b[0m"
+	if got := ansiDisplayWidth(text); got != 5 {
+		t.Fatalf("ansiDisplayWidth=%d want 5", got)
+	}
+}
+
+func TestAnsiTruncateWithEmojiAndEllipsis(t *testing.T) {
+	text := "⚠️foo"
+	out, truncated := ansiTruncate(text, 3, true)
+	if !truncated {
+		t.Fatalf("expected truncation")
+	}
+	if out != "⚠️…" {
+		t.Fatalf("got %q want %q", out, "⚠️…")
+	}
+}
+
+func TestWrapLineSegmentsRespectsGraphemeWidth(t *testing.T) {
+	lines := wrapLineSegments("👩‍🔧aaaa", 3)
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 wrapped lines, got %d", len(lines))
+	}
+	if lines[0] != "👩‍🔧a" {
+		t.Fatalf("first line got %q", lines[0])
+	}
+	if lines[1] != "aaa" {
+		t.Fatalf("second line got %q", lines[1])
+	}
+}
+
 func TestPreviewPagerToggleFormatSwitchesViews(t *testing.T) {
 	preview := &statepkg.PreviewData{
 		Name: "data.json",
