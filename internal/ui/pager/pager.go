@@ -22,7 +22,7 @@ import (
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 	renderpkg "github.com/kk-code-lab/rdir/internal/ui/render"
-	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 	"golang.org/x/term"
 )
 
@@ -2231,24 +2231,21 @@ func wrapLineSegments(text string, width int) []string {
 	for len(text) > 0 {
 		consumed := 0
 		index := 0
-		for index < len(text) {
-			ru, size := utf8.DecodeRuneInString(text[index:])
-			if size <= 0 {
-				index++
-				break
-			}
-			w := runewidth.RuneWidth(ru)
+		g := uniseg.NewGraphemes(text)
+		for g.Next() {
+			cluster := g.Str()
+			w := textutil.DisplayWidth(cluster)
 			if w <= 0 {
 				w = 1
 			}
 			if consumed+w > width {
 				if consumed == 0 {
-					index += size
+					index += len(cluster)
 				}
 				break
 			}
 			consumed += w
-			index += size
+			index += len(cluster)
 			if consumed >= width {
 				break
 			}
@@ -2816,18 +2813,17 @@ func (p *PreviewPager) trimWrappedPrefix(text string, skipRows int) string {
 			index = end
 			continue
 		}
-		ru, size := utf8.DecodeRuneInString(text[index:])
-		if ru == utf8.RuneError && size == 1 {
-			consumed++
-			index++
-			continue
+		g := uniseg.NewGraphemes(text[index:])
+		if !g.Next() {
+			break
 		}
-		w := runewidth.RuneWidth(ru)
+		cluster := g.Str()
+		w := textutil.DisplayWidth(cluster)
 		if w < 1 {
 			w = 1
 		}
 		consumed += w
-		index += size
+		index += len(cluster)
 	}
 	if index >= len(text) {
 		return ""
@@ -3384,30 +3380,31 @@ func segmentDisplayWidth(segments []statepkg.StyledTextSegment) int {
 
 func ansiDisplayWidth(text string) int {
 	width := 0
-	for i := 0; i < len(text); {
-		if text[i] == '\x1b' && i+1 < len(text) && text[i+1] == '[' {
-			j := i + 2
-			for j < len(text) && text[j] != 'm' {
-				j++
+	for len(text) > 0 {
+		esc := strings.IndexByte(text, '\x1b')
+		if esc == -1 {
+			width += textutil.DisplayWidth(text)
+			break
+		}
+		if esc > 0 {
+			width += textutil.DisplayWidth(text[:esc])
+		}
+		text = text[esc:]
+		if len(text) >= 2 && text[0] == '\x1b' && text[1] == '[' {
+			end := 2
+			for end < len(text) && text[end] != 'm' {
+				end++
 			}
-			if j < len(text) {
-				j++
+			if end < len(text) {
+				end++
 			}
-			i = j
+			if end > len(text) {
+				end = len(text)
+			}
+			text = text[end:]
 			continue
 		}
-		ru, size := utf8.DecodeRuneInString(text[i:])
-		if ru == utf8.RuneError && size == 1 {
-			width++
-			i++
-			continue
-		}
-		w := runewidth.RuneWidth(ru)
-		if w <= 0 {
-			w = 1
-		}
-		width += w
-		i += size
+		text = text[1:]
 	}
 	return width
 }
@@ -3417,57 +3414,63 @@ func ansiTruncate(text string, width int, withEllipsis bool) (string, bool) {
 		return "", ansiDisplayWidth(text) > 0
 	}
 	const ellipsisRune = '…'
-	ellipsisWidth := runewidth.RuneWidth(ellipsisRune)
+	ellipsisWidth := textutil.DisplayWidth(string(ellipsisRune))
 	if ellipsisWidth <= 0 {
 		ellipsisWidth = 1
 	}
 	target := width
 	if withEllipsis {
-		if width <= ellipsisWidth {
-			return string(ellipsisRune), true
-		}
-		target = width - ellipsisWidth
+		target -= ellipsisWidth
+	}
+	if target < 0 {
+		target = 0
 	}
 
 	var b strings.Builder
+	b.Grow(len(text))
 	consumed := 0
-	for i := 0; i < len(text) && consumed < target; {
-		if text[i] == '\x1b' && i+1 < len(text) && text[i+1] == '[' {
-			j := i + 2
-			for j < len(text) && text[j] != 'm' {
-				j++
+	truncated := false
+
+	for len(text) > 0 {
+		if text[0] == '\x1b' && len(text) > 1 && text[1] == '[' {
+			end := 2
+			for end < len(text) && text[end] != 'm' {
+				end++
 			}
-			if j < len(text) {
-				j++
+			if end < len(text) {
+				end++
 			}
-			b.WriteString(text[i:j])
-			i = j
+			if end > len(text) {
+				end = len(text)
+			}
+			b.WriteString(text[:end])
+			text = text[end:]
 			continue
 		}
-		ru, size := utf8.DecodeRuneInString(text[i:])
-		if ru == utf8.RuneError && size == 1 {
-			if consumed+1 > target {
-				break
-			}
-			b.WriteByte(text[i])
-			consumed++
-			i++
-			continue
-		}
-		w := runewidth.RuneWidth(ru)
-		if w <= 0 {
-			w = 1
-		}
-		if consumed+w > target {
+
+		g := uniseg.NewGraphemes(text)
+		if !g.Next() {
 			break
 		}
-		b.WriteRune(ru)
-		consumed += w
-		i += size
+		cluster := g.Str()
+		clusterWidth := textutil.DisplayWidth(cluster)
+		if clusterWidth <= 0 {
+			clusterWidth = 1
+		}
+		if consumed+clusterWidth > target {
+			truncated = true
+			break
+		}
+		b.WriteString(cluster)
+		consumed += clusterWidth
+		text = text[len(cluster):]
 	}
 
-	truncated := consumed < ansiDisplayWidth(text)
-	if withEllipsis && truncated {
+	if !truncated && len(text) > 0 {
+		truncated = true
+	}
+
+	if truncated && withEllipsis && ellipsisWidth <= width {
 		b.WriteRune(ellipsisRune)
 	}
 	return b.String(), truncated

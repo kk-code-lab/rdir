@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
-	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 )
 
 func fastIndex(haystack, needle []byte) int {
@@ -439,14 +439,14 @@ func applySearchHighlights(text string, spans []textSpan, focus []textSpan) stri
 			continue
 		}
 
-		ru, size := utf8.DecodeRuneInString(text[i:])
-		if size <= 0 {
-			size = 1
-			ru = rune(text[i])
+		g := uniseg.NewGraphemes(text[i:])
+		if !g.Next() {
+			break
 		}
-		width := runewidth.RuneWidth(ru)
-		if width <= 0 {
-			width = 1
+		cluster := g.Str()
+		clusterWidth := textutil.DisplayWidth(cluster)
+		if clusterWidth <= 0 {
+			clusterWidth = 1
 		}
 
 		if !active && col >= current.start {
@@ -455,8 +455,8 @@ func applySearchHighlights(text string, spans []textSpan, focus []textSpan) stri
 			active = true
 		}
 
-		builder.WriteString(text[i : i+size])
-		col += width
+		builder.WriteString(cluster)
+		col += clusterWidth
 
 		for active && col >= current.end {
 			builder.WriteString(highlightOffForStyle(currentStyle))
@@ -478,7 +478,7 @@ func applySearchHighlights(text string, spans []textSpan, focus []textSpan) stri
 			}
 		}
 
-		i += size
+		i += len(cluster)
 	}
 
 	if active {

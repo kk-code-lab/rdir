@@ -10,10 +10,10 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 	"github.com/kk-code-lab/rdir/internal/ui/input"
 	pagerui "github.com/kk-code-lab/rdir/internal/ui/pager"
 	renderui "github.com/kk-code-lab/rdir/internal/ui/render"
-	"github.com/mattn/go-runewidth"
 )
 
 const doubleClickThreshold = 300 * time.Millisecond
@@ -483,7 +483,7 @@ func (app *Application) handleBreadcrumbClick(x int) bool {
 		return false
 	}
 	headerText := "rdir"
-	pos := runewidth.StringWidth(headerText)
+	pos := textutil.DisplayWidth(headerText)
 	if x < pos {
 		return false
 	}
@@ -501,9 +501,9 @@ func (app *Application) handleBreadcrumbClick(x int) bool {
 	totalWidth := 0
 	for i, s := range segments {
 		if i > 0 {
-			totalWidth += runewidth.StringWidth(" › ")
+			totalWidth += textutil.DisplayWidth(" › ")
 		}
-		totalWidth += runewidth.StringWidth(s)
+		totalWidth += textutil.DisplayWidth(s)
 	}
 	if totalWidth > available {
 		return false
@@ -512,7 +512,7 @@ func (app *Application) handleBreadcrumbClick(x int) bool {
 	currentX := pos
 	for i, s := range segments {
 		if i > 0 {
-			sepW := runewidth.StringWidth(" › ")
+			sepW := textutil.DisplayWidth(" › ")
 			if x >= currentX && x < currentX+sepW {
 				// click on separator -> treat as previous segment
 				if i > 0 {
@@ -523,7 +523,7 @@ func (app *Application) handleBreadcrumbClick(x int) bool {
 			currentX += sepW
 		}
 
-		segW := runewidth.StringWidth(s)
+		segW := textutil.DisplayWidth(s)
 		if x >= currentX && x < currentX+segW {
 			app.jumpToBreadcrumb(segments, i)
 			return true

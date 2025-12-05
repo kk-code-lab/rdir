@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -14,17 +13,15 @@ import (
 	searchpkg "github.com/kk-code-lab/rdir/internal/search"
 	statepkg "github.com/kk-code-lab/rdir/internal/state"
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
+	"github.com/rivo/uniseg"
 )
 
 // Renderer handles all UI rendering
 type Renderer struct {
-	screen           tcell.Screen
-	theme            ColorTheme
-	runeWidthCache   [128]int // ASCII cache (0-127)
-	runeWidthCacheMu sync.RWMutex
-	runeWidthWide    sync.Map // For non-ASCII runes
-	lastLayout       layoutMetrics
-	layoutReady      bool
+	screen      tcell.Screen
+	theme       ColorTheme
+	lastLayout  layoutMetrics
+	layoutReady bool
 }
 
 // NewRenderer creates a new renderer
@@ -159,50 +156,39 @@ func (r *Renderer) fitBreadcrumb(path string, width int) string {
 		return ""
 	}
 
-	runes := []rune(path)
-	totalWidth := 0
-	for _, ru := range runes {
-		ruWidth := r.cachedRuneWidth(ru)
-		if ruWidth < 0 {
-			ruWidth = 0
-		}
-		totalWidth += ruWidth
-		if totalWidth > width {
-			break
-		}
-	}
-
-	if totalWidth <= width {
+	if textutil.DisplayWidth(path) <= width {
 		return path
 	}
 
-	ellipsis := "…"
-	ellipsisWidth := r.cachedRuneWidth('…')
-	if ellipsisWidth < 0 {
-		ellipsisWidth = 1
-	}
+	const ellipsis = "…"
+	ellipsisWidth := textutil.DisplayWidth(ellipsis)
 	if width <= ellipsisWidth {
 		return ellipsis
 	}
-
 	available := width - ellipsisWidth
 
-	// Trim from the left, keep end of the path (most useful part)
-	resultRunes := []rune{}
+	// Trim from the left, keep end of the path
+	var kept []string
 	currentWidth := 0
-	for i := len(runes) - 1; i >= 0; i-- {
-		ruWidth := r.cachedRuneWidth(runes[i])
-		if ruWidth < 0 {
-			ruWidth = 0
+	g := uniseg.NewGraphemes(path)
+	// collect clusters to slice from end
+	var clusters []string
+	for g.Next() {
+		clusters = append(clusters, g.Str())
+	}
+	for i := len(clusters) - 1; i >= 0; i-- {
+		w := textutil.DisplayWidth(clusters[i])
+		if w <= 0 {
+			w = 1
 		}
-		if currentWidth+ruWidth > available {
+		if currentWidth+w > available {
 			break
 		}
-		resultRunes = append([]rune{runes[i]}, resultRunes...)
-		currentWidth += ruWidth
+		kept = append([]string{clusters[i]}, kept...)
+		currentWidth += w
 	}
 
-	return ellipsis + string(resultRunes)
+	return ellipsis + strings.Join(kept, "")
 }
 
 func FormatBreadcrumbSegments(path string) []string {
@@ -270,26 +256,34 @@ func (r *Renderer) drawStatusLine(state *statepkg.AppState, w, h int) {
 	}
 
 	pathText = textutil.SanitizeTerminalText(pathText)
-	pathRunes := []rune(pathText)
 
-	// Calculate how many lines we need for the path (accounting for wide characters)
-	pathWidth := 0
-	pathLines := 1
-	for _, ru := range pathRunes {
-		runeWidth := r.cachedRuneWidth(ru)
-		if runeWidth < 0 {
-			runeWidth = 0
+	countWrappedLines := func(text string, width int) int {
+		if width <= 0 {
+			return 1
 		}
-		if pathWidth+runeWidth > w {
-			pathLines++
-			pathWidth = runeWidth
-		} else {
-			pathWidth += runeWidth
+		lines := 1
+		lineWidth := 0
+		g := uniseg.NewGraphemes(text)
+		for g.Next() {
+			cluster := g.Str()
+			w := textutil.DisplayWidth(cluster)
+			if w <= 0 {
+				w = 1
+			}
+			if lineWidth+w > width {
+				lines++
+				lineWidth = w
+			} else {
+				lineWidth += w
+			}
 		}
+		if lines < 1 {
+			lines = 1
+		}
+		return lines
 	}
-	if pathLines < 1 {
-		pathLines = 1
-	}
+
+	pathLines := countWrappedLines(pathText, w)
 
 	// Status line occupies: pathLines + 1 (for help text)
 	statusLineHeight := pathLines + 1
@@ -303,20 +297,28 @@ func (r *Renderer) drawStatusLine(state *statepkg.AppState, w, h int) {
 
 	x := 0
 	y := startY
-	for _, ru := range pathRunes {
-		if x >= w {
+	g := uniseg.NewGraphemes(pathText)
+	for g.Next() {
+		cluster := g.Str()
+		wc := textutil.DisplayWidth(cluster)
+		if wc <= 0 {
+			wc = 1
+		}
+		if x+wc > w {
 			y++
 			x = 0
 		}
-		if y < h {
-			r.screen.SetContent(x, y, ru, nil, pathStyle)
+		if y >= h {
+			break
 		}
-		// Move x by actual rune width, accounting for wide characters
-		runeWidth := r.cachedRuneWidth(ru)
-		if runeWidth < 0 {
-			runeWidth = 0
+		runes := []rune(cluster)
+		main := runes[0]
+		comb := runes[1:]
+		r.screen.SetContent(x, y, main, comb, pathStyle)
+		for pad := 1; pad < wc && x+pad < w; pad++ {
+			r.screen.SetContent(x+pad, y, ' ', nil, pathStyle)
 		}
-		x += runeWidth
+		x += wc
 	}
 
 	// Fill remaining spaces on last path line
@@ -336,17 +338,24 @@ func (r *Renderer) drawStatusLine(state *statepkg.AppState, w, h int) {
 
 	helpY := h - 1
 	x = 0
-	for _, ru := range helpText {
+	g = uniseg.NewGraphemes(helpText)
+	for g.Next() {
 		if x >= w {
 			break
 		}
-		r.screen.SetContent(x, helpY, ru, nil, normalStyle)
-		// Move x by actual rune width, accounting for wide characters
-		runeWidth := r.cachedRuneWidth(ru)
-		if runeWidth < 0 {
-			runeWidth = 0
+		cluster := g.Str()
+		wc := textutil.DisplayWidth(cluster)
+		if wc <= 0 {
+			wc = 1
 		}
-		x += runeWidth
+		runes := []rune(cluster)
+		main := runes[0]
+		comb := runes[1:]
+		r.screen.SetContent(x, helpY, main, comb, normalStyle)
+		for pad := 1; pad < wc && x+pad < w; pad++ {
+			r.screen.SetContent(x+pad, helpY, ' ', nil, normalStyle)
+		}
+		x += wc
 	}
 	// Fill remaining spaces
 	for x < w {

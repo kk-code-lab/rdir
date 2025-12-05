@@ -4,50 +4,17 @@ import (
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
+
+	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 )
 
 func (r *Renderer) cachedRuneWidth(ru rune) int {
-	if ru < 128 {
-		r.runeWidthCacheMu.RLock()
-		width := r.runeWidthCache[ru]
-		r.runeWidthCacheMu.RUnlock()
-
-		if width == 0 && ru != 0 {
-			actualWidth := runewidth.RuneWidth(ru)
-			if actualWidth < 0 {
-				actualWidth = 0
-			}
-			r.runeWidthCacheMu.Lock()
-			r.runeWidthCache[ru] = actualWidth + 1
-			r.runeWidthCacheMu.Unlock()
-			return actualWidth
-		}
-		return width - 1
-	}
-
-	if cached, ok := r.runeWidthWide.Load(ru); ok {
-		return cached.(int)
-	}
-
-	width := runewidth.RuneWidth(ru)
-	if width < 0 {
-		width = 0
-	}
-	r.runeWidthWide.Store(ru, width)
-	return width
+	return textutil.DisplayWidth(string(ru))
 }
 
 func (r *Renderer) measureTextWidth(text string) int {
-	width := 0
-	for _, ru := range text {
-		runeWidth := r.cachedRuneWidth(ru)
-		if runeWidth < 0 {
-			runeWidth = 0
-		}
-		width += runeWidth
-	}
-	return width
+	return textutil.DisplayWidth(text)
 }
 
 func (r *Renderer) truncateTextToWidth(text string, maxWidth int) string {
@@ -60,7 +27,7 @@ func (r *Renderer) truncateTextToWidth(text string, maxWidth int) string {
 	}
 
 	const ellipsis = "…"
-	ellipsisWidth := r.cachedRuneWidth([]rune(ellipsis)[0])
+	ellipsisWidth := textutil.DisplayWidth(ellipsis)
 	if ellipsisWidth <= 0 {
 		ellipsisWidth = 1
 	}
@@ -72,16 +39,18 @@ func (r *Renderer) truncateTextToWidth(text string, maxWidth int) string {
 	var builder strings.Builder
 	currentWidth := 0
 
-	for _, ru := range text {
-		runeWidth := r.cachedRuneWidth(ru)
-		if runeWidth < 0 {
-			runeWidth = 0
+	g := uniseg.NewGraphemes(text)
+	for g.Next() {
+		cluster := g.Str()
+		w := textutil.DisplayWidth(cluster)
+		if w <= 0 {
+			w = 1
 		}
-		if currentWidth+runeWidth > available {
+		if currentWidth+w > available {
 			break
 		}
-		builder.WriteRune(ru)
-		currentWidth += runeWidth
+		builder.WriteString(cluster)
+		currentWidth += w
 	}
 
 	builder.WriteString(ellipsis)
@@ -90,32 +59,25 @@ func (r *Renderer) truncateTextToWidth(text string, maxWidth int) string {
 
 func (r *Renderer) drawTextLine(startX, y, maxWidth int, text string, style tcell.Style) int {
 	x := startX
-	runes := []rune(text)
-	i := 0
-
-	for i < len(runes) {
+	g := uniseg.NewGraphemes(text)
+	for g.Next() {
 		if x-startX >= maxWidth {
 			break
 		}
-
-		mainc := runes[i]
-		i++
-
-		var combc []rune
-		for i < len(runes) && r.cachedRuneWidth(runes[i]) < 0 {
-			combc = append(combc, runes[i])
-			i++
+		cluster := g.Str()
+		w := textutil.DisplayWidth(cluster)
+		if w <= 0 {
+			w = 1
 		}
-
-		r.screen.SetContent(x, y, mainc, combc, style)
-
-		w := r.cachedRuneWidth(mainc)
-		if w < 0 {
-			w = 0
+		runes := []rune(cluster)
+		main := runes[0]
+		comb := runes[1:]
+		r.screen.SetContent(x, y, main, comb, style)
+		for pad := 1; pad < w && x+pad < startX+maxWidth; pad++ {
+			r.screen.SetContent(x+pad, y, ' ', nil, style)
 		}
 		x += w
 	}
-
 	return x
 }
 
@@ -124,7 +86,7 @@ func (r *Renderer) drawStyledRune(x, y, maxX int, ru rune, style tcell.Style) in
 		return x
 	}
 
-	width := r.cachedRuneWidth(ru)
+	width := textutil.DisplayWidth(string(ru))
 	if width <= 0 {
 		width = 1
 	}
@@ -144,16 +106,18 @@ func (r *Renderer) clipTextToWidth(text string, maxWidth int) (string, bool) {
 	var builder strings.Builder
 	width := 0
 	truncated := false
-	for _, ru := range text {
-		rw := r.cachedRuneWidth(ru)
-		if rw < 0 {
-			rw = 0
+	g := uniseg.NewGraphemes(text)
+	for g.Next() {
+		cluster := g.Str()
+		rw := textutil.DisplayWidth(cluster)
+		if rw <= 0 {
+			rw = 1
 		}
 		if width+rw > maxWidth {
 			truncated = true
 			break
 		}
-		builder.WriteRune(ru)
+		builder.WriteString(cluster)
 		width += rw
 	}
 
@@ -170,41 +134,67 @@ func (r *Renderer) drawStyledStringClipped(startX, y, maxX int, text string, sty
 	}
 
 	x := startX
-	for _, ru := range text {
+	g := uniseg.NewGraphemes(text)
+	for g.Next() {
 		if x >= maxX {
 			break
 		}
-		x = r.drawStyledRune(x, y, maxX, ru, style)
+		cluster := g.Str()
+		w := textutil.DisplayWidth(cluster)
+		if w <= 0 {
+			w = 1
+		}
+		runes := []rune(cluster)
+		main := runes[0]
+		comb := runes[1:]
+		r.screen.SetContent(x, y, main, comb, style)
+		for pad := 1; pad < w && x+pad < maxX; pad++ {
+			r.screen.SetContent(x+pad, y, ' ', nil, style)
+		}
+		x += w
 	}
 	return x
 }
 
 func (r *Renderer) drawHighlightedText(startX, y, maxX int, text string, spans []highlightSpan, offset int, baseStyle, highlightStyle tcell.Style) (int, int) {
-	runes := []rune(text)
 	if maxX <= startX {
-		return startX, offset + len(runes)
+		return startX, offset + len([]rune(text))
 	}
 
 	x := startX
 	spanIdx := 0
+	runeOffset := offset
 
-	for idx, ru := range runes {
+	g := uniseg.NewGraphemes(text)
+	for g.Next() {
 		if x >= maxX {
-			return x, offset + len(runes)
+			break
+		}
+		cluster := g.Str()
+		clusterRunes := []rune(cluster)
+		clusterRuneCount := len(clusterRunes)
+		clusterWidth := textutil.DisplayWidth(cluster)
+		if clusterWidth <= 0 {
+			clusterWidth = 1
 		}
 
-		globalIdx := offset + idx
-		for spanIdx < len(spans) && globalIdx >= spans[spanIdx].end {
+		for spanIdx < len(spans) && runeOffset >= spans[spanIdx].end {
 			spanIdx++
 		}
-
 		style := baseStyle
-		if spanIdx < len(spans) && globalIdx >= spans[spanIdx].start && globalIdx < spans[spanIdx].end {
+		if spanIdx < len(spans) && runeOffset >= spans[spanIdx].start && runeOffset < spans[spanIdx].end {
 			style = highlightStyle
 		}
 
-		x = r.drawStyledRune(x, y, maxX, ru, style)
+		main := clusterRunes[0]
+		comb := clusterRunes[1:]
+		r.screen.SetContent(x, y, main, comb, style)
+		for pad := 1; pad < clusterWidth && x+pad < maxX; pad++ {
+			r.screen.SetContent(x+pad, y, ' ', nil, style)
+		}
+		x += clusterWidth
+		runeOffset += clusterRuneCount
 	}
 
-	return x, offset + len(runes)
+	return x, runeOffset
 }

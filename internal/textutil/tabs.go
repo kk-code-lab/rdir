@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 )
 
 const DefaultTabWidth = 4
@@ -37,13 +38,5 @@ func ExpandTabs(text string, tabWidth int) string {
 
 // DisplayWidth reports the printable width of text accounting for wide runes.
 func DisplayWidth(text string) int {
-	width := 0
-	for _, ru := range text {
-		w := runewidth.RuneWidth(ru)
-		if w <= 0 {
-			w = 1
-		}
-		width += w
-	}
-	return width
+	return uniseg.StringWidth(text)
 }
