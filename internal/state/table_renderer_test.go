@@ -48,6 +48,19 @@ func TestTableRenderingRespectsMaxLinesPerCell(t *testing.T) {
 	}
 }
 
+func TestTableCellWidthUsesGraphemeWidth(t *testing.T) {
+	cell := makeTableCell([]markdownInline{
+		{kind: inlineText, literal: "⚠️a"},
+	}, TextStylePlain)
+	if len(cell.lines) != 1 {
+		t.Fatalf("expected single line, got %d", len(cell.lines))
+	}
+	want := textutil.DisplayWidth("⚠️a")
+	if got := cell.lines[0].width; got != want {
+		t.Fatalf("expected width %d, got %d", want, got)
+	}
+}
+
 func containsEllipsis(s string) bool {
 	for _, r := range s {
 		if r == '…' {
