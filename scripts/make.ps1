@@ -3,14 +3,14 @@
 Helper to mirror common Make targets in PowerShell.
 Usage: ./scripts/make.ps1 <target>
 Targets: build, install, test, test-coverage, test-race, bench-fuzzy, bench-fuzzy-prof,
-         pprof-fuzzy-cpu, pprof-fuzzy-mem, clean, fmt, lint, run, help.
+         pprof-fuzzy-cpu, pprof-fuzzy-mem, clean, fmt, lint, check, run, help.
 Requires: Go in PATH; golangci-lint for lint.
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('build', 'install', 'test', 'test-coverage', 'test-race', 'bench-fuzzy', 'bench-fuzzy-prof', 'pprof-fuzzy-cpu', 'pprof-fuzzy-mem', 'clean', 'fmt', 'lint', 'run', 'help')]
+    [ValidateSet('build', 'install', 'test', 'test-coverage', 'test-race', 'bench-fuzzy', 'bench-fuzzy-prof', 'pprof-fuzzy-cpu', 'pprof-fuzzy-mem', 'clean', 'fmt', 'lint', 'check', 'run', 'help')]
     [string]$Target = 'help'
 )
 
@@ -99,6 +99,11 @@ try {
         'lint' {
             Invoke-CommandChecked -Description 'Linting code (requires golangci-lint)...' -Action { golangci-lint run ./... }
         }
+        'check' {
+            Invoke-CommandChecked -Description 'Linting code (requires golangci-lint)...' -Action { golangci-lint run ./... }
+            Invoke-CommandChecked -Description "Building $binaryName..." -Action { go build -ldflags $buildFlag -o $binPath $mainEntry }
+            Invoke-CommandChecked -Description 'Type-checking tests (no execution)...' -Action { go test -run '^$' $internalPackages }
+        }
         'run' {
             Invoke-CommandChecked -Description "Building $binaryName..." -Action { go build -ldflags $buildFlag -o $binPath $mainEntry }
             Invoke-CommandChecked -Description "Running $binaryName..." -Action { & $binPath }
@@ -116,6 +121,7 @@ try {
             Write-Host '  bench-fuzzy-prof   - Run fuzzy benchmarks and capture CPU/memory profiles'
             Write-Host '  pprof-fuzzy-cpu    - Show hottest stack traces from the captured CPU profile'
             Write-Host '  pprof-fuzzy-mem    - Show top allocators from the captured memory profile'
+            Write-Host '  check              - Lint, build, and compile tests without running them'
             Write-Host '  run                - Build and run the application'
             Write-Host '  clean              - Remove build artifacts'
             Write-Host '  fmt                - Format code with go fmt'

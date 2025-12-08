@@ -12,6 +12,7 @@
 - Use `./scripts/make.ps1 <target>` for builds/tests/benchmarks; targets mirror the Makefile for users who still invoke `make`.
 - `./scripts/make.ps1 build` compiles the binary to `build/rdir`; `./scripts/make.ps1 run` rebuilds and launches it locally.
 - `./scripts/make.ps1 test` runs the full suite in `./internal/...`; use `test-coverage` and `test-race` targets for coverage and race checks.
+- `./scripts/make.ps1 check` runs lint, builds the binary, and compiles tests without executing them (`go test -run '^$' ./internal/...`).
 - `./scripts/make.ps1 bench-fuzzy` benchmarks the fuzzy matchers; run it before and after algorithm changes to confirm deltas.
 - `./scripts/make.ps1 fmt` applies `go fmt ./...`; `./scripts/make.ps1 lint` shells to `golangci-lint run ./...` (install it locally first).
 
