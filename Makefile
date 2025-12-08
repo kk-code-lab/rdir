@@ -2,6 +2,7 @@
 
 BINARY_NAME=rdir
 BUILD_DIR=build
+EXE_SUFFIX=
 MAIN_ENTRY=./cmd/rdir
 INTERNAL_PACKAGES=./internal/...
 PROFILE_DIR=$(BUILD_DIR)/profiles
@@ -9,15 +10,24 @@ CPU_PROFILE=$(PROFILE_DIR)/fuzzy.cpu.pprof
 MEM_PROFILE=$(PROFILE_DIR)/fuzzy.mem.pprof
 ifeq ($(OS),Windows_NT)
 DEVNULL=NUL
+EXE_SUFFIX=.exe
+RUN_BIN=.\\$(BUILD_DIR)\\$(BINARY_NAME)$(EXE_SUFFIX)
+RM=cmd /C del /Q
+BIN_PATH_WIN=$(subst /,\,$(BIN_PATH))
 else
 DEVNULL=/dev/null
+RUN_BIN=$(BIN_PATH)
+RM=rm -f
 endif
+BIN_PATH=$(BUILD_DIR)/$(BINARY_NAME)$(EXE_SUFFIX)
 GIT_COMMIT=$(shell git rev-parse --short HEAD 2>$(DEVNULL) || echo unknown)
 LDFLAGS=-ldflags "-X github.com/kk-code-lab/rdir/internal/app.BuildCommit=$(GIT_COMMIT)"
+RDIR_DEBUG_LOG ?= 1
+export RDIR_DEBUG_LOG
 
 build:
 	@echo "Building $(BINARY_NAME)..."
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_ENTRY)
+	go build $(LDFLAGS) -o $(BIN_PATH) $(MAIN_ENTRY)
 
 install:
 	@echo "Installing $(BINARY_NAME) to $$GOBIN (or GOPATH/bin)..."
@@ -61,7 +71,11 @@ pprof-fuzzy-mem:
 
 clean:
 	@echo "Cleaning build artifacts..."
-	rm -f $(BUILD_DIR)/$(BINARY_NAME)
+ifeq ($(OS),Windows_NT)
+	@$(RM) "$(BIN_PATH_WIN)" 2>$(DEVNULL) || exit 0
+else
+	@$(RM) $(BIN_PATH)
+endif
 
 fmt:
 	@echo "Formatting code..."
@@ -73,7 +87,11 @@ lint:
 
 run: build
 	@echo "Running $(BINARY_NAME)..."
-	./$(BUILD_DIR)/$(BINARY_NAME)
+ifeq ($(OS),Windows_NT)
+	@cmd /C "$(RUN_BIN)"
+else
+	@$(RUN_BIN)
+endif
 
 help:
 	@echo "rdir - Terminal file manager in Go"
