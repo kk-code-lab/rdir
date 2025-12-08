@@ -14,19 +14,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Test Commands
 
-The project includes a **Makefile** for convenient task execution:
+Use the PowerShell helper (cross-platform via pwsh) instead of invoking `make` directly:
 
 ```bash
-make build          # Build binary to build/rdir
-make test           # Run all tests with verbose output
-make test-coverage  # Run tests with coverage report
-make test-race      # Run tests with race detector
-make bench-fuzzy    # Run fuzzy matching benchmarks
-make run            # Build and run the application
-make clean          # Remove build artifacts
-make fmt            # Format code with go fmt
-make lint           # Run linter (requires golangci-lint)
-make help           # Show available commands
+./scripts/make.ps1 build          # Build binary to build/rdir
+./scripts/make.ps1 test           # Run all tests
+./scripts/make.ps1 test-coverage  # Coverage report
+./scripts/make.ps1 test-race      # Race detector
+./scripts/make.ps1 bench-fuzzy    # Fuzzy matching benchmarks
+./scripts/make.ps1 run            # Build and run the application
+./scripts/make.ps1 clean          # Remove build artifacts
+./scripts/make.ps1 fmt            # go fmt ./...
+./scripts/make.ps1 lint           # golangci-lint run ./...
+./scripts/make.ps1 help           # Show available commands
 ```
 
 ### Direct `go` commands (alternative):

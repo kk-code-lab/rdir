@@ -6,13 +6,14 @@
 - `build/rdir` is the generated binary; it stays out of version control via `.gitignore`.
 - `temp/` is gitignored scratch space for temporary scripts, data, or experiments.
 - `docs/` provides deeper reference material such as `docs/TEST_GUIDE.md` and `docs/IMPLEMENTATION.md`.
-- `Makefile` captures the supported workflows—prefer it over ad-hoc `go` commands.
+- `Makefile` captures the supported workflows—prefer it over ad-hoc `go` commands; `scripts/make.ps1` mirrors these targets in PowerShell for Windows/macOS/Linux (run `./scripts/make.ps1 <target>`).
 
 ## Build, Test & Development Commands
-- `make build` compiles the binary to `build/rdir`; `make run` rebuilds and launches it locally.
-- `make test` runs the full suite in `./internal/...`; use `make test-coverage` for coverage data and `make test-race` when touching concurrency.
-- `make bench-fuzzy` benchmarks the fuzzy matchers; run it before and after algorithm changes to confirm deltas.
-- `make fmt` applies `go fmt ./...`; `make lint` shells to `golangci-lint run ./...` (install it locally first).
+- Prefer `./scripts/make.ps1 <target>` (PowerShell) over `make` for cross-platform parity; targets are mirrored.
+- `make build` / `./scripts/make.ps1 build` compiles the binary to `build/rdir`; `make run` / `./scripts/make.ps1 run` rebuilds and launches it locally.
+- `make test` / `./scripts/make.ps1 test` runs the full suite in `./internal/...`; use `test-coverage` and `test-race` targets for coverage and race checks.
+- `make bench-fuzzy` / `./scripts/make.ps1 bench-fuzzy` benchmarks the fuzzy matchers; run it before and after algorithm changes to confirm deltas.
+- `make fmt` / `./scripts/make.ps1 fmt` applies `go fmt ./...`; `make lint` / `./scripts/make.ps1 lint` shells to `golangci-lint run ./...` (install it locally first).
 
 ## Coding Style & Naming Conventions
 - Follow idiomatic Go: tabs for indentation, `camelCase` for locals, `PascalCase` for exported identifiers, and `_test.go` suffixes for test files.
