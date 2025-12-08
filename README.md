@@ -35,14 +35,14 @@ rdir
 ```bash
 git clone https://github.com/kk-code-lab/rdir
 cd rdir
-make build
+./scripts/make.ps1 build   # or: make build
 ./build/rdir
 ```
 
 ## Testing
 
 ```bash
-make test
+./scripts/make.ps1 test    # or: make test
 ```
 
 ## License
