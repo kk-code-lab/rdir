@@ -6,14 +6,14 @@
 - `build/rdir` is the generated binary; it stays out of version control via `.gitignore`.
 - `temp/` is gitignored scratch space for temporary scripts, data, or experiments.
 - `docs/` provides deeper reference material such as `docs/TEST_GUIDE.md` and `docs/IMPLEMENTATION.md`.
-- `Makefile` captures the supported workflows—prefer it over ad-hoc `go` commands; `scripts/make.ps1` mirrors these targets in PowerShell for Windows/macOS/Linux (run `./scripts/make.ps1 <target>`).
+- `scripts/make.ps1` captures the supported workflows for Windows/macOS/Linux (run `./scripts/make.ps1 <target>`). A GNU Makefile is kept for compatibility but is not the primary entrypoint.
 
 ## Build, Test & Development Commands
-- Prefer `./scripts/make.ps1 <target>` (PowerShell) over `make` for cross-platform parity; targets are mirrored.
-- `make build` / `./scripts/make.ps1 build` compiles the binary to `build/rdir`; `make run` / `./scripts/make.ps1 run` rebuilds and launches it locally.
-- `make test` / `./scripts/make.ps1 test` runs the full suite in `./internal/...`; use `test-coverage` and `test-race` targets for coverage and race checks.
-- `make bench-fuzzy` / `./scripts/make.ps1 bench-fuzzy` benchmarks the fuzzy matchers; run it before and after algorithm changes to confirm deltas.
-- `make fmt` / `./scripts/make.ps1 fmt` applies `go fmt ./...`; `make lint` / `./scripts/make.ps1 lint` shells to `golangci-lint run ./...` (install it locally first).
+- Use `./scripts/make.ps1 <target>` for builds/tests/benchmarks; targets mirror the Makefile for users who still invoke `make`.
+- `./scripts/make.ps1 build` compiles the binary to `build/rdir`; `./scripts/make.ps1 run` rebuilds and launches it locally.
+- `./scripts/make.ps1 test` runs the full suite in `./internal/...`; use `test-coverage` and `test-race` targets for coverage and race checks.
+- `./scripts/make.ps1 bench-fuzzy` benchmarks the fuzzy matchers; run it before and after algorithm changes to confirm deltas.
+- `./scripts/make.ps1 fmt` applies `go fmt ./...`; `./scripts/make.ps1 lint` shells to `golangci-lint run ./...` (install it locally first).
 
 ## Coding Style & Naming Conventions
 - Follow idiomatic Go: tabs for indentation, `camelCase` for locals, `PascalCase` for exported identifiers, and `_test.go` suffixes for test files.
