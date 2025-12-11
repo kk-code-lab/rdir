@@ -128,6 +128,68 @@ func (app *Application) handleOpenPager() bool {
 	return true
 }
 
+func (app *Application) handleOpenShell() bool {
+	shellArgs, ok := detectShellCommand()
+	if !ok || len(shellArgs) == 0 {
+		app.state.LastError = fmt.Errorf("no shell command available")
+		return true
+	}
+
+	useTTY := runtime.GOOS != "windows"
+	var tty *os.File
+	if useTTY {
+		if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+			tty = f
+			defer func() { _ = tty.Close() }()
+		} else {
+			useTTY = false
+		}
+	}
+
+	app.stopEventPoller()
+	app.logf("handleOpenShell: suspending screen")
+	if err := app.screen.Suspend(); err != nil {
+		app.startEventPoller()
+		app.state.LastError = fmt.Errorf("failed to suspend screen: %w", err)
+		return true
+	}
+
+	var runErr error
+	defer func() {
+		if resumeErr := app.screen.Resume(); resumeErr != nil && runErr == nil {
+			runErr = resumeErr
+		}
+		app.logf("handleOpenShell: resumed screen")
+		app.drainPendingEvents()
+		_ = flushConsoleInput()
+		if errReinit := app.reinitScreen(); errReinit != nil && runErr == nil {
+			runErr = errReinit
+		}
+		if app.processActions() {
+			app.renderer.Render(app.state)
+			app.screen.Show()
+		}
+		if runErr != nil {
+			app.state.LastError = runErr
+		}
+	}()
+
+	runErr = runExternalCommand(shellArgs, func(cmd *exec.Cmd) {
+		cmd.Dir = app.state.CurrentPath
+		if useTTY && tty != nil {
+			cmd.Stdin = tty
+			cmd.Stdout = tty
+			cmd.Stderr = tty
+		} else {
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+	}, "shell")
+
+	return true
+}
+
 func (app *Application) pagerArgs(filePath string) []string {
 	base := detectPagerCommand(runtime.GOOS, os.Getenv("PAGER"), pagerLookPath)
 	if len(base) == 0 {

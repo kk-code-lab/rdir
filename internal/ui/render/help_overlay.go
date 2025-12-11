@@ -56,6 +56,7 @@ func buildHelpOverlayLines(state *statepkg.AppState) []string {
 			title: "Actions",
 			entries: []helpOverlayEntry{
 				{keys: ".", desc: hiddenDesc},
+				{keys: "!", desc: "Open shell in current directory"},
 				{keys: "r", desc: "Refresh directory"},
 				{keys: "y", desc: "Yank path to clipboard"},
 				{keys: "e", desc: "Open in external editor ($EDITOR)"},

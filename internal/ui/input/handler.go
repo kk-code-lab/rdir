@@ -367,6 +367,10 @@ func (ih *InputHandler) processKeyEvent(ev *tcell.EventKey) bool {
 				ih.actionChan <- statepkg.RefreshDirectoryAction{}
 				return true
 
+			case '!':
+				ih.actionChan <- statepkg.OpenShellAction{}
+				return true
+
 			case 'h':
 				return true
 			}

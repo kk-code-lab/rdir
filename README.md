@@ -26,6 +26,7 @@ rdir
 - **←/Backspace**: Go to parent
 - **/**: Fuzzy search
 - **r**: Refresh current directory listing
+- **!**: Open a shell in current directory (exit to return)
 - **[/]**: History navigation
 - **h**: Toggle hidden files
 - **q**: Exit

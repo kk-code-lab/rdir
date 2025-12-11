@@ -284,3 +284,52 @@ func TestDetectEditorCommandUnixFallbacks(t *testing.T) {
 		t.Fatalf("expected %v, got %v", expected, args)
 	}
 }
+
+func TestDetectShellUsesShellEnvOnUnix(t *testing.T) {
+	lookPath := func(cmd string) (string, error) {
+		if cmd == "zsh" {
+			return "/bin/zsh", nil
+		}
+		return "", errors.New("not found")
+	}
+	getenv := func(key string) string {
+		if key == "SHELL" {
+			return "zsh"
+		}
+		return ""
+	}
+	args, ok := detectShellCommandInternal("linux", getenv, lookPath)
+	if !ok {
+		t.Fatalf("expected shell command")
+	}
+	expected := []string{"/bin/zsh"}
+	if !reflect.DeepEqual(args, expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+}
+
+func TestDetectShellPrefersPwshOnWindows(t *testing.T) {
+	lookPath := func(cmd string) (string, error) {
+		if cmd == "pwsh" {
+			return `C:\Program Files\PowerShell\7\pwsh.exe`, nil
+		}
+		if cmd == "cmd.exe" {
+			return `C:\Windows\System32\cmd.exe`, nil
+		}
+		return "", errors.New("not found")
+	}
+	getenv := func(key string) string {
+		if key == "COMSPEC" {
+			return "cmd.exe"
+		}
+		return ""
+	}
+	args, ok := detectShellCommandInternal("windows", getenv, lookPath)
+	if !ok {
+		t.Fatalf("expected shell command")
+	}
+	expected := []string{`C:\Program Files\PowerShell\7\pwsh.exe`}
+	if !reflect.DeepEqual(args, expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+}

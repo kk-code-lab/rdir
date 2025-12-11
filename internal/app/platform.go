@@ -94,6 +94,85 @@ func detectEditorCommandInternal(goos string, getenv func(string) string, lookPa
 	return nil, false
 }
 
+func detectShellCommand() ([]string, bool) {
+	return detectShellCommandInternal(runtime.GOOS, os.Getenv, exec.LookPath)
+}
+
+func detectShellCommandInternal(goos string, getenv func(string) string, lookPath func(string) (string, error)) ([]string, bool) {
+	override := strings.TrimSpace(getenv("RDIR_SHELL"))
+	if override != "" {
+		if args := parseEditorCommand(override); len(args) > 0 {
+			if lookPath != nil {
+				if resolved, err := lookPath(args[0]); err == nil && resolved != "" {
+					args[0] = resolved
+					return args, true
+				}
+			} else {
+				return args, true
+			}
+		}
+	}
+
+	if !strings.EqualFold(goos, "windows") {
+		shellEnv := strings.TrimSpace(getenv("SHELL"))
+		if shellEnv != "" {
+			if args := parseEditorCommand(shellEnv); len(args) > 0 {
+				if lookPath != nil {
+					if resolved, err := lookPath(args[0]); err == nil && resolved != "" {
+						args[0] = resolved
+						return args, true
+					}
+				} else {
+					return args, true
+				}
+			}
+		}
+
+		for _, candidate := range []string{"zsh", "bash", "fish", "sh", "ksh"} {
+			if lookPath != nil {
+				if resolved, err := lookPath(candidate); err == nil && resolved != "" {
+					return []string{resolved}, true
+				}
+			} else {
+				return []string{candidate}, true
+			}
+		}
+		return nil, false
+	}
+
+	var candidates []string
+	candidates = append(candidates, "pwsh", "powershell", "powershell.exe")
+
+	comspec := strings.TrimSpace(getenv("COMSPEC"))
+	if comspec != "" {
+		if args := parseEditorCommand(comspec); len(args) > 0 {
+			candidates = append(candidates, args[0])
+		}
+	}
+	candidates = append(candidates, "cmd", "cmd.exe")
+
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		lower := strings.ToLower(candidate)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		if lookPath != nil {
+			if resolved, err := lookPath(candidate); err == nil && resolved != "" {
+				return []string{resolved}, true
+			}
+		} else {
+			return []string{candidate}, true
+		}
+	}
+
+	return nil, false
+}
+
 func parseEditorCommand(cmd string) []string {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {

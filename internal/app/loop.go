@@ -655,6 +655,9 @@ func (app *Application) handleAppAction(action statepkg.Action) bool {
 		app.logf("handleAppAction OpenPagerAction")
 		_ = app.reducer.EnsurePreviewCurrent(app.state)
 		return app.handleOpenPager()
+	case statepkg.OpenShellAction:
+		app.logf("handleAppAction OpenShellAction")
+		return app.handleOpenShell()
 	}
 
 	if _, err := app.reducer.Reduce(app.state, action); err != nil {
