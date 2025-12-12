@@ -384,6 +384,33 @@ func TestGeneratePreview_BinaryFile(t *testing.T) {
 	}
 }
 
+func TestPreviewExitFullScreenKeepsScrollOffset(t *testing.T) {
+	state := &AppState{
+		PreviewFullScreen:    true,
+		PreviewData:          &PreviewData{Name: "doc.md", TextLines: []string{"a", "b", "c"}, LineCount: 200},
+		PreviewScrollOffset:  50,
+		PreviewWrapOffset:    0,
+		ScreenWidth:          120,
+		ScreenHeight:         40,
+		previewScrollHistory: make(map[string]previewScrollPosition),
+		CurrentPath:          "/tmp",
+		Files:                []FileEntry{{Name: "doc.md", FullPath: "/tmp/doc.md"}},
+		SelectedIndex:        0,
+	}
+
+	r := &StateReducer{}
+	next, err := r.Reduce(state, PreviewExitFullScreenAction{})
+	if err != nil {
+		t.Fatalf("Reduce: %v", err)
+	}
+	if next.PreviewFullScreen {
+		t.Fatalf("expected PreviewFullScreen=false")
+	}
+	if next.PreviewScrollOffset != 50 {
+		t.Fatalf("expected PreviewScrollOffset preserved, got %d", next.PreviewScrollOffset)
+	}
+}
+
 func TestIsTextFile_PlainText(t *testing.T) {
 	content := []byte("Hello world\nThis is plain text\n")
 	if !fsutil.IsTextFile("plain.txt", content) {

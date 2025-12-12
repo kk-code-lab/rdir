@@ -132,19 +132,20 @@ type AppState struct {
 	HideHiddenFiles bool // Whether to hide files starting with . (default true)
 
 	// Preview
-	PreviewData          *PreviewData
-	PreviewPath          string
-	PreviewFullScreen    bool
-	PreviewWrap          bool
-	PreviewScrollOffset  int
-	PreviewWrapOffset    int
-	PreviewPreferRaw     bool
-	previewCache         map[string]previewCacheEntry
-	previewScrollHistory map[string]previewScrollPosition
-	previewDebounceTimer *time.Timer
-	previewPendingToken  int
-	previewPendingPath   string
-	previewPendingReset  bool
+	PreviewData             *PreviewData
+	PreviewPath             string
+	PreviewFullScreen       bool
+	PreviewWrap             bool
+	PreviewScrollOffset     int
+	PreviewWrapOffset       int
+	PreviewBinaryByteOffset int64
+	PreviewPreferRaw        bool
+	previewCache            map[string]previewCacheEntry
+	previewScrollHistory    map[string]previewScrollPosition
+	previewDebounceTimer    *time.Timer
+	previewPendingToken     int
+	previewPendingPath      string
+	previewPendingReset     bool
 
 	PreviewLoader          PreviewLoader
 	PreviewLoading         bool
@@ -188,8 +189,9 @@ type previewCacheEntry struct {
 }
 
 type previewScrollPosition struct {
-	scroll int
-	wrap   int
+	scroll           int
+	wrap             int
+	binaryByteOffset int64
 }
 
 func (s *AppState) nextDirectoryLoadToken() int {

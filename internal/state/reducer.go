@@ -1222,10 +1222,8 @@ func (r *StateReducer) Reduce(state *AppState, action Action) (*AppState, error)
 		if state.PreviewFullScreen {
 			state.rememberPreviewScrollForCurrentFile()
 			state.PreviewFullScreen = false
-			// Reset inline preview to the top; the remembered position is kept
-			// in history and will be restored next time fullscreen pager opens.
-			state.normalizePreviewScroll()
-			state.clampPreviewScroll()
+			// Keep the current scroll position when returning to the inline preview.
+			// The remembered fullscreen position is stored in history.
 		}
 		return state, nil
 

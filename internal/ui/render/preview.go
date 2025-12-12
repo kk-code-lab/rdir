@@ -131,7 +131,10 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 			lines := preview.FormattedSegments
 			meta := preview.FormattedSegmentLineMeta
 			if preview.FormattedKind == "markdown" && preview.FormattedUnavailableReason == "" && len(preview.TextLines) > 0 && panelWidth > 0 {
-				maxLinesPerCell := 3
+				// Keep inline table rows stable: wrapping cell content changes the
+				// rendered line count and makes scroll positions feel "shifted"
+				// compared to the fullscreen pager view.
+				maxLinesPerCell := 1
 				if wrapEnabled {
 					maxLinesPerCell = 0
 				}

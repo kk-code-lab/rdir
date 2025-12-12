@@ -258,10 +258,10 @@ func hexSpanForByte(byteIdx int, bytesPerLine int) textSpan {
 		byteIdx = bytesPerLine - 1
 	}
 	const hexOffsetCol = 10 // "00000000  "
-	col := hexOffsetCol + byteIdx*3
-	if byteIdx > 7 {
-		col++
-	}
+	// Each byte is rendered as "HH " (3 columns). Additionally, formatHexLine
+	// inserts one extra space after every 8 bytes (except after the last group).
+	groupSpacesBefore := byteIdx / 8
+	col := hexOffsetCol + byteIdx*3 + groupSpacesBefore
 	return textSpan{start: col, end: col + 2}
 }
 
@@ -288,7 +288,11 @@ func asciiSpanForByte(byteIdx int, bytesPerLine int) textSpan {
 	if byteIdx >= bytesPerLine {
 		byteIdx = bytesPerLine - 1
 	}
-	asciiStart := 10 + bytesPerLine*3 + 3
+	// Prefix: 10 columns for "00000000␠␠".
+	// Hex: bytesPerLine * 3 columns + group spaces after each 8 bytes (except last group).
+	// Separator between hex and ascii: " |" (2 columns), with ascii starting after '|'.
+	groupSpacesTotal := (bytesPerLine - 1) / 8
+	asciiStart := 10 + bytesPerLine*3 + groupSpacesTotal + 2
 	return textSpan{start: asciiStart + byteIdx, end: asciiStart + byteIdx + 1}
 }
 
@@ -449,7 +453,29 @@ func applySearchHighlights(text string, spans []textSpan, focus []textSpan) stri
 			clusterWidth = 1
 		}
 
-		if !active && col >= current.start {
+		// Close any spans that have already ended before the next cluster is
+		// emitted. This prevents highlight "leakage" when column accounting
+		// jumps past an end boundary.
+		for active && col >= current.end {
+			builder.WriteString(highlightOffForStyle(currentStyle))
+			if activeSGR != "" {
+				builder.WriteString(activeSGR)
+			}
+			active = false
+			spanIdx++
+			if spanIdx >= len(spans) {
+				current = textSpan{}
+				currentStyle = ""
+				break
+			}
+			current = spans[spanIdx]
+		}
+		if spanIdx >= len(spans) {
+			builder.WriteString(text[i:])
+			break
+		}
+
+		if !active && col >= current.start && col < current.end {
 			currentStyle = highlightStyleForSpan(current, focus)
 			builder.WriteString(currentStyle)
 			active = true
@@ -595,6 +621,7 @@ func (p *PreviewPager) cancelSearch() {
 	p.stopSearchTimer()
 	p.searchQuery = ""
 	p.searchQueryBinary = false
+	p.searchQueryFullScan = false
 	p.clearSearchResults()
 }
 
@@ -742,6 +769,10 @@ func (p *PreviewPager) executeSearch(query string) {
 	p.searchQueryBinary = searchBinaryUI
 
 	binaryEngine := p.binaryMode
+	fullScan := p.searchFullScan
+	if !p.searchMode {
+		fullScan = p.searchQueryFullScan
+	}
 	if query == "" {
 		return
 	}
@@ -754,7 +785,8 @@ func (p *PreviewPager) executeSearch(query string) {
 	)
 
 	if binaryEngine {
-		hits, highlights, limited, err = p.collectBinarySearchMatches(query)
+		hits, highlights, limited, err = p.collectBinarySearchMatches(query, fullScan)
+		p.searchQueryFullScan = fullScan
 	} else {
 		hits, highlights, limited, err = p.collectSearchMatches(query)
 	}
@@ -779,7 +811,7 @@ func (p *PreviewPager) collectSearchMatches(query string) ([]searchHit, map[int]
 	return p.searchStatic(needle)
 }
 
-func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, map[int][]textSpan, bool, error) {
+func (p *PreviewPager) collectBinarySearchMatches(query string, fullScan bool) ([]searchHit, map[int][]textSpan, bool, error) {
 	if p == nil || p.state == nil || p.binarySource == nil {
 		return nil, nil, false, errors.New("binary source unavailable")
 	}
@@ -807,7 +839,7 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 	}
 
 	bytesToScan := totalBytes
-	if !p.searchFullScan && searchMaxBinaryBytes > 0 && bytesToScan > searchMaxBinaryBytes {
+	if !fullScan && searchMaxBinaryBytes > 0 && bytesToScan > searchMaxBinaryBytes {
 		bytesToScan = searchMaxBinaryBytes
 	}
 
@@ -843,6 +875,7 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 	hits := []searchHit{}
 	highlights := make(map[int][]textSpan)
 	limited := totalBytes > bytesToScan
+	limitedByHitCap := false
 	var tail []byte
 	for offset := int64(0); offset < bytesToScan && len(hits) < searchMaxHits; {
 		readSize := bufSize
@@ -924,6 +957,7 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 
 		if len(hits) >= searchMaxHits {
 			limited = true
+			limitedByHitCap = true
 			break
 		}
 
@@ -935,7 +969,184 @@ func (p *PreviewPager) collectBinarySearchMatches(query string) ([]searchHit, ma
 		offset += int64(n)
 	}
 
+	// When the match count is huge we cap hits for performance. In that case, the
+	// global scan may fill the cap before reaching the user's current viewport,
+	// so make sure we still highlight matches that are currently on screen.
+	if limitedByHitCap {
+		viewportHits := p.appendBinarySearchHighlightsForVisibleRange(highlights, query, needle, partialNibble, nibble, bytesPerLine, totalBytes)
+		// Navigation should prefer the current viewport over the start of file in
+		// hit-capped searches; otherwise "next" jumps to early matches the user
+		// can't currently see.
+		if len(viewportHits) > 0 {
+			hits = viewportHits
+		}
+	}
+
 	return hits, highlights, limited, nil
+}
+
+func (p *PreviewPager) appendBinarySearchHighlightsForVisibleRange(highlights map[int][]textSpan, query string, needle []byte, partialNibble bool, nibble byte, bytesPerLine int, totalBytes int64) []searchHit {
+	if p == nil || p.state == nil || p.binarySource == nil || p.height <= 0 || bytesPerLine <= 0 || totalBytes <= 0 {
+		return nil
+	}
+	if highlights == nil {
+		return nil
+	}
+
+	// Reconstruct how many content rows are visible.
+	headerRows := len(p.headerLines())
+	if headerRows >= p.height {
+		headerRows = p.height - 1
+		if headerRows < 0 {
+			headerRows = 0
+		}
+	}
+	available := p.height - headerRows - 1
+	if available < 1 {
+		available = 1
+	}
+	searchDisplay, _ := p.searchDisplaySegment()
+	showSearchRow := p.searchMode && searchDisplay != "" && available >= 2
+	contentRows := available
+	if showSearchRow {
+		contentRows--
+	}
+	if contentRows < 1 {
+		contentRows = 1
+	}
+
+	startLine := p.state.PreviewScrollOffset
+	if startLine < 0 {
+		startLine = 0
+	}
+	totalLines := p.binarySource.LineCount()
+	if totalLines <= 0 {
+		return nil
+	}
+	if startLine >= totalLines {
+		startLine = totalLines - 1
+		if startLine < 0 {
+			startLine = 0
+		}
+	}
+	endLine := startLine + contentRows - 1
+	if endLine >= totalLines {
+		endLine = totalLines - 1
+	}
+
+	startByte := int64(startLine) * int64(bytesPerLine)
+	endByte := int64(endLine+1)*int64(bytesPerLine) - 1
+	if endByte >= totalBytes {
+		endByte = totalBytes - 1
+	}
+	if endByte < startByte {
+		return nil
+	}
+
+	readLen := endByte - startByte + 1
+	if readLen <= 0 {
+		return nil
+	}
+
+	file := p.binarySource.file
+	closeFile := false
+	if file == nil {
+		f, err := os.Open(p.binarySource.path)
+		if err != nil {
+			return nil
+		}
+		file = f
+		closeFile = true
+	}
+	if closeFile {
+		defer func() { _ = file.Close() }()
+	}
+
+	buf := make([]byte, readLen)
+	n, err := file.ReadAt(buf, startByte)
+	if n <= 0 {
+		return nil
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil
+	}
+	buf = buf[:n]
+
+	hexQuery := strings.HasPrefix(query, ":")
+	caseInsensitive := !hexQuery && smartCaseInsensitiveASCII(needle)
+	searchChunk := buf
+	needleFolded := needle
+	if caseInsensitive {
+		searchChunk = foldASCIIBytes(buf)
+		needleFolded = foldASCIIBytes(needle)
+	}
+
+	viewportHits := []searchHit{}
+	searchFrom := 0
+	for {
+		idx := findBinaryPattern(searchChunk, needleFolded, partialNibble, nibble, searchFrom)
+		if idx == -1 {
+			break
+		}
+		abs := startByte + int64(idx)
+		start := int(abs)
+		matchLen := len(needle)
+		end := start + matchLen - 1
+		nibbleByte := -1
+		if partialNibble {
+			nibbleByte = start + matchLen
+		}
+
+		startL := start / bytesPerLine
+		endL := end / bytesPerLine
+		if nibbleByte >= 0 {
+			if nl := nibbleByte / bytesPerLine; nl > endL {
+				endL = nl
+			}
+		}
+
+		for line := maxInt(startLine, startL); line <= minInt(endLine, endL); line++ {
+			lineStart := line * bytesPerLine
+			lineEnd := lineStart + bytesPerLine - 1
+			for b := maxInt(lineStart, start); b <= minInt(lineEnd, end); b++ {
+				col := b - lineStart
+				highlights[line] = append(highlights[line],
+					hexSpanForByte(col, bytesPerLine),
+					asciiSpanForByte(col, bytesPerLine),
+				)
+			}
+			if nibbleByte >= 0 && nibbleByte >= lineStart && nibbleByte <= lineEnd {
+				col := nibbleByte - lineStart
+				highlights[line] = append(highlights[line],
+					hexNibbleSpanForByte(col, bytesPerLine, true),
+					asciiSpanForByte(col, bytesPerLine),
+				)
+			}
+		}
+
+		// Track a navigable hit for the viewport (first line of the match).
+		if startL >= startLine && startL <= endLine {
+			viewportHits = append(viewportHits, searchHit{
+				line:      startL,
+				span:      hexSpanForByte(start-startL*bytesPerLine, bytesPerLine),
+				len:       matchLen,
+				startByte: start,
+				nibbleEnd: partialNibble,
+				nibblePos: nibbleByte,
+			})
+		}
+
+		step := len(needle)
+		if step < 1 {
+			step = 1
+		}
+		if partialNibble {
+			step = len(needle) + 1
+		}
+		searchFrom = idx + step
+	}
+
+	return viewportHits
 }
 
 func (p *PreviewPager) searchStreaming(needle []byte) ([]searchHit, map[int][]textSpan, bool, error) {

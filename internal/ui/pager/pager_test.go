@@ -79,26 +79,46 @@ func TestBinaryPagerSourceReadsChunks(t *testing.T) {
 		t.Fatalf("write test file: %v", err)
 	}
 
-	source, err := newBinaryPagerSource(path, int64(len(data)))
-	if err != nil {
-		t.Fatalf("newBinaryPagerSource: %v", err)
-	}
-	defer source.Close()
-
-	expectedLines := (len(data) + binaryPreviewLineWidth - 1) / binaryPreviewLineWidth
-	if count := source.LineCount(); count != expectedLines {
-		t.Fatalf("LineCount=%d want %d", count, expectedLines)
-	}
-
-	line := source.Line(0)
-	if !strings.HasPrefix(line, "00000000") {
-		t.Fatalf("unexpected first data line: %q", line)
+	// Test with different widths to verify adaptive behavior
+	testCases := []struct {
+		width       int
+		expectedBPL int // expected bytes per line
+		description string
+	}{
+		{60, 8, "narrow terminal"},
+		{80, 8, "medium-narrow terminal"},
+		{90, 16, "medium terminal"},
+		{100, 16, "medium-wide terminal"},
+		{120, 24, "wide terminal"},
+		{150, 24, "very wide terminal"},
 	}
 
-	secondChunkIdx := binaryPagerChunkSize / binaryPreviewLineWidth
-	line = source.Line(secondChunkIdx)
-	if !strings.HasPrefix(line, "00010000") {
-		t.Fatalf("expected offset 0x10000, got %q", line)
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			source, err := newBinaryPagerSource(path, int64(len(data)), tc.width)
+			if err != nil {
+				t.Fatalf("newBinaryPagerSource: %v", err)
+			}
+			defer source.Close()
+
+			expectedLines := (len(data) + tc.expectedBPL - 1) / tc.expectedBPL
+			if count := source.LineCount(); count != expectedLines {
+				t.Fatalf("Width %d: LineCount=%d want %d (bytesPerLine=%d)", tc.width, count, expectedLines, tc.expectedBPL)
+			}
+
+			// Check first line format
+			line := source.Line(0)
+			if !strings.HasPrefix(line, "00000000") {
+				t.Fatalf("Width %d: unexpected first data line: %q", tc.width, line)
+			}
+
+			// Check second chunk first line
+			secondChunkIdx := source.chunkSize / tc.expectedBPL
+			line = source.Line(secondChunkIdx)
+			if !strings.HasPrefix(line, fmt.Sprintf("%08X", source.chunkSize)) {
+				t.Fatalf("Width %d: unexpected second chunk first line: %q", tc.width, line)
+			}
+		})
 	}
 }
 
@@ -138,6 +158,149 @@ func TestUpdateSizeFallsBackToOutputFd(t *testing.T) {
 	}
 	if len(seen) < 2 {
 		t.Fatalf("expected both descriptors to be attempted, got %v", seen)
+	}
+}
+
+func TestBinarySearchRecomputesHighlightsAfterBytesPerLineChange(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := make([]byte, 64)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+
+	source, err := newBinaryPagerSource(path, int64(len(data)), 90) // 16 bytes/line
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+	if source.bytesPerLine != 16 {
+		t.Fatalf("expected initial bytesPerLine=16, got %d", source.bytesPerLine)
+	}
+
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        120, // updateSize() should switch to 24 bytes/line
+		height:       10,
+		binarySource: source,
+	}
+
+	// Bytes 0x10 and 0x11 sit on line 1 when bytesPerLine=16.
+	p.executeSearch(":1011")
+	if len(p.searchHits) == 0 {
+		t.Fatalf("expected at least one search hit")
+	}
+	if len(p.searchHighlights[1]) == 0 {
+		t.Fatalf("expected highlights on line 1 for 16 bytes/line")
+	}
+
+	p.updateSize()
+	if source.bytesPerLine != 24 {
+		t.Fatalf("expected updated bytesPerLine=24, got %d", source.bytesPerLine)
+	}
+	if len(p.searchHighlights[0]) == 0 {
+		t.Fatalf("expected highlights on line 0 for 24 bytes/line")
+	}
+}
+
+func TestBinaryPagerSyncClampsInlineScrollAfterExit(t *testing.T) {
+	t.Parallel()
+	state := &statepkg.AppState{
+		PreviewData: &statepkg.PreviewData{
+			Name: "data.bin",
+			BinaryInfo: statepkg.BinaryPreview{
+				Lines:      []string{"(binary preview)"},
+				TotalBytes: 1024,
+			},
+		},
+	}
+
+	p := &PreviewPager{
+		state:      state,
+		binaryMode: true,
+		binarySource: &binaryPagerSource{
+			bytesPerLine: 24,
+			totalBytes:   1024,
+			chunkSize:    24 * 10,
+		},
+	}
+
+	// Simulate being deep in the file in the pager (line index for 24 bytes/line),
+	// which the inline preview cannot represent with its limited cached lines.
+	state.PreviewScrollOffset = 999
+	p.syncBinaryByteOffsetFromScroll()
+	if state.PreviewBinaryByteOffset != int64(999*24) {
+		t.Fatalf("expected byte offset %d, got %d", int64(999*24), state.PreviewBinaryByteOffset)
+	}
+
+	p.syncBinaryPositionOnExit()
+	if state.PreviewScrollOffset != 0 { // clamp to last available line (len=1)
+		t.Fatalf("expected inline scroll offset clamped to 0, got %d", state.PreviewScrollOffset)
+	}
+}
+
+func TestBinaryPagerExitRefreshesInlineBinaryLinesWindow(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := make([]byte, 8*1024)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			BinaryInfo: statepkg.BinaryPreview{
+				Lines:      []string{"00000000  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|", "… (1 bytes not shown)"},
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+
+	source, err := newBinaryPagerSource(path, int64(len(data)), 120)
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		binarySource: source,
+	}
+
+	state.PreviewBinaryByteOffset = 4096
+	p.syncBinaryPositionOnExit()
+
+	if len(state.PreviewData.BinaryInfo.Lines) < 3 {
+		t.Fatalf("expected refreshed inline preview to have multiple lines, got %d", len(state.PreviewData.BinaryInfo.Lines))
+	}
+	if !strings.Contains(state.PreviewData.BinaryInfo.Lines[0], "showing from") {
+		t.Fatalf("expected first line to include window header, got %q", state.PreviewData.BinaryInfo.Lines[0])
+	}
+	if !strings.HasPrefix(state.PreviewData.BinaryInfo.Lines[1], "00001000") {
+		t.Fatalf("expected hexdump to start at 0x1000, got %q", state.PreviewData.BinaryInfo.Lines[1])
 	}
 }
 
@@ -893,7 +1056,7 @@ func TestBinaryHighlightsApplied(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -986,7 +1149,7 @@ func TestBinarySearchAsciiSmartCase(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -1024,7 +1187,7 @@ func TestBinarySearchSpaceLiteral(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -1064,7 +1227,7 @@ func TestBinarySearchHighlightsMultiBytePattern(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -1081,6 +1244,85 @@ func TestBinarySearchHighlightsMultiBytePattern(t *testing.T) {
 	high := p.searchHighlights[0]
 	if len(high) < 4 {
 		t.Fatalf("expected per-byte hex+ascii spans, got %d", len(high))
+	}
+}
+
+func TestBinarySearchHighlightsTrack24BytesPerLine(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := make([]byte, 64)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)), 120) // 24 bytes/line
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+	if source.bytesPerLine != 24 {
+		t.Fatalf("expected bytesPerLine=24, got %d", source.bytesPerLine)
+	}
+
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        140,
+		height:       10,
+		binarySource: source,
+	}
+
+	// Bytes 0x10 and 0x11 are at positions 16 and 17, which are on the first
+	// line only when bytesPerLine >= 18.
+	p.executeSearch(":1011")
+	if len(p.searchHits) == 0 {
+		t.Fatalf("expected at least one hex search hit")
+	}
+
+	high0 := p.searchHighlights[0]
+	if len(high0) == 0 {
+		t.Fatalf("expected highlights on line 0")
+	}
+
+	wantHex16 := hexSpanForByte(16, 24)
+	wantHex17 := hexSpanForByte(17, 24)
+	wantASCII16 := asciiSpanForByte(16, 24)
+	wantASCII17 := asciiSpanForByte(17, 24)
+
+	contains := func(spans []textSpan, want textSpan) bool {
+		for _, sp := range spans {
+			if sp == want {
+				return true
+			}
+		}
+		return false
+	}
+	for _, want := range []textSpan{wantHex16, wantHex17, wantASCII16, wantASCII17} {
+		if !contains(high0, want) {
+			t.Fatalf("missing highlight span %+v on line 0 (got=%+v)", want, high0)
+		}
+	}
+
+	// Ensure we didn't accidentally stick these in the next line due to stale
+	// 16-bytes-per-line column math.
+	if high1 := p.searchHighlights[1]; len(high1) > 0 {
+		if contains(high1, wantHex16) || contains(high1, wantHex17) || contains(high1, wantASCII16) || contains(high1, wantASCII17) {
+			t.Fatalf("unexpected spans from line 0 present on line 1: %+v", high1)
+		}
 	}
 }
 
@@ -1103,7 +1345,7 @@ func TestBinarySearchHexDoesNotFoldASCII(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -1144,7 +1386,7 @@ func TestBinarySearchAcceptsPartialHexNibble(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -1204,7 +1446,7 @@ func TestBinarySearchFocusSingleNibbleHighlight(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -1260,7 +1502,7 @@ func TestBinarySearchClearingKeepsBinaryMode(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -1333,7 +1575,7 @@ func TestBinarySearchPartialNibbleAsciiHighlights(t *testing.T) {
 					},
 				},
 			}
-			source, err := newBinaryPagerSource(path, int64(len(tt.data)))
+			source, err := newBinaryPagerSource(path, int64(len(tt.data)), 100)
 			if err != nil {
 				t.Fatalf("newBinaryPagerSource: %v", err)
 			}
@@ -1384,7 +1626,7 @@ func TestBinarySearchPartialNibbleSkipsOverlappingMatches(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -1428,7 +1670,7 @@ func TestBinarySearchHonorsByteLimit(t *testing.T) {
 			},
 		},
 	}
-	source, err := newBinaryPagerSource(path, int64(len(data)))
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
 	if err != nil {
 		t.Fatalf("newBinaryPagerSource: %v", err)
 	}
@@ -1447,6 +1689,214 @@ func TestBinarySearchHonorsByteLimit(t *testing.T) {
 	}
 	if !p.searchLimited {
 		t.Fatalf("expected limited flag when scan is capped")
+	}
+}
+
+func TestBinarySearchFullScanFindsBeyondBinaryByteLimit(t *testing.T) {
+	t.Parallel()
+	oldLimit := searchMaxBinaryBytes
+	searchMaxBinaryBytes = 64
+	t.Cleanup(func() { searchMaxBinaryBytes = oldLimit })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := make([]byte, 256)
+	data[128] = 0xA9
+	data[129] = 0xFF
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+	p := &PreviewPager{
+		state:        state,
+		binaryMode:   true,
+		width:        120,
+		height:       10,
+		binarySource: source,
+	}
+
+	p.searchQueryFullScan = false
+	p.executeSearch(":a9ff")
+	if len(p.searchHits) != 0 {
+		t.Fatalf("expected no hits without full scan, got %d", len(p.searchHits))
+	}
+	if !p.searchLimited {
+		t.Fatalf("expected limited flag without full scan")
+	}
+
+	p.searchQueryFullScan = true
+	p.executeSearch(":a9ff")
+	if len(p.searchHits) == 0 {
+		t.Fatalf("expected hits with full scan enabled")
+	}
+	if p.searchLimited {
+		t.Fatalf("expected not limited with full scan enabled")
+	}
+}
+
+func TestBinarySearchHitCapStillHighlightsVisibleMatch(t *testing.T) {
+	t.Parallel()
+	oldHits := searchMaxHits
+	searchMaxHits = 10
+	t.Cleanup(func() { searchMaxHits = oldHits })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+
+	// Many matches: 0x00 0x00 appears everywhere.
+	data := make([]byte, 8192)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+		PreviewScrollOffset: 0,
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+
+	p := &PreviewPager{
+		state:            state,
+		binaryMode:       true,
+		width:            120,
+		height:           15,
+		binarySource:     source,
+		searchMode:       true,
+		searchBinaryMode: true,
+	}
+
+	// Jump close to end.
+	bytesPerLine := source.bytesPerLine
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	endLine := int((int64(len(data)) - 1) / int64(bytesPerLine))
+	state.PreviewScrollOffset = endLine - 3
+	if state.PreviewScrollOffset < 0 {
+		state.PreviewScrollOffset = 0
+	}
+
+	// Search a pattern that has extremely many matches so the hit cap triggers,
+	// then ensure that matches in the current viewport are still highlighted.
+	p.executeSearch(":0000")
+	if !p.searchLimited {
+		t.Fatalf("expected search to be limited by hit cap")
+	}
+
+	found := false
+	for line := range p.searchHighlights {
+		if line >= state.PreviewScrollOffset {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected at least one highlighted line within viewport")
+	}
+}
+
+func TestBinarySearchHitCapNextPrefersViewport(t *testing.T) {
+	t.Parallel()
+	oldHits := searchMaxHits
+	searchMaxHits = 10
+	t.Cleanup(func() { searchMaxHits = oldHits })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	data := make([]byte, 8192) // lots of :0000 hits
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	state := &statepkg.AppState{
+		CurrentPath: filepath.Dir(path),
+		PreviewData: &statepkg.PreviewData{
+			Name: filepath.Base(path),
+			Size: int64(len(data)),
+			BinaryInfo: statepkg.BinaryPreview{
+				TotalBytes: int64(len(data)),
+			},
+		},
+	}
+	source, err := newBinaryPagerSource(path, int64(len(data)), 100)
+	if err != nil {
+		t.Fatalf("newBinaryPagerSource: %v", err)
+	}
+	t.Cleanup(source.Close)
+
+	p := &PreviewPager{
+		state:            state,
+		binaryMode:       true,
+		width:            120,
+		height:           15,
+		binarySource:     source,
+		searchMode:       true,
+		searchBinaryMode: true,
+	}
+
+	bpl := source.bytesPerLine
+	if bpl <= 0 {
+		bpl = binaryPreviewLineWidth
+	}
+	endLine := int((int64(len(data)) - 1) / int64(bpl))
+	state.PreviewScrollOffset = endLine - 3
+	if state.PreviewScrollOffset < 0 {
+		state.PreviewScrollOffset = 0
+	}
+
+	p.executeSearch(":0000")
+	if !p.searchLimited {
+		t.Fatalf("expected hit-capped search to be limited")
+	}
+	if len(p.searchHits) == 0 {
+		t.Fatalf("expected viewport hits to exist")
+	}
+
+	// "Next" in search mode should focus within the current viewport, not jump
+	// to a hit near the start of the file.
+	p.handleSearchModeEvent(keyEvent{kind: keyDown})
+	if state.PreviewScrollOffset < endLine-20 {
+		t.Fatalf("expected to stay near end after next; got scroll=%d end=%d", state.PreviewScrollOffset, endLine)
+	}
+}
+
+func TestApplySearchHighlightsBinarySingleByteDoesNotIncludeTrailingSpace(t *testing.T) {
+	t.Parallel()
+	line := formatHexLine(0, []byte{0x00, 0x01}, 16)
+	spans := []textSpan{hexSpanForByte(0, 16)}
+	highlighted := applySearchHighlights(line, spans, nil)
+	want := searchHighlightOn + "00" + searchHighlightOff + " "
+	if !strings.Contains(highlighted, want) {
+		t.Fatalf("expected highlight to end before trailing space; want substring %q in %q", want, highlighted)
+	}
+	if strings.Contains(highlighted, searchHighlightOn+"00 "+searchHighlightOff) {
+		t.Fatalf("expected highlight not to include trailing space; got %q", highlighted)
 	}
 }
 

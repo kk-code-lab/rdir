@@ -85,9 +85,14 @@ func (s *AppState) rememberPreviewScrollForCurrentFile() {
 	if s.previewScrollHistory == nil {
 		s.previewScrollHistory = make(map[string]previewScrollPosition)
 	}
+	binaryByteOffset := int64(0)
+	if s.PreviewData != nil && len(s.PreviewData.BinaryInfo.Lines) > 0 {
+		binaryByteOffset = s.PreviewBinaryByteOffset
+	}
 	s.previewScrollHistory[path] = previewScrollPosition{
-		scroll: s.PreviewScrollOffset,
-		wrap:   s.PreviewWrapOffset,
+		scroll:           s.PreviewScrollOffset,
+		wrap:             s.PreviewWrapOffset,
+		binaryByteOffset: binaryByteOffset,
 	}
 }
 
@@ -101,6 +106,7 @@ func (s *AppState) restorePreviewScrollForPath(path string) bool {
 	}
 	s.PreviewScrollOffset = pos.scroll
 	s.PreviewWrapOffset = pos.wrap
+	s.PreviewBinaryByteOffset = pos.binaryByteOffset
 	return true
 }
 
@@ -172,6 +178,7 @@ func (s *AppState) resetPreviewScroll() {
 	}
 	s.PreviewScrollOffset = 0
 	s.PreviewWrapOffset = 0
+	s.PreviewBinaryByteOffset = 0
 	if s.PreviewData == nil {
 		s.PreviewFullScreen = false
 		s.PreviewWrap = false

@@ -147,7 +147,7 @@ func (r *Renderer) computeLayout(w int, state *statepkg.AppState) layoutMetrics 
 
 	if canShowPreview {
 		metrics.contentSeparatorWidth = 1
-	combinedWidth := contentWidth - metrics.contentSeparatorWidth
+		combinedWidth := contentWidth - metrics.contentSeparatorWidth
 		if combinedWidth >= (minMainPanelWidth + previewMinWidth) {
 			allowEstimate := state != nil && !state.PreviewLoading
 			previewWidth := r.desiredPreviewWidth(combinedWidth, previewMinWidth, state.PreviewData, allowEstimate)

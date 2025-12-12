@@ -41,9 +41,9 @@ const (
 	clipboardHardLimitBytes = int64(128 * 1024 * 1024)
 	shiftScrollLines        = 10
 	searchHighlightOn       = "\x1b[38;5;16;48;5;255m"
-	searchHighlightOff      = "\x1b[39;49m"
+	searchHighlightOff      = "\x1b[0m"
 	searchHighlightFocusOn  = "\x1b[38;5;16;48;5;178m"
-	searchHighlightFocusOff = "\x1b[39;49m"
+	searchHighlightFocusOff = "\x1b[0m"
 	searchDebounceDelay     = 140 * time.Millisecond
 )
 
@@ -118,61 +118,62 @@ type searchHit struct {
 var termGetSize = term.GetSize
 
 type PreviewPager struct {
-	state             *statepkg.AppState
-	editorCmd         []string
-	reducer           *statepkg.StateReducer
-	input             *os.File
-	outputFile        *os.File
-	output            io.Writer
-	reader            *bufio.Reader
-	writer            *bufio.Writer
-	restoreTerm       *term.State
-	stopKeyReader     func()
-	width             int
-	height            int
-	wrapEnabled       bool
-	lines             []string
-	lineWidths        []int
-	rawLines          []string
-	rawLineWidths     []int
-	rawSanitized      []string
-	rawSanitizedWid   []int
-	formattedLines    []string
-	formattedWidths   []int
-	formattedRules    []bool
-	formattedStyles   []string
-	rowSpans          []int
-	rowPrefix         []int
-	rowMetricsWidth   int
-	charCount         int
-	binaryMode        bool
-	binarySource      *binaryPagerSource
-	rawTextSource     *textPagerSource
-	preloadLines      int
-	showInfo          bool
-	showHelp          bool
-	showFormatted     bool
-	statusMessage     string
-	statusStyle       string
-	statusExpiry      time.Time
-	statusTimer       *time.Timer
-	lastErr           error
-	restartKeys       bool
-	clipboardCmd      []string
-	clipboardFunc     func(string) error
-	searchMode        bool
-	searchInput       []rune
-	searchQuery       string
-	searchHits        []searchHit
-	searchCursor      int
-	searchHighlights  map[int][]textSpan
-	searchLimited     bool
-	searchErr         error
-	searchTimer       *time.Timer
-	searchFocused     bool
-	searchBinaryMode  bool
-	searchQueryBinary bool
-	searchFullScan    bool
+	state               *statepkg.AppState
+	editorCmd           []string
+	reducer             *statepkg.StateReducer
+	input               *os.File
+	outputFile          *os.File
+	output              io.Writer
+	reader              *bufio.Reader
+	writer              *bufio.Writer
+	restoreTerm         *term.State
+	stopKeyReader       func()
+	width               int
+	height              int
+	wrapEnabled         bool
+	lines               []string
+	lineWidths          []int
+	rawLines            []string
+	rawLineWidths       []int
+	rawSanitized        []string
+	rawSanitizedWid     []int
+	formattedLines      []string
+	formattedWidths     []int
+	formattedRules      []bool
+	formattedStyles     []string
+	rowSpans            []int
+	rowPrefix           []int
+	rowMetricsWidth     int
+	charCount           int
+	binaryMode          bool
+	binarySource        *binaryPagerSource
+	rawTextSource       *textPagerSource
+	preloadLines        int
+	showInfo            bool
+	showHelp            bool
+	showFormatted       bool
+	statusMessage       string
+	statusStyle         string
+	statusExpiry        time.Time
+	statusTimer         *time.Timer
+	lastErr             error
+	restartKeys         bool
+	clipboardCmd        []string
+	clipboardFunc       func(string) error
+	searchMode          bool
+	searchInput         []rune
+	searchQuery         string
+	searchHits          []searchHit
+	searchCursor        int
+	searchHighlights    map[int][]textSpan
+	searchLimited       bool
+	searchErr           error
+	searchTimer         *time.Timer
+	searchFocused       bool
+	searchBinaryMode    bool
+	searchQueryBinary   bool
+	searchQueryFullScan bool
+	searchFullScan      bool
 }
 
 var pagerCommand = exec.Command
@@ -332,6 +333,7 @@ func (p *PreviewPager) Run() error {
 	}
 	defer p.cleanupTerminal()
 	defer p.persistLoadedLines()
+	defer p.syncBinaryPositionOnExit()
 
 	done := make(chan struct{})
 	defer close(done)
@@ -346,6 +348,7 @@ func (p *PreviewPager) Run() error {
 
 	p.updateSize()
 	p.applyWrapSetting()
+	p.syncBinaryPositionOnEnter()
 	needsRender := true
 	for {
 		if needsRender {
@@ -367,12 +370,10 @@ func (p *PreviewPager) Run() error {
 		}
 
 		if resizeEvents == nil && keyEvents == nil {
-			updated := false
 			if p.statusTimer != nil {
 				select {
 				case <-p.statusTimer.C:
 					p.clearStatusMessage()
-					updated = true
 				default:
 				}
 			}
@@ -380,7 +381,6 @@ func (p *PreviewPager) Run() error {
 				select {
 				case <-ch:
 					p.runPendingSearch()
-					updated = true
 				default:
 				}
 			}
@@ -391,7 +391,8 @@ func (p *PreviewPager) Run() error {
 			if done := p.handleKey(event); done {
 				return p.lastErr
 			}
-			needsRender = true || updated
+			p.syncBinaryByteOffsetFromScroll()
+			needsRender = true
 			continue
 		}
 
@@ -402,6 +403,7 @@ func (p *PreviewPager) Run() error {
 			if done := p.handleKey(event); done {
 				return p.lastErr
 			}
+			p.syncBinaryByteOffsetFromScroll()
 			needsRender = true
 		case err := <-keyErrs:
 			if err != nil {
@@ -662,12 +664,185 @@ func (p *PreviewPager) printf(format string, args ...interface{}) {
 }
 
 func (p *PreviewPager) updateSize() {
-	if p.tryUpdateSizeFromFile(p.input) {
-		return
-	}
+	_ = p.tryUpdateSizeFromFile(p.input)
 	if p.outputFile != nil && p.outputFile != p.input {
 		_ = p.tryUpdateSizeFromFile(p.outputFile)
 	}
+
+	if p.binarySource != nil && p.width > 0 {
+		oldBytesPerLine := p.binarySource.bytesPerLine
+		p.binarySource.UpdateBytesPerLine(p.width)
+		newBytesPerLine := p.binarySource.bytesPerLine
+		if p.state != nil && oldBytesPerLine > 0 && newBytesPerLine > 0 && oldBytesPerLine != newBytesPerLine {
+			byteOffset := p.state.PreviewBinaryByteOffset
+			if byteOffset <= 0 {
+				byteOffset = int64(p.state.PreviewScrollOffset) * int64(oldBytesPerLine)
+			}
+			p.state.PreviewBinaryByteOffset = byteOffset
+			p.state.PreviewScrollOffset = int(byteOffset / int64(newBytesPerLine))
+			p.state.PreviewWrapOffset = 0
+			if p.searchQuery != "" {
+				p.executeSearch(p.searchQuery)
+			}
+		}
+	}
+}
+
+func (p *PreviewPager) binaryBytesPerLine() int {
+	if p == nil || p.binarySource == nil || p.binarySource.bytesPerLine <= 0 {
+		return binaryPreviewLineWidth
+	}
+	return p.binarySource.bytesPerLine
+}
+
+func (p *PreviewPager) syncBinaryByteOffsetFromScroll() {
+	if p == nil || p.state == nil || !p.binaryMode {
+		return
+	}
+	bytesPerLine := p.binaryBytesPerLine()
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	if p.state.PreviewScrollOffset < 0 {
+		p.state.PreviewScrollOffset = 0
+	}
+	p.state.PreviewBinaryByteOffset = int64(p.state.PreviewScrollOffset) * int64(bytesPerLine)
+}
+
+func (p *PreviewPager) syncBinaryScrollFromByteOffset(byteOffset int64) {
+	if p == nil || p.state == nil || !p.binaryMode {
+		return
+	}
+	if byteOffset < 0 {
+		byteOffset = 0
+	}
+	bytesPerLine := p.binaryBytesPerLine()
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	p.state.PreviewScrollOffset = int(byteOffset / int64(bytesPerLine))
+	p.state.PreviewWrapOffset = 0
+}
+
+func (p *PreviewPager) syncBinaryPositionOnEnter() {
+	if p == nil || p.state == nil || !p.binaryMode {
+		return
+	}
+	byteOffset := p.state.PreviewBinaryByteOffset
+	if byteOffset <= 0 && p.state.PreviewScrollOffset > 0 {
+		// The inline (non-pager) binary preview uses the fixed hexdump width.
+		byteOffset = int64(p.state.PreviewScrollOffset) * int64(binaryPreviewLineWidth)
+	}
+	p.state.PreviewBinaryByteOffset = byteOffset
+	p.syncBinaryScrollFromByteOffset(byteOffset)
+}
+
+func (p *PreviewPager) syncBinaryPositionOnExit() {
+	if p == nil || p.state == nil || !p.binaryMode {
+		return
+	}
+	p.state.PreviewWrapOffset = 0
+
+	// Refresh the inline binary preview window around the last byte offset so the
+	// non-fullscreen panel doesn't end up showing only the last cached line.
+	if p.state.PreviewData != nil && p.binarySource != nil && p.state.CurrentPath != "" && p.state.PreviewData.Name != "" {
+		filePath := filepath.Join(p.state.CurrentPath, p.state.PreviewData.Name)
+		p.refreshInlineBinaryPreview(filePath, p.binarySource.totalBytes, p.state.PreviewBinaryByteOffset)
+		p.state.PreviewScrollOffset = 0
+		return
+	}
+
+	// Inline preview only has a lightweight set of hexdump lines; if we leave the
+	// scroll position pointing beyond that slice, the panel will render empty.
+	if p.state.PreviewData != nil && len(p.state.PreviewData.BinaryInfo.Lines) > 0 {
+		max := len(p.state.PreviewData.BinaryInfo.Lines) - 1
+		if max < 0 {
+			max = 0
+		}
+		if p.state.PreviewScrollOffset > max {
+			p.state.PreviewScrollOffset = max
+		}
+		if p.state.PreviewScrollOffset < 0 {
+			p.state.PreviewScrollOffset = 0
+		}
+		return
+	}
+	if p.state.PreviewScrollOffset < 0 {
+		p.state.PreviewScrollOffset = 0
+	}
+}
+
+func (p *PreviewPager) refreshInlineBinaryPreview(path string, totalBytes int64, byteOffset int64) {
+	if p == nil || p.state == nil || p.state.PreviewData == nil || path == "" || totalBytes <= 0 {
+		return
+	}
+
+	const maxBytes = 1024
+	bytesPerLine := binaryPreviewLineWidth
+
+	start := byteOffset
+	if start < 0 {
+		start = 0
+	}
+	start = (start / int64(bytesPerLine)) * int64(bytesPerLine)
+	if start >= totalBytes {
+		start = totalBytes - 1
+		if start < 0 {
+			start = 0
+		}
+		start = (start / int64(bytesPerLine)) * int64(bytesPerLine)
+	}
+
+	readLen := int64(maxBytes)
+	if remaining := totalBytes - start; remaining < readLen {
+		readLen = remaining
+	}
+	if readLen <= 0 {
+		return
+	}
+
+	file := p.binarySource.file
+	closeFile := false
+	if file == nil {
+		f, err := os.Open(path)
+		if err != nil {
+			return
+		}
+		file = f
+		closeFile = true
+	}
+	if closeFile {
+		defer func() { _ = file.Close() }()
+	}
+
+	buf := make([]byte, readLen)
+	n, err := file.ReadAt(buf, start)
+	if n <= 0 {
+		return
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return
+	}
+	buf = buf[:n]
+
+	lines := make([]string, 0, (len(buf)+bytesPerLine-1)/bytesPerLine+2)
+	if start > 0 {
+		lines = append(lines, fmt.Sprintf("… (showing from %s)", formatHexOffset(start)))
+	}
+	for off := 0; off < len(buf); off += bytesPerLine {
+		end := off + bytesPerLine
+		if end > len(buf) {
+			end = len(buf)
+		}
+		lines = append(lines, formatHexLine(int(start)+off, buf[off:end], bytesPerLine))
+	}
+	if tail := totalBytes - (start + int64(len(buf))); tail > 0 {
+		lines = append(lines, fmt.Sprintf("… (%d bytes not shown)", tail))
+	}
+
+	p.state.PreviewData.BinaryInfo.Lines = lines
+	p.state.PreviewData.BinaryInfo.ByteCount = len(buf)
+	p.state.PreviewData.BinaryInfo.TotalBytes = totalBytes
 }
 
 func (p *PreviewPager) tryUpdateSizeFromFile(file *os.File) bool {
@@ -1717,10 +1892,20 @@ func (p *PreviewPager) statusBadges(kind pagerContentKind) []string {
 		infoState = "on"
 	}
 	badges = append(badges, "info:"+infoState)
-	if p.binaryMode && p.searchFullScan {
+	if p.binaryMode && p.effectiveBinaryFullScan() {
 		badges = append(badges, "scan:*")
 	}
 	return badges
+}
+
+func (p *PreviewPager) effectiveBinaryFullScan() bool {
+	if p == nil || !p.binaryMode {
+		return false
+	}
+	if p.searchMode {
+		return p.searchFullScan
+	}
+	return p.searchQueryFullScan
 }
 
 func (p *PreviewPager) searchStatusSegment() string {
@@ -1781,7 +1966,7 @@ func (p *PreviewPager) searchDisplaySegment() (string, int) {
 			return segment + " !", 0
 		}
 		counts := p.searchCountsSegment()
-		if binary && p.searchFullScan {
+		if binary && p.effectiveBinaryFullScan() {
 			counts += "*"
 		}
 		return segment + " " + counts, 0
@@ -1789,7 +1974,7 @@ func (p *PreviewPager) searchDisplaySegment() (string, int) {
 
 	if useResults {
 		counts := p.searchCountsSegment()
-		if binary && p.searchFullScan {
+		if binary && p.effectiveBinaryFullScan() {
 			counts += "*"
 		}
 		segment += " " + counts
@@ -2931,7 +3116,7 @@ func (p *PreviewPager) buildContentLines() ([]string, int, *binaryPagerSource, *
 		return preview.TextLines, preview.TextCharCount, nil, nil
 	case len(preview.BinaryInfo.Lines) > 0:
 		filePath := filepath.Join(p.state.CurrentPath, preview.Name)
-		source, err := newBinaryPagerSource(filePath, preview.BinaryInfo.TotalBytes)
+		source, err := newBinaryPagerSource(filePath, preview.BinaryInfo.TotalBytes, p.width)
 		if err == nil {
 			return nil, int(preview.BinaryInfo.TotalBytes), source, nil
 		}
@@ -3484,18 +3669,45 @@ func lineCharCount(lines []string) int {
 	return total
 }
 
-func formatHexLine(offset int, chunk []byte) string {
+func calculateBytesPerLine(pagerWidth int) int {
+	// Calculate optimal bytes per line based on available pager width
+	// Format: [8-char offset] [hex bytes] |[ASCII bytes]|
+	// Minimum width needed for different byte counts:
+	// 8 bytes: 10 (offset) + 8*3 (hex) + 3 (spaces) + 3 (separators) + 8 (ASCII) = 48 chars
+	// 16 bytes: 10 (offset) + 16*3 (hex) + 4 (spaces) + 3 (separators) + 16 (ASCII) = 81 chars
+	// 24 bytes: 10 (offset) + 24*3 (hex) + 5 (spaces) + 3 (separators) + 24 (ASCII) = 112 chars
+
+	if pagerWidth <= 0 {
+		return binaryPreviewLineWidth // fallback to default
+	}
+
+	// Use the full width for calculation, be more generous with space usage
+	// Most terminals can handle tight layouts, and the separators provide visual structure
+	if pagerWidth >= 120 {
+		return 24 // 24 bytes per line for wide terminals
+	} else if pagerWidth >= 90 {
+		return 16 // 16 bytes per line for medium terminals
+	} else if pagerWidth >= 60 {
+		return 8 // 8 bytes per line for narrow terminals
+	} else {
+		return binaryPreviewLineWidth // fallback to default if very narrow
+	}
+}
+
+func formatHexLine(offset int, chunk []byte, bytesPerLine int) string {
 	var builder strings.Builder
-	builder.Grow(80)
+	// Estimate buffer size: 10 (offset) + bytesPerLine*3 (hex) + bytesPerLine/8 (spaces) + 3 (separators) + bytesPerLine (ASCII)
+	builder.Grow(10 + bytesPerLine*3 + bytesPerLine/8 + 3 + bytesPerLine)
 	fmt.Fprintf(&builder, "%08X  ", offset)
 
-	for i := 0; i < binaryPreviewLineWidth; i++ {
+	for i := 0; i < bytesPerLine; i++ {
 		if i < len(chunk) {
 			fmt.Fprintf(&builder, "%02X ", chunk[i])
 		} else {
 			builder.WriteString("   ")
 		}
-		if i == 7 {
+		// Add grouping space every 8 bytes (after byte 7, 15, 23, etc.)
+		if (i+1)%8 == 0 && i < bytesPerLine-1 {
 			builder.WriteString(" ")
 		}
 	}
@@ -3504,7 +3716,7 @@ func formatHexLine(offset int, chunk []byte) string {
 	for i := 0; i < len(chunk); i++ {
 		builder.WriteByte(printableASCII(chunk[i]))
 	}
-	for i := len(chunk); i < binaryPreviewLineWidth; i++ {
+	for i := len(chunk); i < bytesPerLine; i++ {
 		builder.WriteByte(' ')
 	}
 	builder.WriteString("|")
@@ -3534,22 +3746,40 @@ type binaryChunk struct {
 	lines []string
 }
 
-func newBinaryPagerSource(path string, totalBytes int64) (*binaryPagerSource, error) {
+func alignedBinaryChunkSize(bytesPerLine int) int {
+	if bytesPerLine <= 0 {
+		bytesPerLine = binaryPreviewLineWidth
+	}
+	size := binaryPagerChunkSize
+	if size <= 0 {
+		size = bytesPerLine
+	}
+	if size < bytesPerLine {
+		size = bytesPerLine
+	}
+	aligned := (size / bytesPerLine) * bytesPerLine
+	if aligned < bytesPerLine {
+		aligned = bytesPerLine
+	}
+	return aligned
+}
+
+func newBinaryPagerSource(path string, totalBytes int64, pagerWidth int) (*binaryPagerSource, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+
+	bytesPerLine := calculateBytesPerLine(pagerWidth)
+
 	source := &binaryPagerSource{
 		path:         path,
 		totalBytes:   totalBytes,
-		bytesPerLine: binaryPreviewLineWidth,
-		chunkSize:    binaryPagerChunkSize,
+		bytesPerLine: bytesPerLine,
+		chunkSize:    alignedBinaryChunkSize(bytesPerLine),
 		maxChunks:    binaryPagerMaxChunks,
 		file:         file,
 		cache:        make(map[int]*binaryChunk),
-	}
-	if source.chunkSize < source.bytesPerLine {
-		source.chunkSize = source.bytesPerLine
 	}
 	return source, nil
 }
@@ -3560,6 +3790,22 @@ func (s *binaryPagerSource) Close() {
 	}
 	_ = s.file.Close()
 	s.file = nil
+}
+
+func (s *binaryPagerSource) UpdateBytesPerLine(pagerWidth int) {
+	if s == nil {
+		return
+	}
+	newBytesPerLine := calculateBytesPerLine(pagerWidth)
+	if newBytesPerLine == s.bytesPerLine {
+		return // no change needed
+	}
+
+	// Clear cache since line formatting will change
+	s.cache = make(map[int]*binaryChunk)
+	s.cacheOrder = nil
+	s.bytesPerLine = newBytesPerLine
+	s.chunkSize = alignedBinaryChunkSize(newBytesPerLine)
 }
 
 func (s *binaryPagerSource) LineCount() int {
@@ -3641,7 +3887,7 @@ func (s *binaryPagerSource) loadChunk(index int) (*binaryChunk, error) {
 			end = n
 		}
 		absOffset := int(offset) + i
-		lines = append(lines, formatHexLine(absOffset, buf[i:end]))
+		lines = append(lines, formatHexLine(absOffset, buf[i:end], s.bytesPerLine))
 	}
 	chunk := &binaryChunk{
 		index: index,

@@ -44,8 +44,9 @@
 - [x] **Binary search**  
   Remove the `/` blockade in binary mode (`pager.go:1162-1168`) after adding simple byte/ASCII search on `binarySource`. Support `n/N`, hit highlighting, respect `searchMaxHits/Lines`. Preview panel remains without search.
 
-- [ ] **Adaptive hexdump width (pager)**  
-  Let `binaryPagerSource` emit 8/16/24 bytes per row based on pager width; size offset/hex/ASCII columns accordingly. Inline preview stays fixed at 16 B to remain lightweight.
+- [x] **Adaptive hexdump width (pager)**  
+  `binaryPagerSource` now emits 8/16/24 bytes per row based on pager width; offset/hex/ASCII columns adapt accordingly. Inline preview stays fixed at 16 B to remain lightweight.  
+  Follow-ups included: correct hit span mapping for 8/16/24, preserve byte position across resize/exit, and ensure hit-capped searches still highlight/navigate within the current viewport.
 
 - [ ] **Dual-column hex + text**  
   Add a pager mode where each line shows hex plus parallel ASCII/UTF-8 decoding with non-printables masked; simple key toggle. Preview panel unchanged.
