@@ -2187,6 +2187,23 @@ func (r *StateReducer) generatePreview(state *AppState) error {
 		return nil
 	}
 
+	// We're about to schedule a preview for a different file. Clear the existing
+	// preview immediately so the UI doesn't momentarily reflow stale content while
+	// debounce/async work is in flight.
+	if !sameFile && state.PreviewPath != filePath {
+		state.PreviewData = nil
+		state.PreviewPath = ""
+		// Mark preview as loading right away (even before debounce fires) so the
+		// UI shows a loading indicator instead of "preview unavailable".
+		state.PreviewLoading = true
+		state.PreviewLoadingPath = filePath
+		state.PreviewLoadingStarted = time.Now()
+		state.pendingPreviewReset = resetScroll
+		if resetScroll {
+			state.resetPreviewScroll()
+		}
+	}
+
 	state.cancelPreviewDebounceTimer()
 
 	token := state.nextPreviewLoadToken()

@@ -53,9 +53,8 @@ func (r *Renderer) LastLayout() (LayoutSnapshot, bool) {
 
 // Render draws the entire UI based on state
 func (r *Renderer) Render(state *statepkg.AppState) {
-	r.screen.Clear()
-
 	w, h := r.screen.Size()
+	r.screen.Clear()
 
 	if state != nil && state.HelpVisible {
 		r.drawHelpOverlay(state, w, h)
@@ -315,9 +314,6 @@ func (r *Renderer) drawStatusLine(state *statepkg.AppState, w, h int) {
 		main := runes[0]
 		comb := runes[1:]
 		r.screen.SetContent(x, y, main, comb, pathStyle)
-		for pad := 1; pad < wc && x+pad < w; pad++ {
-			r.screen.SetContent(x+pad, y, ' ', nil, pathStyle)
-		}
 		x += wc
 	}
 
@@ -352,9 +348,6 @@ func (r *Renderer) drawStatusLine(state *statepkg.AppState, w, h int) {
 		main := runes[0]
 		comb := runes[1:]
 		r.screen.SetContent(x, helpY, main, comb, normalStyle)
-		for pad := 1; pad < wc && x+pad < w; pad++ {
-			r.screen.SetContent(x+pad, helpY, ' ', nil, normalStyle)
-		}
 		x += wc
 	}
 	// Fill remaining spaces

@@ -69,13 +69,13 @@ func (r *Renderer) drawTextLine(startX, y, maxWidth int, text string, style tcel
 		if w <= 0 {
 			w = 1
 		}
+		// Do not manually paint padding for wide clusters here.
+		// tcell tracks continuation cells for double-width graphemes; overwriting
+		// them (e.g., with spaces) can leave ghost characters in Windows Terminal.
 		runes := []rune(cluster)
 		main := runes[0]
 		comb := runes[1:]
 		r.screen.SetContent(x, y, main, comb, style)
-		for pad := 1; pad < w && x+pad < startX+maxWidth; pad++ {
-			r.screen.SetContent(x+pad, y, ' ', nil, style)
-		}
 		x += w
 	}
 	return x
@@ -92,9 +92,6 @@ func (r *Renderer) drawStyledRune(x, y, maxX int, ru rune, style tcell.Style) in
 	}
 
 	r.screen.SetContent(x, y, ru, nil, style)
-	for w := 1; w < width && x+w < maxX; w++ {
-		r.screen.SetContent(x+w, y, ' ', nil, style)
-	}
 	return x + width
 }
 
@@ -148,9 +145,6 @@ func (r *Renderer) drawStyledStringClipped(startX, y, maxX int, text string, sty
 		main := runes[0]
 		comb := runes[1:]
 		r.screen.SetContent(x, y, main, comb, style)
-		for pad := 1; pad < w && x+pad < maxX; pad++ {
-			r.screen.SetContent(x+pad, y, ' ', nil, style)
-		}
 		x += w
 	}
 	return x
@@ -189,9 +183,6 @@ func (r *Renderer) drawHighlightedText(startX, y, maxX int, text string, spans [
 		main := clusterRunes[0]
 		comb := clusterRunes[1:]
 		r.screen.SetContent(x, y, main, comb, style)
-		for pad := 1; pad < clusterWidth && x+pad < maxX; pad++ {
-			r.screen.SetContent(x+pad, y, ' ', nil, style)
-		}
 		x += clusterWidth
 		runeOffset += clusterRuneCount
 	}

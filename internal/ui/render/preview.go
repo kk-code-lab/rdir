@@ -41,7 +41,10 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 			placeholder = loadingLabel
 			style = baseStyle.Foreground(r.theme.SymlinkFg).Bold(true)
 		}
-		r.drawTextLine(startX, y, panelWidth, placeholder, style)
+		endX := r.drawTextLine(startX, y, panelWidth, placeholder, style)
+		for x := endX; x < startX+panelWidth && x < w; x++ {
+			r.screen.SetContent(x, y, ' ', nil, style)
+		}
 		y++
 		for y < h-1 {
 			for x := startX; x < startX+panelWidth && x < w; x++ {
@@ -213,12 +216,12 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 
 func (r *Renderer) previewLoadingLabel(state *statepkg.AppState) string {
 	spinner := r.previewSpinner(state)
-	label := fmt.Sprintf(" %s loading preview… ", spinner)
+	label := fmt.Sprintf("%s loading preview… ", spinner)
 	if state == nil {
 		return label
 	}
 	if file := state.CurrentFile(); file != nil && file.Name != "" {
-		label = fmt.Sprintf(" %s loading %s… ", spinner, textutil.SanitizeTerminalText(file.Name))
+		label = fmt.Sprintf("%s loading %s… ", spinner, textutil.SanitizeTerminalText(file.Name))
 	}
 	return label
 }
@@ -528,6 +531,8 @@ func (r *Renderer) drawSegments(startX, y, maxWidth int, segments []statepkg.Sty
 			if width <= 0 {
 				width = 1
 			}
+			// Same as drawTextLine: don't paint padding for wide clusters.
+			// tcell handles continuation cells; touching them can cause ghosting on WT.
 			if width > remaining {
 				return
 			}
@@ -535,9 +540,6 @@ func (r *Renderer) drawSegments(startX, y, maxWidth int, segments []statepkg.Sty
 			main := runes[0]
 			comb := runes[1:]
 			r.screen.SetContent(x, y, main, comb, style)
-			for pad := 1; pad < width; pad++ {
-				r.screen.SetContent(x+pad, y, ' ', nil, style)
-			}
 			x += width
 			remaining -= width
 		}

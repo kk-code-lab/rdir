@@ -57,7 +57,7 @@ func (r *Renderer) previewContainsBinary(state *statepkg.AppState) bool {
 	return !preview.IsDir && len(preview.BinaryInfo.Lines) > 0
 }
 
-func (r *Renderer) desiredPreviewWidth(combinedWidth, previewMin int, preview *statepkg.PreviewData) int {
+func (r *Renderer) desiredPreviewWidth(combinedWidth, previewMin int, preview *statepkg.PreviewData, allowEstimate bool) int {
 	width := int(float64(combinedWidth)*previewPanelRatio + 0.5)
 	if width < previewMin {
 		width = previewMin
@@ -66,7 +66,7 @@ func (r *Renderer) desiredPreviewWidth(combinedWidth, previewMin int, preview *s
 		width = previewWidthCap
 	}
 
-	if preview != nil && len(preview.TextLines) > 0 {
+	if allowEstimate && preview != nil && len(preview.TextLines) > 0 {
 		needed := r.estimateTextPreviewWidth(preview) + previewInnerPadding*2
 		if needed < previewMin {
 			needed = previewMin
@@ -147,9 +147,10 @@ func (r *Renderer) computeLayout(w int, state *statepkg.AppState) layoutMetrics 
 
 	if canShowPreview {
 		metrics.contentSeparatorWidth = 1
-		combinedWidth := contentWidth - metrics.contentSeparatorWidth
+	combinedWidth := contentWidth - metrics.contentSeparatorWidth
 		if combinedWidth >= (minMainPanelWidth + previewMinWidth) {
-			previewWidth := r.desiredPreviewWidth(combinedWidth, previewMinWidth, state.PreviewData)
+			allowEstimate := state != nil && !state.PreviewLoading
+			previewWidth := r.desiredPreviewWidth(combinedWidth, previewMinWidth, state.PreviewData, allowEstimate)
 			mainWidth := combinedWidth - previewWidth
 
 			if mainWidth < minMainPanelWidth {
