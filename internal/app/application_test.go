@@ -47,6 +47,7 @@ func TestRightArrowOnDirectory(t *testing.T) {
 	file := state.CurrentFile()
 	if file == nil {
 		t.Fatalf("expected current file, got nil")
+		return
 	}
 
 	// VERIFY: Selected file should be a directory
@@ -87,6 +88,7 @@ func TestRightArrowOnFile(t *testing.T) {
 	file := state.CurrentFile()
 	if file == nil {
 		t.Fatalf("expected current file, got nil")
+		return
 	}
 
 	// VERIFY: Selected file should NOT be a directory (it's a file)

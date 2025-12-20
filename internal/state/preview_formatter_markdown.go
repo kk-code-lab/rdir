@@ -36,15 +36,15 @@ func (markdownPreviewFormatter) Format(ctx previewFormatContext, preview *Previe
 	preview.MarkdownFrontmatter = nil
 	preview.MarkdownFrontmatterRaw = ""
 	if preview.TextTruncated {
-		preview.FormattedUnavailableReason = "formatted preview unavailable: truncated content"
+		preview.FormattedUnavailableReason = "no preview available: truncated content"
 		return
 	}
 	if ctx.info.Size() > formattedPreviewMaxBytes {
-		preview.FormattedUnavailableReason = "formatted preview unavailable: file too large"
+		preview.FormattedUnavailableReason = "no preview available: file too large"
 		return
 	}
 	if len(preview.TextLines) == 0 {
-		preview.FormattedUnavailableReason = "formatted preview unavailable: empty content"
+		preview.FormattedUnavailableReason = "no preview available: empty content"
 		return
 	}
 

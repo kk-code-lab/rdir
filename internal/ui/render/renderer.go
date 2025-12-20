@@ -372,7 +372,7 @@ func (r *Renderer) drawSidebar(state *statepkg.AppState, sidebarWidth, h int) {
 	entries := state.ParentEntries
 	if !hasParent {
 		if y < h-1 {
-			placeholder := " No parent directory"
+			placeholder := "(no parent directory)"
 			endX := r.drawTextLine(0, y, sidebarWidth, placeholder, baseBgStyle)
 			for x := endX; x < sidebarWidth; x++ {
 				r.screen.SetContent(x, y, ' ', nil, baseBgStyle)
@@ -381,7 +381,7 @@ func (r *Renderer) drawSidebar(state *statepkg.AppState, sidebarWidth, h int) {
 		}
 	} else if len(entries) == 0 {
 		if y < h-1 {
-			placeholder := " Parent is empty"
+			placeholder := "(parent is empty)"
 			endX := r.drawTextLine(0, y, sidebarWidth, placeholder, baseBgStyle)
 			for x := endX; x < sidebarWidth; x++ {
 				r.screen.SetContent(x, y, ' ', nil, baseBgStyle)
@@ -594,6 +594,24 @@ func (r *Renderer) drawFileList(state *statepkg.AppState, startX, panelWidth, h 
 	visibleLines := bottomLimit - listStartY
 	if visibleLines < 0 {
 		visibleLines = 0
+	}
+
+	if len(displayFiles) == 0 {
+		if listStartY < bottomLimit {
+			placeholder := "(directory is empty)"
+			placeholderStyle := baseBgStyle.Foreground(r.theme.SidebarFg).Dim(true)
+			endX := r.drawTextLine(startX, listStartY, panelWidth, placeholder, placeholderStyle)
+			for x := endX; x < startX+panelWidth; x++ {
+				r.screen.SetContent(x, listStartY, ' ', nil, placeholderStyle)
+			}
+		}
+		// Fill rest with empty space
+		for y := listStartY + 1; y < bottomLimit; y++ {
+			for x := startX; x < startX+panelWidth; x++ {
+				r.screen.SetContent(x, y, ' ', nil, baseBgStyle)
+			}
+		}
+		return
 	}
 
 	endIndex := state.ScrollOffset + visibleLines

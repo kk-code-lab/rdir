@@ -35,7 +35,7 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 	}
 
 	if state.PreviewData == nil {
-		placeholder := " preview unavailable "
+		placeholder := "(no preview available)"
 		style := baseStyle.Dim(true)
 		if loading {
 			placeholder = loadingLabel

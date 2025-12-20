@@ -36,17 +36,17 @@ func (jsonPreviewFormatter) Format(ctx previewFormatContext, preview *PreviewDat
 		return
 	}
 	if preview.TextTruncated {
-		preview.FormattedUnavailableReason = "formatted preview unavailable: truncated content"
+		preview.FormattedUnavailableReason = "no preview available: truncated content"
 		return
 	}
 	if ctx.info.Size() > formattedPreviewMaxBytes {
-		preview.FormattedUnavailableReason = "formatted preview unavailable: file too large"
+		preview.FormattedUnavailableReason = "no preview available: file too large"
 		return
 	}
 
 	encoding := fsutil.DetectUnicodeEncoding(ctx.content)
 	if encoding == fsutil.EncodingUTF16LE || encoding == fsutil.EncodingUTF16BE {
-		preview.FormattedUnavailableReason = "formatted preview unavailable: unsupported encoding"
+		preview.FormattedUnavailableReason = "no preview available: unsupported encoding"
 		return
 	}
 
@@ -57,13 +57,13 @@ func (jsonPreviewFormatter) Format(ctx previewFormatContext, preview *PreviewDat
 		}
 	}
 	if len(source) == 0 {
-		preview.FormattedUnavailableReason = "formatted preview unavailable: empty content"
+		preview.FormattedUnavailableReason = "no preview available: empty content"
 		return
 	}
 
 	var buf bytes.Buffer
 	if err := json.Indent(&buf, source, "", "  "); err != nil {
-		preview.FormattedUnavailableReason = "formatted preview unavailable: invalid JSON"
+		preview.FormattedUnavailableReason = "no preview available: invalid json"
 		return
 	}
 

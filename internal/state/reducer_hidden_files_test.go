@@ -907,6 +907,7 @@ func TestSelectionHistoryRestoresVisibleWhenHiddenDisabled(t *testing.T) {
 	current = state.getCurrentFile()
 	if current == nil {
 		t.Fatalf("expected a visible selection after re-entering")
+		return
 	}
 	if current.IsHidden() {
 		t.Fatalf("expected visible selection, got hidden file %q", current.Name)
@@ -986,6 +987,7 @@ func TestGoUpAfterHidingHiddenDirectoryKeepsSelectionVisible(t *testing.T) {
 	current := state.getCurrentFile()
 	if current == nil {
 		t.Fatal("expected a current file after going up")
+		return
 	}
 	if current.IsHidden() {
 		t.Fatalf("expected visible selection, got hidden entry %q", current.Name)

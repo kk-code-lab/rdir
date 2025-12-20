@@ -148,6 +148,7 @@ func TestRefreshDirectoryHandlesMissingSelection(t *testing.T) {
 	current := state.CurrentFile()
 	if current == nil {
 		t.Fatal("expected a selection after refresh")
+		return
 	}
 	if current.Name != "alpha.txt" {
 		t.Fatalf("expected selection to fall back to alpha.txt, got %s", current.Name)

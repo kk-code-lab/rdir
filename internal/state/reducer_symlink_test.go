@@ -55,6 +55,7 @@ func TestLoadDirectory_SymlinkToDirectory(t *testing.T) {
 
 	if symlinkEntry == nil {
 		t.Fatal("Symlink not found in Files")
+		return
 	}
 
 	// Verify symlink is detected and marked as directory
@@ -115,6 +116,7 @@ func TestLoadDirectory_SymlinkToFile(t *testing.T) {
 
 	if symlinkEntry == nil {
 		t.Fatal("Symlink not found in Files")
+		return
 	}
 
 	// Verify symlink is detected and marked as file
@@ -170,6 +172,7 @@ func TestLoadDirectory_BrokenSymlink(t *testing.T) {
 
 	if symlinkEntry == nil {
 		t.Fatal("Broken symlink not found in Files")
+		return
 	}
 
 	// Verify broken symlink is detected

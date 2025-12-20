@@ -2653,7 +2653,7 @@ func (p *PreviewPager) progressPercent(position, total int) int {
 
 func (p *PreviewPager) headerLines() []string {
 	if p.state == nil || p.state.PreviewData == nil {
-		return []string{"Preview unavailable"}
+		return []string{"(no preview available)"}
 	}
 	preview := p.state.PreviewData
 	fullPath := filepath.Join(p.state.CurrentPath, preview.Name)
