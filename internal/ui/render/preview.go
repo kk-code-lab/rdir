@@ -120,6 +120,25 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 			}
 		}
 	} else if !preview.IsDir && (len(preview.TextLines) > 0 || len(preview.FormattedTextLines) > 0 || len(preview.FormattedSegments) > 0) {
+		if title := markdownFrontmatterTitle(preview); title != "" {
+			titleStyle := baseStyle.Foreground(r.theme.FileFg).Bold(true)
+			prefix := "📝 "
+			title = textutil.SanitizeTerminalText(title)
+			maxTitleWidth := panelWidth - r.measureTextWidth(prefix)
+			if maxTitleWidth < 0 {
+				maxTitleWidth = 0
+			}
+			if maxTitleWidth <= 0 {
+				title = ""
+			} else {
+				title = r.truncateTextToWidth(title, maxTitleWidth)
+			}
+			if title == "" {
+				// Not enough space to draw a useful title line.
+			} else if !drawLine(prefix+title, titleStyle) {
+				return
+			}
+		}
 		if preview.HiddenFormattingDetected {
 			warnStyle := baseStyle.Bold(true).Foreground(r.theme.SymlinkFg)
 			if !drawLine("⚠ hidden formatting characters replaced with ⟪…⟫", warnStyle) {
@@ -215,6 +234,25 @@ func (r *Renderer) drawPreviewPanel(state *statepkg.AppState, layout layoutMetri
 		}
 		y++
 	}
+}
+
+func markdownFrontmatterTitle(preview *statepkg.PreviewData) string {
+	if preview == nil || preview.FormattedKind != "markdown" || preview.MarkdownFrontmatter == nil {
+		return ""
+	}
+	raw, ok := preview.MarkdownFrontmatter["title"]
+	if !ok {
+		return ""
+	}
+	title, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	return title
 }
 
 func (r *Renderer) previewLoadingLabel(state *statepkg.AppState) string {

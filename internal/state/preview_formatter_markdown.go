@@ -33,6 +33,8 @@ func (markdownPreviewFormatter) Format(ctx previewFormatContext, preview *Previe
 		return
 	}
 	preview.FormattedKind = "markdown"
+	preview.MarkdownFrontmatter = nil
+	preview.MarkdownFrontmatterRaw = ""
 	if preview.TextTruncated {
 		preview.FormattedUnavailableReason = "formatted preview unavailable: truncated content"
 		return
@@ -47,7 +49,13 @@ func (markdownPreviewFormatter) Format(ctx previewFormatContext, preview *Previe
 	}
 
 	opts := defaultMarkdownRenderOptions()
-	doc := parseMarkdown(preview.TextLines)
+	lines := preview.TextLines
+	if meta, raw, body, ok := splitMarkdownFrontmatter(lines); ok {
+		preview.MarkdownFrontmatter = meta
+		preview.MarkdownFrontmatterRaw = raw
+		lines = body
+	}
+	doc := parseMarkdown(lines)
 	segments := renderMarkdownSegmentsWithDoc(doc, opts)
 	formatted := renderMarkdownLinesWithDoc(doc, opts)
 

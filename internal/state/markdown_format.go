@@ -24,6 +24,7 @@ func formatMarkdownLines(lines []string) []string {
 }
 
 func formatMarkdownLinesWithOptions(lines []string, opts markdownRenderOptions) []string {
+	lines = stripMarkdownFrontmatter(lines)
 	doc := parseMarkdown(lines)
 	return renderMarkdownLinesWithDoc(doc, opts)
 }
@@ -31,6 +32,7 @@ func formatMarkdownLinesWithOptions(lines []string, opts markdownRenderOptions) 
 // FormatMarkdownPreview builds styled segments and metadata for a markdown document,
 // applying table rendering options such as width limits and line truncation.
 func FormatMarkdownPreview(lines []string, tableWidth int, maxLinesPerCell int, wrap bool) ([][]StyledTextSegment, []TextLineMetadata) {
+	lines = stripMarkdownFrontmatter(lines)
 	doc := parseMarkdown(lines)
 	return formatMarkdownPreviewWithDoc(doc, tableWidth, maxLinesPerCell, wrap)
 }

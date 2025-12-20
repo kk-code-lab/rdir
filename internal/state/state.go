@@ -55,6 +55,8 @@ type PreviewData struct {
 	BinaryInfo                 BinaryPreview
 	DirEntries                 []FileEntry
 	HiddenFormattingDetected   bool
+	MarkdownFrontmatter        map[string]any
+	MarkdownFrontmatterRaw     string
 
 	markdownDoc *markdownDocument
 }

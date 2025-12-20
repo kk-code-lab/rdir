@@ -351,6 +351,38 @@ func TestDrawFileListSanitizesNames(t *testing.T) {
 	}
 }
 
+func TestPreviewDrawsMarkdownFrontmatterTitle(t *testing.T) {
+	screen := tcell.NewSimulationScreen("")
+	if err := screen.Init(); err != nil {
+		t.Fatalf("failed to init simulation screen: %v", err)
+	}
+	defer screen.Fini()
+	screen.SetSize(60, 8)
+
+	r := NewRenderer(screen)
+	state := &statepkg.AppState{
+		PreviewData: &statepkg.PreviewData{
+			IsDir:               false,
+			TextLines:           []string{"# Heading"},
+			FormattedKind:       "markdown",
+			MarkdownFrontmatter: map[string]any{"title": "Doc Title"},
+		},
+	}
+	layout := layoutMetrics{
+		previewStart: 0,
+		previewWidth: 60,
+		showPreview:  true,
+	}
+
+	r.drawPreviewPanel(state, layout, 60, 8)
+	screen.Show()
+
+	row := readScreenRow(t, screen, 1, 60)
+	if !strings.Contains(row, "📝 Doc Title") {
+		t.Fatalf("expected markdown title in preview, got %q", row)
+	}
+}
+
 func readScreenRow(t *testing.T, screen tcell.SimulationScreen, y, width int) string {
 	t.Helper()
 	cells, w, h := screen.GetContents()

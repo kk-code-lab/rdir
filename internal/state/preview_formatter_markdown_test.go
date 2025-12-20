@@ -38,6 +38,72 @@ func TestMarkdownPreviewFormatterFormatsContent(t *testing.T) {
 	}
 }
 
+func TestMarkdownPreviewFormatterStripsFrontmatter(t *testing.T) {
+	content := strings.Join([]string{
+		"---",
+		"title: Doc",
+		"tags:",
+		"  - a",
+		"  - b",
+		"---",
+		"",
+		"# Heading",
+		"",
+		"Body text",
+	}, "\n")
+	info := fakeFileInfo{name: "doc.md", size: int64(len(content))}
+	ctx := previewFormatContext{
+		path:    info.Name(),
+		info:    info,
+		content: []byte(content),
+	}
+	preview := &PreviewData{}
+	markdownPreviewFormatter{}.Format(ctx, preview)
+
+	want := []string{
+		"# Heading",
+		"",
+		"Body text",
+	}
+	if diff := diffLines(want, preview.FormattedTextLines); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+	if preview.MarkdownFrontmatter == nil {
+		t.Fatalf("expected frontmatter metadata")
+	}
+	if preview.MarkdownFrontmatter["title"] != "Doc" {
+		t.Fatalf("expected title metadata, got %#v", preview.MarkdownFrontmatter["title"])
+	}
+	tags, ok := preview.MarkdownFrontmatter["tags"].([]any)
+	if !ok {
+		t.Fatalf("expected tags list, got %#v", preview.MarkdownFrontmatter["tags"])
+	}
+	if len(tags) != 2 || tags[0] != "a" || tags[1] != "b" {
+		t.Fatalf("unexpected tags content: %#v", tags)
+	}
+	wantRaw := "title: Doc\ntags:\n  - a\n  - b"
+	if preview.MarkdownFrontmatterRaw != wantRaw {
+		t.Fatalf("unexpected frontmatter raw: %q", preview.MarkdownFrontmatterRaw)
+	}
+	if len(preview.TextLines) == 0 || preview.TextLines[0] != "---" {
+		t.Fatalf("expected raw text to keep frontmatter")
+	}
+}
+
+func TestFormatMarkdownLinesStripsFrontmatter(t *testing.T) {
+	lines := []string{
+		"---",
+		"title: Doc",
+		"---",
+		"# Heading",
+	}
+	got := formatMarkdownLines(lines)
+	want := []string{"# Heading"}
+	if diff := diffLines(want, got); diff != "" {
+		t.Fatalf("formatted markdown mismatch:\n%s", diff)
+	}
+}
+
 func TestMarkdownPreviewFormatterRespectsSizeLimit(t *testing.T) {
 	size := formattedPreviewMaxBytes + 2048
 	content := make([]byte, formattedPreviewMaxBytes)
