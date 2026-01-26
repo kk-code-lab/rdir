@@ -3,6 +3,7 @@ package pager
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sort"
@@ -14,6 +15,20 @@ import (
 	textutil "github.com/kk-code-lab/rdir/internal/textutil"
 	"github.com/rivo/uniseg"
 )
+
+type textSpan struct {
+	start int
+	end   int
+}
+
+type searchHit struct {
+	line      int
+	span      textSpan
+	len       int
+	startByte int
+	nibbleEnd bool
+	nibblePos int
+}
 
 func fastIndex(haystack, needle []byte) int {
 	return bytes.Index(haystack, needle)
@@ -179,6 +194,99 @@ func smartCaseInsensitive(query string) bool {
 		}
 	}
 	return true
+}
+
+func (p *PreviewPager) searchStatusSegment() string {
+	segment, _ := p.searchDisplaySegment()
+	return segment
+}
+
+func (p *PreviewPager) searchDisplaySegment() (string, int) {
+	if p == nil {
+		return "", 0
+	}
+	displayRaw := p.searchQuery
+	binary := false
+	if p.searchMode {
+		binary = p.searchBinaryMode
+	} else if p.binaryMode && p.searchQueryBinary {
+		binary = true
+	}
+	prefix := "/"
+	if binary {
+		prefix = ":"
+	}
+	displayText := displayRaw
+	if binary && strings.HasPrefix(displayText, ":") {
+		displayText = strings.TrimPrefix(displayText, ":")
+	}
+	if p.searchMode {
+		displayRaw = string(p.searchInput)
+		displayText = displayRaw
+		if binary && strings.HasPrefix(displayText, ":") {
+			displayText = strings.TrimPrefix(displayText, ":")
+		}
+	}
+	if displayText == "" {
+		if p.searchMode {
+			return prefix, displayWidth(prefix) + 1
+		}
+		return "", 0
+	}
+
+	visibleQuery := visualizeSpaces(displayText)
+	safeQuery := textutil.SanitizeTerminalText(visibleQuery)
+	segment := prefix + safeQuery
+	cursorCol := displayWidth(segment) + 1
+
+	activeQuery := p.searchQuery
+	matchInput := displayRaw
+	useResults := activeQuery != "" && strings.EqualFold(activeQuery, matchInput)
+
+	if !p.searchMode {
+		if activeQuery == "" {
+			return "", 0
+		}
+		if !useResults {
+			return segment, 0
+		}
+		if p.searchErr != nil {
+			return segment + " !", 0
+		}
+		counts := p.searchCountsSegment()
+		if binary && p.effectiveBinaryFullScan() {
+			counts += "*"
+		}
+		return segment + " " + counts, 0
+	}
+
+	if useResults {
+		counts := p.searchCountsSegment()
+		if binary && p.effectiveBinaryFullScan() {
+			counts += "*"
+		}
+		segment += " " + counts
+	}
+	return segment, cursorCol
+}
+
+func (p *PreviewPager) searchCountsSegment() string {
+	total := len(p.searchHits)
+	if total == 0 {
+		if p.searchLimited {
+			return "0/0+"
+		}
+		return "0/0"
+	}
+	cursor := p.searchCursor
+	if cursor < 0 || cursor >= total {
+		cursor = 0
+	}
+	seg := fmt.Sprintf("%d/%d", cursor+1, total)
+	if p.searchLimited {
+		seg += "+"
+	}
+	return seg
 }
 
 func (p *PreviewPager) visibleHighlights(lineIdx int, drop int, widthLimit int) ([]textSpan, []textSpan) {
