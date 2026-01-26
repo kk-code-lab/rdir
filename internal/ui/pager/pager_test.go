@@ -397,6 +397,65 @@ func TestWrapLineSegmentsRespectsGraphemeWidth(t *testing.T) {
 	}
 }
 
+func TestWrapLineSegmentsRangeSkipsAndLimits(t *testing.T) {
+	lines := wrapLineSegmentsRange("abcdef", 2, 1, 2)
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 segments, got %d", len(lines))
+	}
+	if lines[0] != "cd" || lines[1] != "ef" {
+		t.Fatalf("unexpected segments: %#v", lines)
+	}
+
+	lines = wrapLineSegmentsRange("abcdef", 2, 3, 1)
+	if len(lines) != 0 {
+		t.Fatalf("expected no segments after full skip, got %#v", lines)
+	}
+}
+
+func TestCopyVisibleMergesWrappedSegments(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "data.txt",
+		TextLines: []string{"abcdefgh"},
+	}
+	state := &statepkg.AppState{
+		PreviewData:        preview,
+		CurrentPath:        ".",
+		PreviewWrap:        true,
+		ClipboardAvailable: true,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.width = 4
+	pager.height = 4 // 1 header + 2 content + 1 status
+	pager.wrapEnabled = true
+
+	var captured string
+	pager.clipboardFunc = func(content string) error {
+		captured = content
+		return nil
+	}
+
+	if err := pager.copyVisibleToClipboard(); err != nil {
+		t.Fatalf("copyVisibleToClipboard: %v", err)
+	}
+	if captured != "abcdefgh" {
+		t.Fatalf("expected merged content, got %q", captured)
+	}
+
+	pager.height = 3 // 1 header + 1 content + 1 status
+	state.PreviewScrollOffset = 0
+	state.PreviewWrapOffset = 1
+	captured = ""
+	if err := pager.copyVisibleToClipboard(); err != nil {
+		t.Fatalf("copyVisibleToClipboard (offset): %v", err)
+	}
+	if captured != "efgh" {
+		t.Fatalf("expected visible segment, got %q", captured)
+	}
+}
+
 func TestPreviewPagerToggleFormatSwitchesViews(t *testing.T) {
 	preview := &statepkg.PreviewData{
 		Name: "data.json",
@@ -445,6 +504,50 @@ func TestPreviewPagerToggleFormatSwitchesViews(t *testing.T) {
 	}
 	if state.PreviewPreferRaw {
 		t.Fatalf("state should record formatted preference")
+	}
+}
+
+func TestPreviewPagerToggleWrapResetsWrapOffset(t *testing.T) {
+	preview := &statepkg.PreviewData{
+		Name:      "data.json",
+		TextLines: []string{strings.Repeat("x", 200)},
+	}
+	state := &statepkg.AppState{
+		PreviewData: preview,
+		CurrentPath: ".",
+	}
+	pager, err := NewPreviewPager(state, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	state.PreviewScrollOffset = 4
+	state.PreviewWrapOffset = 5
+	state.PreviewWrap = false
+	pager.wrapEnabled = false
+	pager.handleKey(keyEvent{kind: keyToggleWrap})
+
+	if !pager.wrapEnabled || !state.PreviewWrap {
+		t.Fatalf("expected wrap to enable")
+	}
+	if state.PreviewScrollOffset != 0 {
+		t.Fatalf("expected scroll offset reset on enable, got %d", state.PreviewScrollOffset)
+	}
+	if state.PreviewWrapOffset != 0 {
+		t.Fatalf("expected wrap offset reset on enable, got %d", state.PreviewWrapOffset)
+	}
+
+	state.PreviewScrollOffset = 2
+	state.PreviewWrapOffset = 3
+	pager.handleKey(keyEvent{kind: keyToggleWrap})
+	if pager.wrapEnabled || state.PreviewWrap {
+		t.Fatalf("expected wrap to disable")
+	}
+	if state.PreviewScrollOffset != 0 {
+		t.Fatalf("expected scroll offset reset on disable, got %d", state.PreviewScrollOffset)
+	}
+	if state.PreviewWrapOffset != 0 {
+		t.Fatalf("expected wrap offset reset on disable, got %d", state.PreviewWrapOffset)
 	}
 }
 

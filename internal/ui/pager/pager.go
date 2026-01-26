@@ -174,6 +174,12 @@ type PreviewPager struct {
 	searchQueryBinary   bool
 	searchQueryFullScan bool
 	searchFullScan      bool
+
+	wrapCacheWidth     int
+	wrapCacheFormatted bool
+	wrapCacheNextLine  int
+	wrapCacheLines     []wrapLineCache
+
 }
 
 var pagerCommand = exec.Command
@@ -322,6 +328,7 @@ func (p *PreviewPager) toggleFormatView() {
 	p.updateDisplayLines()
 	p.rowSpans = nil
 	p.rowPrefix = nil
+	p.resetWrapCache()
 	if p.searchQuery != "" {
 		p.executeSearch(p.searchQuery)
 	}
@@ -664,9 +671,14 @@ func (p *PreviewPager) printf(format string, args ...interface{}) {
 }
 
 func (p *PreviewPager) updateSize() {
+	oldWidth := p.width
 	_ = p.tryUpdateSizeFromFile(p.input)
 	if p.outputFile != nil && p.outputFile != p.input {
 		_ = p.tryUpdateSizeFromFile(p.outputFile)
+	}
+	if p.width != oldWidth {
+		p.resetWrapCache()
+		p.rowMetricsWidth = 0
 	}
 
 	if p.binarySource != nil && p.width > 0 {
@@ -948,34 +960,34 @@ func (p *PreviewPager) render() error {
 
 	for i := start; i < totalLines && row <= contentRowLimit; i++ {
 		text := p.lineAt(i)
-		displayText := text
-		currentSkip := skipRows
-		if p.wrapEnabled && currentSkip > 0 {
-			displayText = p.trimWrappedPrefix(displayText, currentSkip)
+		if p.wrapEnabled && p.width > 0 {
+			currentSkip := skipRows
+			maxRows := contentRowLimit - row + 1
+			segments := p.wrapSegmentsRangeForLine(i, text, currentSkip, maxRows, contentRows)
+			for segIdx, seg := range segments {
+				dropCols := (currentSkip + segIdx) * p.width
+				if spans, focus := p.visibleHighlights(i, dropCols, p.width); len(spans) > 0 {
+					seg = applySearchHighlights(seg, spans, focus)
+				}
+				p.drawRow(row, seg, false)
+				row++
+				if row > contentRowLimit {
+					break
+				}
+			}
+			skipRows = 0
+			continue
 		}
-		if !p.wrapEnabled && p.width > 0 {
+
+		displayText := text
+		if p.width > 0 {
 			displayText = truncateToWidth(displayText, p.width)
 		}
-		dropCols := 0
-		if p.wrapEnabled && p.width > 0 && currentSkip > 0 {
-			dropCols = currentSkip * p.width
-		}
-		widthLimit := 0
-		if !p.wrapEnabled && p.width > 0 {
-			widthLimit = p.width
-		}
-		if spans, focus := p.visibleHighlights(i, dropCols, widthLimit); len(spans) > 0 {
+		if spans, focus := p.visibleHighlights(i, 0, p.width); len(spans) > 0 {
 			displayText = applySearchHighlights(displayText, spans, focus)
 		}
 		p.drawRow(row, displayText, false)
-		rowsUsed := p.rowSpanForIndex(i)
-		if currentSkip > 0 {
-			rowsUsed -= currentSkip
-			if rowsUsed < 1 {
-				rowsUsed = 1
-			}
-		}
-		row += rowsUsed
+		row++
 		skipRows = 0
 	}
 
@@ -1444,10 +1456,16 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 	case keyJumpBackSmall:
 		if p.binaryMode {
 			p.jumpBinary(-binaryJumpSmallBytes, binaryJumpSmallBytes)
+		} else if p.wrapEnabled {
+			p.state.PreviewScrollOffset--
+			p.state.PreviewWrapOffset = 0
 		}
 	case keyJumpForwardSmall:
 		if p.binaryMode {
 			p.jumpBinary(binaryJumpSmallBytes, binaryJumpSmallBytes)
+		} else if p.wrapEnabled {
+			p.state.PreviewScrollOffset++
+			p.state.PreviewWrapOffset = 0
 		}
 	case keyJumpBackLarge:
 		if p.binaryMode {
@@ -1469,10 +1487,10 @@ func (p *PreviewPager) handleKey(ev keyEvent) bool {
 		}
 		p.wrapEnabled = !p.wrapEnabled
 		p.state.PreviewWrap = p.wrapEnabled
-		if !p.wrapEnabled {
-			p.state.PreviewWrapOffset = 0
-		}
+		p.state.PreviewScrollOffset = 0
+		p.state.PreviewWrapOffset = 0
 		p.rowMetricsWidth = 0
+		p.resetWrapCache()
 		p.applyWrapSetting()
 	case keySpace:
 		if p.wrapEnabled {
@@ -2086,6 +2104,8 @@ func (p *PreviewPager) helpSections() []helpSection {
 			helpEntry{keys: "[ / ]", desc: "Jump ±4 KB"},
 			helpEntry{keys: "{ / }", desc: "Jump ±64 KB"},
 		)
+	} else if p.wrapEnabled {
+		nav = append(nav, helpEntry{keys: "[ / ]", desc: "Skip wrapped line"})
 	}
 
 	view := []helpEntry{
@@ -2187,7 +2207,7 @@ func (p *PreviewPager) setStatusMessage(msg string, style string) {
 }
 
 func (p *PreviewPager) copyVisibleToClipboard() error {
-	lines := p.visibleContentLines()
+	lines := p.visibleContentLinesForCopy()
 	return p.copyLinesToClipboard(lines)
 }
 
@@ -2325,6 +2345,66 @@ func (p *PreviewPager) visibleContentLines() []string {
 		}
 		lines = append(lines, text)
 		rowsRemaining--
+	}
+	return lines
+}
+
+func (p *PreviewPager) visibleContentLinesForCopy() []string {
+	if p == nil {
+		return nil
+	}
+	if p.state == nil {
+		return nil
+	}
+	if !p.wrapEnabled || p.width <= 0 {
+		return p.visibleContentLines()
+	}
+
+	width := p.width
+	if width <= 0 {
+		width = 1
+	}
+	height := p.height
+	if height <= 0 {
+		height = 1
+	}
+	headerRows := len(p.headerLines())
+	if headerRows >= height {
+		headerRows = height - 1
+		if headerRows < 0 {
+			headerRows = 0
+		}
+	}
+
+	contentRows := height - headerRows - 1
+	if contentRows < 1 {
+		contentRows = 1
+	}
+
+	totalLines := p.lineCount()
+	p.clampScroll(totalLines, contentRows)
+
+	start := p.state.PreviewScrollOffset
+	if start < 0 {
+		start = 0
+	}
+	if totalLines > 0 && start > totalLines {
+		start = totalLines
+	}
+	skipRows := p.state.PreviewWrapOffset
+
+	rowsRemaining := contentRows
+	lines := []string{}
+	for i := start; i < totalLines && rowsRemaining > 0; i++ {
+		text := lineForClipboard(p.lineAt(i))
+		segments := p.wrapSegmentsRangeForLine(i, text, skipRows, rowsRemaining, contentRows)
+		if len(segments) == 0 {
+			skipRows = 0
+			continue
+		}
+		lines = append(lines, strings.Join(segments, ""))
+		rowsRemaining -= len(segments)
+		skipRows = 0
 	}
 	return lines
 }
@@ -2526,6 +2606,67 @@ func wrapLineSegments(text string, width int) []string {
 	}
 	if len(out) == 0 {
 		return []string{""}
+	}
+	return out
+}
+
+func wrapLineSegmentsRange(text string, width int, skipRows int, maxRows int) []string {
+	if maxRows == 0 {
+		return nil
+	}
+	if width <= 0 {
+		if skipRows <= 0 && maxRows != 0 {
+			return []string{text}
+		}
+		return nil
+	}
+	if text == "" {
+		if skipRows <= 0 && maxRows != 0 {
+			return []string{""}
+		}
+		return nil
+	}
+
+	out := []string{}
+	row := 0
+	var b strings.Builder
+	consumed := 0
+	flush := func() {
+		if row >= skipRows {
+			out = append(out, b.String())
+		}
+		row++
+		b.Reset()
+		consumed = 0
+	}
+
+	g := uniseg.NewGraphemes(text)
+	for g.Next() {
+		cluster := g.Str()
+		w := textutil.DisplayWidth(cluster)
+		if w <= 0 {
+			w = 1
+		}
+		if consumed+w > width && consumed > 0 {
+			flush()
+			if maxRows > 0 && len(out) >= maxRows {
+				return out
+			}
+		}
+		b.WriteString(cluster)
+		consumed += w
+		if consumed >= width {
+			flush()
+			if maxRows > 0 && len(out) >= maxRows {
+				return out
+			}
+		}
+	}
+	if b.Len() > 0 {
+		flush()
+	}
+	if maxRows > 0 && len(out) > maxRows {
+		out = out[:maxRows]
 	}
 	return out
 }
@@ -2845,11 +2986,237 @@ func (p *PreviewPager) applyWrapSetting() {
 	if p.output == nil {
 		return
 	}
-	if p.wrapEnabled {
-		p.writeString("\x1b[?7h")
-	} else {
-		p.writeString("\x1b[?7l")
+	p.writeString("\x1b[?7l")
+}
+
+type wrapRowCacheEntry struct {
+	row   int
+	index int
+}
+
+const wrapCacheRowCapacity = 4096
+const wrapCacheLineCapacity = 64
+const wrapCacheWindowMax = 4096
+
+type wrapLineCache struct {
+	line        int
+	next        int
+	rows        []wrapRowCacheEntry
+	windowStart int
+	windowRows  []string
+}
+
+func (p *PreviewPager) resetWrapCache() {
+	p.wrapCacheWidth = 0
+	p.wrapCacheFormatted = false
+	p.wrapCacheNextLine = 0
+	p.wrapCacheLines = nil
+}
+
+func (c *wrapLineCache) remember(row int, index int) {
+	if row < 0 || index < 0 {
+		return
 	}
+	if len(c.rows) < wrapCacheRowCapacity {
+		c.rows = append(c.rows, wrapRowCacheEntry{row: row, index: index})
+		return
+	}
+	c.rows[c.next] = wrapRowCacheEntry{row: row, index: index}
+	c.next = (c.next + 1) % wrapCacheRowCapacity
+}
+
+func (c *wrapLineCache) findStart(row int) (int, int, bool) {
+	bestRow := -1
+	bestIdx := 0
+	for _, entry := range c.rows {
+		if entry.row <= row && entry.row > bestRow {
+			bestRow = entry.row
+			bestIdx = entry.index
+		}
+	}
+	if bestRow < 0 {
+		return 0, 0, false
+	}
+	return bestRow, bestIdx, true
+}
+
+func (p *PreviewPager) wrapCacheForLine(idx int) *wrapLineCache {
+	for i := range p.wrapCacheLines {
+		if p.wrapCacheLines[i].line == idx {
+			return &p.wrapCacheLines[i]
+		}
+	}
+	if len(p.wrapCacheLines) < wrapCacheLineCapacity {
+		p.wrapCacheLines = append(p.wrapCacheLines, wrapLineCache{line: idx})
+		return &p.wrapCacheLines[len(p.wrapCacheLines)-1]
+	}
+	p.wrapCacheLines[p.wrapCacheNextLine] = wrapLineCache{line: idx}
+	cache := &p.wrapCacheLines[p.wrapCacheNextLine]
+	p.wrapCacheNextLine = (p.wrapCacheNextLine + 1) % wrapCacheLineCapacity
+	return cache
+}
+
+func (p *PreviewPager) wrapSegmentsRangeForLine(idx int, text string, skipRows int, maxRows int, windowRows int) []string {
+	if maxRows == 0 {
+		return nil
+	}
+	if p.width <= 0 {
+		if skipRows <= 0 {
+			return []string{text}
+		}
+		return nil
+	}
+	if text == "" {
+		if skipRows <= 0 {
+			return []string{""}
+		}
+		return nil
+	}
+
+	if p.wrapCacheWidth != p.width || p.wrapCacheFormatted != p.showFormatted {
+		p.resetWrapCache()
+		p.wrapCacheWidth = p.width
+		p.wrapCacheFormatted = p.showFormatted
+	}
+
+	lineWidth := p.lineWidth(idx)
+	if lineWidth > 0 && p.width > 0 {
+		if lineWidth <= p.width {
+			if skipRows <= 0 {
+				return []string{text}
+			}
+			return nil
+		}
+		cache := p.wrapCacheForLine(idx)
+		if len(cache.rows) == 0 {
+			cache.remember(0, 0)
+		}
+		if cache.windowRows == nil {
+			cache.windowStart = 0
+			cache.windowRows = wrapLineSegments(text, p.width)
+		}
+		start := skipRows
+		if start < 0 {
+			start = 0
+		}
+		if start >= len(cache.windowRows) {
+			return nil
+		}
+		end := start + maxRows
+		if end > len(cache.windowRows) {
+			end = len(cache.windowRows)
+		}
+		return cache.windowRows[start:end]
+	}
+
+	cache := p.wrapCacheForLine(idx)
+	if len(cache.rows) == 0 {
+		cache.remember(0, 0)
+	}
+	if cache.windowRows != nil {
+		if skipRows >= cache.windowStart && skipRows+maxRows <= cache.windowStart+len(cache.windowRows) {
+			start := skipRows - cache.windowStart
+			return cache.windowRows[start : start+maxRows]
+		}
+	}
+
+	if windowRows <= 0 {
+		windowRows = maxRows
+	}
+	windowSize := wrapCacheWindowMax
+	if windowSize < maxRows {
+		windowSize = maxRows
+	}
+	windowStart := skipRows - windowSize/2
+	if windowStart < 0 {
+		windowStart = 0
+	}
+
+	startRow := 0
+	startIndex := 0
+	if r, i, ok := cache.findStart(windowStart); ok {
+		startRow = r
+		startIndex = i
+	}
+
+	row := startRow
+	index := startIndex
+	window := []string{}
+
+	for index <= len(text) {
+		if windowSize > 0 && len(window) >= windowSize && row >= windowStart {
+			break
+		}
+		if index >= len(text) {
+			break
+		}
+		segment, nextIndex := nextWrapSegment(text, index, p.width)
+		if row >= windowStart {
+			window = append(window, segment)
+			if windowSize > 0 && len(window) >= windowSize {
+				cache.remember(row+1, nextIndex)
+				break
+			}
+		}
+		row++
+		cache.remember(row, nextIndex)
+		index = nextIndex
+	}
+	cache.windowStart = windowStart
+	cache.windowRows = window
+
+	if maxRows <= 0 {
+		return nil
+	}
+	if skipRows < cache.windowStart {
+		return nil
+	}
+	start := skipRows - cache.windowStart
+	if start < 0 || start >= len(window) {
+		return nil
+	}
+	end := start + maxRows
+	if end > len(window) {
+		end = len(window)
+	}
+	return window[start:end]
+}
+
+func nextWrapSegment(text string, start int, width int) (string, int) {
+	if width <= 0 || start >= len(text) {
+		return "", start
+	}
+	consumed := 0
+	index := start
+	var b strings.Builder
+	g := uniseg.NewGraphemes(text[start:])
+	for g.Next() {
+		cluster := g.Str()
+		w := textutil.DisplayWidth(cluster)
+		if w <= 0 {
+			w = 1
+		}
+		if consumed+w > width && consumed > 0 {
+			break
+		}
+		b.WriteString(cluster)
+		consumed += w
+		index += len(cluster)
+		if consumed >= width {
+			break
+		}
+	}
+	if b.Len() == 0 && start < len(text) {
+		ru, size := utf8.DecodeRuneInString(text[start:])
+		if size > 0 && ru != utf8.RuneError {
+			b.WriteRune(ru)
+			index = start + size
+		} else {
+			b.WriteByte(text[start])
+			index = start + 1
+		}
+	}
+	return b.String(), index
 }
 
 func (p *PreviewPager) rowSpanForIndex(idx int) int {
