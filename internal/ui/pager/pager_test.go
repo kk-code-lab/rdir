@@ -1750,7 +1750,6 @@ func TestBinarySearchPartialNibbleSkipsOverlappingMatches(t *testing.T) {
 }
 
 func TestBinarySearchHonorsByteLimit(t *testing.T) {
-	t.Parallel()
 	oldLimit := searchMaxBinaryBytes
 	searchMaxBinaryBytes = 64 // small limit to force truncation
 	defer func() { searchMaxBinaryBytes = oldLimit }()
@@ -1796,7 +1795,6 @@ func TestBinarySearchHonorsByteLimit(t *testing.T) {
 }
 
 func TestBinarySearchFullScanFindsBeyondBinaryByteLimit(t *testing.T) {
-	t.Parallel()
 	oldLimit := searchMaxBinaryBytes
 	searchMaxBinaryBytes = 64
 	t.Cleanup(func() { searchMaxBinaryBytes = oldLimit })
@@ -1853,7 +1851,6 @@ func TestBinarySearchFullScanFindsBeyondBinaryByteLimit(t *testing.T) {
 }
 
 func TestBinarySearchHitCapStillHighlightsVisibleMatch(t *testing.T) {
-	t.Parallel()
 	oldHits := searchMaxHits
 	searchMaxHits = 10
 	t.Cleanup(func() { searchMaxHits = oldHits })
@@ -1925,7 +1922,6 @@ func TestBinarySearchHitCapStillHighlightsVisibleMatch(t *testing.T) {
 }
 
 func TestBinarySearchHitCapNextPrefersViewport(t *testing.T) {
-	t.Parallel()
 	oldHits := searchMaxHits
 	searchMaxHits = 10
 	t.Cleanup(func() { searchMaxHits = oldHits })
