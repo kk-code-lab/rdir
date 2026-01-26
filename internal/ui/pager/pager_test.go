@@ -3080,3 +3080,77 @@ func TestCopyVisibleStripsANSIFromFormatted(t *testing.T) {
 		t.Fatalf("unexpected copied content: %q", copied)
 	}
 }
+
+func TestCopyVisibleRespectsFormatToggle(t *testing.T) {
+	t.Parallel()
+	preview := &statepkg.PreviewData{
+		Name:               "doc.md",
+		TextLines:          []string{"raw **value**"},
+		FormattedTextLines: []string{"rendered value"},
+	}
+	state := &statepkg.AppState{
+		CurrentPath:        "/tmp",
+		PreviewData:        preview,
+		ClipboardAvailable: true,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, []string{"clip"})
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+	pager.width = 40
+	pager.height = 4
+
+	var copied string
+	pager.clipboardFunc = func(content string) error {
+		copied = content
+		return nil
+	}
+
+	if done := pager.handleKey(keyEvent{kind: keyCopyVisible}); done {
+		t.Fatalf("copy action should not exit pager")
+	}
+	if strings.TrimSpace(copied) != "rendered value" {
+		t.Fatalf("expected formatted copy, got %q", copied)
+	}
+
+	if done := pager.handleKey(keyEvent{kind: keyToggleFormat}); done {
+		t.Fatalf("toggle action should not exit pager")
+	}
+	if done := pager.handleKey(keyEvent{kind: keyCopyVisible}); done {
+		t.Fatalf("copy action should not exit pager")
+	}
+	if strings.TrimSpace(copied) != "raw **value**" {
+		t.Fatalf("expected raw copy after toggle, got %q", copied)
+	}
+}
+
+func TestCopyAllUsesRawWhenFormatted(t *testing.T) {
+	t.Parallel()
+	preview := &statepkg.PreviewData{
+		Name:               "doc.md",
+		TextLines:          []string{"raw line"},
+		FormattedTextLines: []string{"rendered line"},
+	}
+	state := &statepkg.AppState{
+		CurrentPath:        "/tmp",
+		PreviewData:        preview,
+		ClipboardAvailable: true,
+	}
+	pager, err := NewPreviewPager(state, nil, nil, []string{"clip"})
+	if err != nil {
+		t.Fatalf("NewPreviewPager: %v", err)
+	}
+
+	var copied string
+	pager.clipboardFunc = func(content string) error {
+		copied = content
+		return nil
+	}
+
+	if _, _, err := pager.copyAllToClipboard(); err != nil {
+		t.Fatalf("copyAllToClipboard: %v", err)
+	}
+	if strings.TrimSpace(copied) != "raw line" {
+		t.Fatalf("expected raw copy, got %q", copied)
+	}
+}

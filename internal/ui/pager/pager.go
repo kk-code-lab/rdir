@@ -2103,7 +2103,7 @@ func (p *PreviewPager) helpSections() []helpSection {
 	if p.clipboardAvailable() {
 		actions = append(actions,
 			helpEntry{keys: "c", desc: "Copy visible lines"},
-			helpEntry{keys: "C", desc: "Copy entire file"},
+			helpEntry{keys: "C", desc: "Copy entire file (raw)"},
 		)
 	}
 	if p.canOpenEditor() {
@@ -2212,21 +2212,38 @@ func (p *PreviewPager) copyAllToClipboard() (string, string, error) {
 		p.setStatusMessage(fmt.Sprintf("copying %s; this may be slow", formatSize(size)), statusWarnStyle)
 	}
 
+	preferRawCopy := p.showFormatted && !p.binaryMode && (p.rawTextSource != nil || len(p.rawLines) > 0)
+
 	if p.clipboardFunc != nil {
 		var builder strings.Builder
-		if err := p.writeAllLines(&builder); err != nil {
-			return "", "", err
+		if preferRawCopy {
+			if err := p.writeAllLinesRaw(&builder); err != nil {
+				return "", "", err
+			}
+		} else {
+			if err := p.writeAllLines(&builder); err != nil {
+				return "", "", err
+			}
 		}
 		if err := p.clipboardFunc(builder.String()); err != nil {
 			return "", "", err
 		}
 	} else {
-		if err := p.streamAllLinesToClipboard(); err != nil {
-			return "", "", err
+		if preferRawCopy {
+			if err := p.streamAllLinesToClipboardRaw(); err != nil {
+				return "", "", err
+			}
+		} else {
+			if err := p.streamAllLinesToClipboard(); err != nil {
+				return "", "", err
+			}
 		}
 	}
 
 	msg := "copied all"
+	if preferRawCopy {
+		msg = "copied all (raw)"
+	}
 	if size > 0 {
 		msg = fmt.Sprintf("%s (%s)", msg, formatSize(size))
 	}
@@ -2364,6 +2381,46 @@ func (p *PreviewPager) writeAllLines(w io.Writer) error {
 	return nil
 }
 
+func (p *PreviewPager) writeAllLinesRaw(w io.Writer) error {
+	if p == nil {
+		return errors.New("pager unavailable")
+	}
+	bufw := bufio.NewWriter(w)
+	if p.rawTextSource != nil {
+		if err := p.rawTextSource.EnsureAll(); err != nil {
+			return err
+		}
+		total := p.rawTextSource.LineCount()
+		if total < 0 {
+			total = 0
+		}
+		for i := 0; i < total; i++ {
+			if _, err := bufw.WriteString(lineForClipboard(p.rawTextSource.Line(i))); err != nil {
+				return err
+			}
+			if i+1 < total {
+				if err := bufw.WriteByte('\n'); err != nil {
+					return err
+				}
+			}
+		}
+		return bufw.Flush()
+	}
+
+	total := len(p.rawLines)
+	for i := 0; i < total; i++ {
+		if _, err := bufw.WriteString(lineForClipboard(p.rawLines[i])); err != nil {
+			return err
+		}
+		if i+1 < total {
+			if err := bufw.WriteByte('\n'); err != nil {
+				return err
+			}
+		}
+	}
+	return bufw.Flush()
+}
+
 func (p *PreviewPager) streamAllLinesToClipboard() error {
 	if len(p.clipboardCmd) == 0 {
 		return errors.New("clipboard unavailable")
@@ -2377,6 +2434,32 @@ func (p *PreviewPager) streamAllLinesToClipboard() error {
 	writeErrCh := make(chan error, 1)
 	go func() {
 		err := p.writeAllLines(writer)
+		_ = writer.CloseWithError(err)
+		writeErrCh <- err
+	}()
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("clipboard command %q failed: %w", p.clipboardCmd[0], err)
+	}
+	if err := <-writeErrCh; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *PreviewPager) streamAllLinesToClipboardRaw() error {
+	if len(p.clipboardCmd) == 0 {
+		return errors.New("clipboard unavailable")
+	}
+	cmd := clipboardCommand(p.clipboardCmd[0], p.clipboardCmd[1:]...)
+	reader, writer := io.Pipe()
+	cmd.Stdin = reader
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	writeErrCh := make(chan error, 1)
+	go func() {
+		err := p.writeAllLinesRaw(writer)
 		_ = writer.CloseWithError(err)
 		writeErrCh <- err
 	}()
