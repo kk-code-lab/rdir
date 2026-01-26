@@ -963,7 +963,7 @@ func (p *PreviewPager) render() error {
 		if p.wrapEnabled && p.width > 0 {
 			currentSkip := skipRows
 			maxRows := contentRowLimit - row + 1
-			segments := p.wrapSegmentsRangeForLine(i, text, currentSkip, maxRows, contentRows)
+			segments := p.wrapSegmentsRangeForLine(i, text, currentSkip, maxRows)
 			for segIdx, seg := range segments {
 				dropCols := (currentSkip + segIdx) * p.width
 				if spans, focus := p.visibleHighlights(i, dropCols, p.width); len(spans) > 0 {
@@ -2359,11 +2359,6 @@ func (p *PreviewPager) visibleContentLinesForCopy() []string {
 	if !p.wrapEnabled || p.width <= 0 {
 		return p.visibleContentLines()
 	}
-
-	width := p.width
-	if width <= 0 {
-		width = 1
-	}
 	height := p.height
 	if height <= 0 {
 		height = 1
@@ -2397,7 +2392,7 @@ func (p *PreviewPager) visibleContentLinesForCopy() []string {
 	lines := []string{}
 	for i := start; i < totalLines && rowsRemaining > 0; i++ {
 		text := lineForClipboard(p.lineAt(i))
-		segments := p.wrapSegmentsRangeForLine(i, text, skipRows, rowsRemaining, contentRows)
+		segments := p.wrapSegmentsRangeForLine(i, text, skipRows, rowsRemaining)
 		if len(segments) == 0 {
 			skipRows = 0
 			continue
@@ -3056,7 +3051,7 @@ func (p *PreviewPager) wrapCacheForLine(idx int) *wrapLineCache {
 	return cache
 }
 
-func (p *PreviewPager) wrapSegmentsRangeForLine(idx int, text string, skipRows int, maxRows int, windowRows int) []string {
+func (p *PreviewPager) wrapSegmentsRangeForLine(idx int, text string, skipRows int, maxRows int) []string {
 	if maxRows == 0 {
 		return nil
 	}
@@ -3120,9 +3115,6 @@ func (p *PreviewPager) wrapSegmentsRangeForLine(idx int, text string, skipRows i
 		}
 	}
 
-	if windowRows <= 0 {
-		windowRows = maxRows
-	}
 	windowSize := wrapCacheWindowMax
 	if windowSize < maxRows {
 		windowSize = maxRows
